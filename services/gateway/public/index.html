@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Routine</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%E2%9F%B3%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">⟳</span> Routine</div>
+    <nav id="nav" hidden>
+      <button type="button" data-tab="routines" class="active">Routinen</button>
+      <button type="button" data-tab="executions">Ausführungen</button>
+      <button type="button" data-tab="tasks">Aufgaben</button>
+      <button type="button" data-tab="notifications">Benachrichtigungen <span id="unread" class="pill" hidden></span></button>
+      <button type="button" data-tab="system">System</button>
+    </nav>
+    <div id="session" class="session" hidden>
+      <span id="user-email"></span>
+      <button type="button" id="logout" class="ghost">Abmelden</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- login -->
+    <section id="login-view" class="card narrow" hidden>
+      <h1>Anmelden</h1>
+      <p class="muted">Demo-Konto: <code>demo@routine.local</code> / <code>demo12345</code></p>
+      <form id="login-form">
+        <label>E-Mail <input name="email" type="email" value="demo@routine.local" required></label>
+        <label>Passwort <input name="password" type="password" value="demo12345" minlength="8" required></label>
+        <div class="row">
+          <button type="submit">Anmelden</button>
+          <button type="button" id="register" class="ghost">Registrieren</button>
+        </div>
+        <p id="login-error" class="error" hidden></p>
+      </form>
+    </section>
+
+    <!-- routines -->
+    <section id="routines-view" class="tab" hidden>
+      <div class="split">
+        <div>
+          <h2>Meine Routinen</h2>
+          <div id="routine-list" class="stack"></div>
+        </div>
+        <div class="card">
+          <h2>Neue Routine</h2>
+          <label>Vorlage
+            <select id="template"></select>
+          </label>
+          <textarea id="routine-json" spellcheck="false" rows="22"></textarea>
+          <p class="muted small">Aktionen mit gleichem <code>step</code> laufen parallel. Ohne <code>step</code> läuft eine Aktion nach der vorherigen.
+            Ergebnisse früherer Schritte: <code>&#123;&#123;actions.&lt;key&gt;.&lt;feld&gt;&#125;&#125;</code>.</p>
+          <div class="row"><button type="button" id="create-routine">Erstellen &amp; aktivieren</button></div>
+          <pre id="routine-error" class="error" hidden></pre>
+          <details><summary>Verfügbare Action-Typen</summary><div id="action-types"></div></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- executions -->
+    <section id="executions-view" class="tab" hidden>
+      <div class="split wide-right">
+        <div>
+          <h2>Ausführungen</h2>
+          <div id="execution-list" class="stack"></div>
+        </div>
+        <div id="execution-detail" class="card">
+          <p class="muted">Ausführung auswählen …</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- tasks -->
+    <section id="tasks-view" class="tab" hidden>
+      <h2>Aufgaben <span class="muted small">(task-service)</span></h2>
+      <table class="table"><thead><tr><th></th><th>Titel</th><th>Priorität</th><th>Fällig</th><th>Quelle</th><th>Erstellt</th></tr></thead>
+        <tbody id="task-list"></tbody></table>
+    </section>
+
+    <!-- notifications -->
+    <section id="notifications-view" class="tab" hidden>
+      <h2>Benachrichtigungen <span class="muted small">(notification-service)</span></h2>
+      <div id="notification-list" class="stack"></div>
+    </section>
+
+    <!-- system -->
+    <section id="system-view" class="tab" hidden>
+      <h2>Systemstatus</h2>
+      <p class="muted small">Aktualisiert jede Sekunde. Werkzeuge:
+        <a href="http://localhost:15672" target="_blank" rel="noopener">RabbitMQ</a> (routine/routine) ·
+        <a href="http://localhost:16686" target="_blank" rel="noopener">Jaeger</a></p>
+      <div id="service-grid" class="grid"></div>
+      <h3>Queues</h3>
+      <table class="table"><thead><tr><th>Queue</th><th class="num">wartend</th><th class="num">in Arbeit</th><th class="num">Consumer</th></tr></thead>
+        <tbody id="queue-list"></tbody></table>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

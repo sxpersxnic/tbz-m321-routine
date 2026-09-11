@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/routine-triggered.v1.schema.json",
+  "title": "RoutineTriggered v1",
+  "description": "A routine was started manually or by its schedule. Routing key: routine.triggered",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "RoutineTriggered"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "executionId",
+        "routineId",
+        "ownerId",
+        "trigger"
+      ],
+      "properties": {
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "trigger": {
+          "enum": [
+            "manual",
+            "schedule"
+          ]
+        },
+        "scheduledFor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

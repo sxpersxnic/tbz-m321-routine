@@ -1,0 +1,371 @@
+import type { Queryable } from '@routine/service-kit';
+import type { ActionDefinition, RoutineDefinition, TriggerDefinition } from './domain/definition.ts';
+import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
+
+// ---------------------------------------------------------------- rows
+
+export interface RoutineRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string;
+  trigger: TriggerDefinition;
+  actions: ActionDefinition[];
+  active: boolean;
+  next_run_at: Date | null;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ExecutionRow {
+  id: string;
+  routine_id: string;
+  owner_id: string;
+  routine_name: string;
+  trigger_type: 'manual' | 'schedule';
+  scheduled_for: Date | null;
+  status: ExecutionStatus;
+  current_step: number;
+  correlation_id: string;
+  error: string | null;
+  created_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+}
+
+export interface ExecutionActionRow {
+  id: string;
+  execution_id: string;
+  key: string;
+  type: string;
+  step: number;
+  params: Record<string, unknown>;
+  resolved_params: Record<string, unknown> | null;
+  status: ActionStatus;
+  attempts: number;
+  output: Record<string, unknown> | null;
+  error: string | null;
+  processed_by: string | null;
+  dispatched_at: Date | null;
+  finished_at: Date | null;
+}
+
+export interface ExecutionLogRow {
+  at: Date;
+  kind: string;
+  action_key: string | null;
+  message: string;
+}
+
+// ---------------------------------------------------------------- routines
+
+export async function listRoutines(db: Queryable, ownerId: string): Promise<RoutineRow[]> {
+  const { rows } = await db.query<RoutineRow>('SELECT * FROM routines WHERE owner_id = $1 ORDER BY created_at DESC', [ownerId]);
+  return rows;
+}
+
+export async function getRoutine(db: Queryable, ownerId: string, id: string, forUpdate = false): Promise<RoutineRow | null> {
+  const { rows } = await db.query<RoutineRow>(
+    `SELECT * FROM routines WHERE id = $1 AND owner_id = $2 ${forUpdate ? 'FOR UPDATE' : ''}`,
+    [id, ownerId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition): Promise<RoutineRow> {
+  const { rows } = await db.query<RoutineRow>(
+    `INSERT INTO routines (id, owner_id, name, description, trigger, actions)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [id, ownerId, definition.name, definition.description, JSON.stringify(definition.trigger), JSON.stringify(definition.actions)],
+  );
+  return rows[0];
+}
+
+export async function updateRoutine(
+  db: Queryable,
+  routine: RoutineRow,
+  definition: RoutineDefinition,
+  nextRunAt: Date | null,
+): Promise<RoutineRow> {
+  const { rows } = await db.query<RoutineRow>(
+    `UPDATE routines
+        SET name = $2, description = $3, trigger = $4, actions = $5, next_run_at = $6,
+            version = version + 1, updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [routine.id, definition.name, definition.description, JSON.stringify(definition.trigger), JSON.stringify(definition.actions), nextRunAt],
+  );
+  return rows[0];
+}
+
+export async function setRoutineActive(db: Queryable, id: string, active: boolean, nextRunAt: Date | null): Promise<RoutineRow> {
+  const { rows } = await db.query<RoutineRow>(
+    'UPDATE routines SET active = $2, next_run_at = $3, version = version + 1, updated_at = now() WHERE id = $1 RETURNING *',
+    [id, active, nextRunAt],
+  );
+  return rows[0];
+}
+
+export async function deleteRoutine(db: Queryable, ownerId: string, id: string): Promise<boolean> {
+  const result = await db.query('DELETE FROM routines WHERE id = $1 AND owner_id = $2', [id, ownerId]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** Locks due routines; SKIP LOCKED lets several scheduler replicas work side by side. */
+export async function lockDueRoutines(db: Queryable, limit: number): Promise<RoutineRow[]> {
+  const { rows } = await db.query<RoutineRow>(
+    `SELECT * FROM routines
+      WHERE active AND next_run_at IS NOT NULL AND next_run_at <= now()
+      ORDER BY next_run_at
+      LIMIT $1
+      FOR UPDATE SKIP LOCKED`,
+    [limit],
+  );
+  return rows;
+}
+
+export async function setNextRun(db: Queryable, id: string, nextRunAt: Date | null): Promise<void> {
+  await db.query('UPDATE routines SET next_run_at = $2 WHERE id = $1', [id, nextRunAt]);
+}
+
+// ---------------------------------------------------------------- executions
+
+export async function insertExecution(
+  db: Queryable,
+  execution: {
+    id: string;
+    routine: RoutineRow;
+    trigger: 'manual' | 'schedule';
+    scheduledFor: Date | null;
+    idempotencyKey: string | null;
+    correlationId: string;
+  },
+): Promise<ExecutionRow | null> {
+  const { rows } = await db.query<ExecutionRow>(
+    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [
+      execution.id,
+      execution.routine.id,
+      execution.routine.owner_id,
+      execution.routine.name,
+      execution.trigger,
+      execution.scheduledFor,
+      execution.idempotencyKey,
+      execution.correlationId,
+    ],
+  );
+  return rows[0] ?? null;
+}
+
+export async function insertExecutionActions(
+  db: Queryable,
+  executionId: string,
+  actions: Array<ActionDefinition & { id: string }>,
+): Promise<void> {
+  for (const [position, action] of actions.entries()) {
+    await db.query(
+      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
+      [action.id, executionId, action.key, action.type, action.step, position, JSON.stringify(action.params)],
+    );
+  }
+}
+
+export async function findExecutionByIdempotencyKey(db: Queryable, ownerId: string, key: string): Promise<ExecutionRow | null> {
+  const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE owner_id = $1 AND idempotency_key = $2', [ownerId, key]);
+  return rows[0] ?? null;
+}
+
+/** Serialises all state changes of one execution (parallel results, several replicas). */
+export async function lockExecution(db: Queryable, id: string): Promise<ExecutionRow | null> {
+  const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE id = $1 FOR UPDATE', [id]);
+  return rows[0] ?? null;
+}
+
+export async function getExecution(db: Queryable, ownerId: string, id: string): Promise<ExecutionRow | null> {
+  const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE id = $1 AND owner_id = $2', [id, ownerId]);
+  return rows[0] ?? null;
+}
+
+export async function listExecutions(
+  db: Queryable,
+  ownerId: string,
+  filter: { routineId?: string; status?: string; limit: number },
+): Promise<ExecutionRow[]> {
+  const { rows } = await db.query<ExecutionRow>(
+    `SELECT * FROM executions
+      WHERE owner_id = $1
+        AND ($2::uuid IS NULL OR routine_id = $2)
+        AND ($3::text IS NULL OR status = $3)
+      ORDER BY created_at DESC
+      LIMIT $4`,
+    [ownerId, filter.routineId ?? null, filter.status ?? null, filter.limit],
+  );
+  return rows;
+}
+
+export async function updateExecutionStatus(
+  db: Queryable,
+  id: string,
+  status: ExecutionStatus,
+  fields: { error?: string | null; currentStep?: number } = {},
+): Promise<void> {
+  await db.query(
+    `UPDATE executions
+        SET status = $2,
+            error = COALESCE($3, error),
+            current_step = COALESCE($4, current_step),
+            started_at = CASE WHEN $2 = 'RUNNING' AND started_at IS NULL THEN now() ELSE started_at END,
+            finished_at = CASE WHEN $2 IN ('COMPLETED', 'FAILED') THEN now() ELSE finished_at END,
+            updated_at = now()
+      WHERE id = $1`,
+    [id, status, fields.error ?? null, fields.currentStep ?? null],
+  );
+}
+
+export async function listExecutionActions(db: Queryable, executionId: string, forUpdate = false): Promise<ExecutionActionRow[]> {
+  const { rows } = await db.query<ExecutionActionRow>(
+    `SELECT * FROM execution_actions WHERE execution_id = $1 ORDER BY step, position ${forUpdate ? 'FOR UPDATE' : ''}`,
+    [executionId],
+  );
+  return rows;
+}
+
+export async function markActionDispatched(db: Queryable, id: string, resolvedParams: Record<string, unknown>): Promise<void> {
+  await db.query(
+    `UPDATE execution_actions
+        SET status = 'DISPATCHED', resolved_params = $2, attempts = 1, dispatched_at = now(), updated_at = now()
+      WHERE id = $1`,
+    [id, JSON.stringify(resolvedParams)],
+  );
+}
+
+export async function markActionCompleted(db: Queryable, id: string, output: Record<string, unknown>, processedBy: string): Promise<void> {
+  await db.query(
+    `UPDATE execution_actions
+        SET status = 'COMPLETED', output = $2, processed_by = $3, error = NULL, finished_at = now(), updated_at = now()
+      WHERE id = $1`,
+    [id, JSON.stringify(output), processedBy],
+  );
+}
+
+export async function markActionFailed(db: Queryable, id: string, error: string, processedBy: string | null, attempts?: number): Promise<void> {
+  await db.query(
+    `UPDATE execution_actions
+        SET status = 'FAILED', error = $2, processed_by = COALESCE($3, processed_by),
+            attempts = COALESCE($4, attempts), finished_at = now(), updated_at = now()
+      WHERE id = $1`,
+    [id, error, processedBy, attempts ?? null],
+  );
+}
+
+export async function markActionRetrying(db: Queryable, id: string, attempt: number, error: string, processedBy: string): Promise<void> {
+  await db.query(
+    `UPDATE execution_actions
+        SET status = 'RETRYING', attempts = GREATEST(attempts, $2), error = $3, processed_by = $4, updated_at = now()
+      WHERE id = $1`,
+    [id, attempt + 1, error, processedBy],
+  );
+}
+
+export async function skipPendingActions(db: Queryable, executionId: string): Promise<void> {
+  await db.query(
+    `UPDATE execution_actions SET status = 'SKIPPED', updated_at = now() WHERE execution_id = $1 AND status = 'PENDING'`,
+    [executionId],
+  );
+}
+
+export async function appendLog(db: Queryable, executionId: string, kind: string, message: string, actionKey?: string): Promise<void> {
+  await db.query('INSERT INTO execution_log (execution_id, kind, action_key, message) VALUES ($1, $2, $3, $4)', [
+    executionId,
+    kind,
+    actionKey ?? null,
+    message,
+  ]);
+}
+
+export async function listLog(db: Queryable, executionId: string): Promise<ExecutionLogRow[]> {
+  const { rows } = await db.query<ExecutionLogRow>(
+    'SELECT at, kind, action_key, message FROM execution_log WHERE execution_id = $1 ORDER BY id',
+    [executionId],
+  );
+  return rows;
+}
+
+/** Flags executions whose dispatched actions got no answer for too long (e.g. worker down). */
+export async function markStaleExecutionsWaiting(db: Queryable, waitingAfterMs: number): Promise<string[]> {
+  const { rows } = await db.query<{ execution_id: string }>(
+    `WITH stale AS (
+       UPDATE executions e
+          SET status = 'WAITING', updated_at = now()
+        WHERE e.status = 'RUNNING'
+          AND EXISTS (
+            SELECT 1 FROM execution_actions a
+             WHERE a.execution_id = e.id
+               AND a.status = 'DISPATCHED'
+               AND a.dispatched_at < now() - make_interval(secs => $1::double precision / 1000))
+        RETURNING e.id
+     )
+     INSERT INTO execution_log (execution_id, kind, message)
+     SELECT id, 'WAITING', 'Keine Rückmeldung eines Workers – Nachricht wartet im Broker' FROM stale
+     RETURNING execution_id`,
+    [waitingAfterMs],
+  );
+  return rows.map((row) => row.execution_id);
+}
+
+// ---------------------------------------------------------------- API representations
+
+export function routineDto(row: RoutineRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    trigger: row.trigger,
+    actions: row.actions,
+    active: row.active,
+    nextRunAt: row.next_run_at,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], log?: ExecutionLogRow[]) {
+  return {
+    id: row.id,
+    routineId: row.routine_id,
+    routineName: row.routine_name,
+    status: row.status,
+    trigger: row.trigger_type,
+    scheduledFor: row.scheduled_for,
+    correlationId: row.correlation_id,
+    currentStep: row.current_step,
+    error: row.error,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    ...(actions && {
+      actions: actions.map((action) => ({
+        id: action.id,
+        key: action.key,
+        type: action.type,
+        step: action.step,
+        status: action.status,
+        attempts: action.attempts,
+        params: action.resolved_params ?? action.params,
+        output: action.output,
+        error: action.error,
+        processedBy: action.processed_by,
+        dispatchedAt: action.dispatched_at,
+        finishedAt: action.finished_at,
+      })),
+    }),
+    ...(log && {
+      log: log.map((entry) => ({ at: entry.at, kind: entry.kind, actionKey: entry.action_key, message: entry.message })),
+    }),
+  };
+}

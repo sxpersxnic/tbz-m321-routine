@@ -1,0 +1,171 @@
+asyncapi: 3.0.0
+info:
+  title: Routine Messaging
+  version: 1.0.0
+  description: |
+    Asynchrone Verträge zwischen den Routine-Services (RabbitMQ, AMQP 0-9-1).
+
+    **Envelope** – jede Nachricht ist ein JSON-Envelope (schemas/envelope.schema.json)
+    mit `messageId`, `type`, `version`, `occurredAt`, `source`, `correlationId`,
+    optional `causationId` und dem typspezifischen `data`. Zusätzlich tragen alle
+    Nachrichten die AMQP-Header `x-correlation-id` und `traceparent` (W3C Trace Context).
+
+    **Zustellung** – at-least-once. Consumer müssen idempotent sein; die
+    Idempotenzschlüssel sind `actionId` (Actions) bzw. `executionId` (Events).
+
+    **Kompatibilitätsregeln** – Consumer ignorieren unbekannte Felder
+    (tolerant reader). Producer dürfen Felder nur hinzufügen; Entfernen/Umbenennen
+    erfordert Expand-and-Contract mit neuer `version` (siehe ExecutionCompleted).
+
+    **Retry/DLQ** – Consumer planen transiente Fehler in eigene Retry-Queues
+    (`<queue>.retry.<delay>ms`, TTL + Dead-Lettering zurück) und legen nicht
+    verarbeitbare Nachrichten in `<queue>.dlq` ab.
+
+defaultContentType: application/json
+
+servers:
+  rabbitmq:
+    host: rabbitmq:5672
+    protocol: amqp
+    protocolVersion: 0.9.1
+    description: Topologie wird aus infra/rabbitmq/definitions.json geladen
+
+channels:
+  actionRequests:
+    address: routine.actions
+    title: Action-Befehle
+    description: |
+      Topic-Exchange. Routing-Key `action.<actionType>`, z. B. `action.task.create`.
+      Der Routine Service weiss nicht, welcher Service eine Action ausführt – die
+      Bindings entscheiden (action.task.# → task-service, action.http.#/weather.#/summary.# →
+      integration-worker, action.notification.# → notification-service). Nicht
+      zustellbare Befehle landen via Alternate Exchange in `routine.unrouted-actions`.
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: routine.actions, type: topic, durable: true, autoDelete: false }
+    messages:
+      ActionRequested: { $ref: '#/components/messages/ActionRequested' }
+
+  actionResults:
+    address: routine.action-results
+    title: Ergebnisse von Actions
+    description: 'Topic-Exchange. Routing-Keys: action.completed, action.failed, action.retry-scheduled'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: routine.action-results, type: topic, durable: true, autoDelete: false }
+    messages:
+      ActionCompleted: { $ref: '#/components/messages/ActionCompleted' }
+      ActionFailed: { $ref: '#/components/messages/ActionFailed' }
+      ActionRetryScheduled: { $ref: '#/components/messages/ActionRetryScheduled' }
+
+  routineEvents:
+    address: routine.events
+    title: Domain-Events des Routine Service
+    description: 'Topic-Exchange. Routing-Keys: routine.triggered, execution.completed, execution.failed'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: routine.events, type: topic, durable: true, autoDelete: false }
+    messages:
+      RoutineTriggered: { $ref: '#/components/messages/RoutineTriggered' }
+      ExecutionCompletedV1: { $ref: '#/components/messages/ExecutionCompletedV1' }
+      ExecutionCompletedV2: { $ref: '#/components/messages/ExecutionCompletedV2' }
+      ExecutionFailed: { $ref: '#/components/messages/ExecutionFailed' }
+
+operations:
+  # ---- routine-service
+  publishRoutineTriggered:
+    action: send
+    channel: { $ref: '#/channels/routineEvents' }
+    summary: routine-service (API/Scheduler) – Ausführung angelegt (via Transactional Outbox)
+    messages: [{ $ref: '#/channels/routineEvents/messages/RoutineTriggered' }]
+  consumeRoutineTriggered:
+    action: receive
+    channel: { $ref: '#/channels/routineEvents' }
+    summary: routine-service – Queue routine-service.triggers startet die Execution
+    messages: [{ $ref: '#/channels/routineEvents/messages/RoutineTriggered' }]
+  requestAction:
+    action: send
+    channel: { $ref: '#/channels/actionRequests' }
+    summary: routine-service – veröffentlicht die Actions eines Schritts (via Outbox)
+    messages: [{ $ref: '#/channels/actionRequests/messages/ActionRequested' }]
+  consumeActionResults:
+    action: receive
+    channel: { $ref: '#/channels/actionResults' }
+    summary: routine-service – Queue routine-service.action-results aktualisiert die Execution
+    messages:
+      - { $ref: '#/channels/actionResults/messages/ActionCompleted' }
+      - { $ref: '#/channels/actionResults/messages/ActionFailed' }
+      - { $ref: '#/channels/actionResults/messages/ActionRetryScheduled' }
+  publishExecutionEvents:
+    action: send
+    channel: { $ref: '#/channels/routineEvents' }
+    summary: routine-service – Execution abgeschlossen/fehlgeschlagen (Format per EXECUTION_COMPLETED_FORMAT)
+    messages:
+      - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV1' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
+
+  # ---- workers
+  executeActions:
+    action: receive
+    channel: { $ref: '#/channels/actionRequests' }
+    summary: task-service, integration-worker (skalierbar), notification-service – je eine eigene Queue
+    messages: [{ $ref: '#/channels/actionRequests/messages/ActionRequested' }]
+  reportActionResults:
+    action: send
+    channel: { $ref: '#/channels/actionResults' }
+    summary: Worker melden Ergebnis, Retry oder endgültigen Fehler
+    messages:
+      - { $ref: '#/channels/actionResults/messages/ActionCompleted' }
+      - { $ref: '#/channels/actionResults/messages/ActionFailed' }
+      - { $ref: '#/channels/actionResults/messages/ActionRetryScheduled' }
+
+  # ---- notification-service
+  notifyOnExecutionEvents:
+    action: receive
+    channel: { $ref: '#/channels/routineEvents' }
+    summary: notification-service – Queue notification-service.execution-events (execution.#)
+    messages:
+      - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV1' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
+
+components:
+  messages:
+    RoutineTriggered:
+      name: RoutineTriggered
+      title: RoutineTriggered v1
+      payload: { $ref: '../schemas/routine-triggered.v1.schema.json' }
+    ActionRequested:
+      name: ActionRequested
+      title: ActionRequested v1
+      payload: { $ref: '../schemas/action-requested.v1.schema.json' }
+    ActionCompleted:
+      name: ActionCompleted
+      title: ActionCompleted v1
+      payload: { $ref: '../schemas/action-completed.v1.schema.json' }
+    ActionFailed:
+      name: ActionFailed
+      title: ActionFailed v1
+      payload: { $ref: '../schemas/action-failed.v1.schema.json' }
+    ActionRetryScheduled:
+      name: ActionRetryScheduled
+      title: ActionRetryScheduled v1
+      payload: { $ref: '../schemas/action-retry-scheduled.v1.schema.json' }
+    ExecutionCompletedV1:
+      name: ExecutionCompleted
+      title: ExecutionCompleted v1 (deprecated)
+      summary: 'Ursprüngliches Format: { executionId, message }'
+      payload: { $ref: '../schemas/execution-completed.v1.schema.json' }
+    ExecutionCompletedV2:
+      name: ExecutionCompleted
+      title: ExecutionCompleted v2
+      summary: 'Strukturiert: { executionId, notification: { title, body }, priority } – in der Expand-Phase zusätzlich mit message'
+      payload: { $ref: '../schemas/execution-completed.v2.schema.json' }
+    ExecutionFailed:
+      name: ExecutionFailed
+      title: ExecutionFailed v1
+      payload: { $ref: '../schemas/execution-failed.v1.schema.json' }

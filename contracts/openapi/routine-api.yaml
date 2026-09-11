@@ -1,0 +1,335 @@
+openapi: 3.1.0
+info:
+  title: Routine Service API
+  version: 1.0.0
+  description: |
+    Synchrone Schnittstelle des Routine Service: Routinen verwalten, Ausführungen
+    auslösen und deren Status abfragen. Die eigentliche Ausführung erfolgt
+    asynchron über den Message Broker (siehe asyncapi/routine-messaging.yaml).
+
+    Alle Endpunkte erfordern ein Access Token des Identity Service. Ein Benutzer
+    sieht ausschliesslich eigene Routinen und Ausführungen (fremde → 404).
+servers:
+  - url: http://localhost:8080
+    description: über das API Gateway
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/action-types:
+    get:
+      summary: Verfügbare Action-Typen
+      operationId: listActionTypes
+      responses:
+        '200':
+          description: Katalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ActionType' } }
+
+  /api/v1/routines:
+    get:
+      summary: Eigene Routinen auflisten
+      operationId: listRoutines
+      responses:
+        '200':
+          description: Routinen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Routine' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      summary: Routine erstellen (inaktiv)
+      operationId: createRoutine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutineInput' }
+      responses:
+        '201':
+          description: erstellt
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Routine' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+
+  /api/v1/routines/{routineId}:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    get:
+      summary: Routine lesen
+      operationId: getRoutine
+      responses:
+        '200': { description: Routine, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      summary: Routine bearbeiten
+      description: Mit `version` im Body wird optimistisch gesperrt – bei zwischenzeitlicher Änderung folgt 409.
+      operationId: updateRoutine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/RoutineInput'
+                - type: object
+                  properties:
+                    version: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: aktualisiert, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+    delete:
+      summary: Routine inkl. Ausführungen löschen
+      operationId: deleteRoutine
+      responses:
+        '204': { description: gelöscht }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/activate:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Routine aktivieren (Zeitplan wird aktiv, manuelles Auslösen erlaubt)
+      operationId: activateRoutine
+      responses:
+        '200': { description: aktiviert, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/deactivate:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Routine deaktivieren
+      operationId: deactivateRoutine
+      responses:
+        '200': { description: deaktiviert, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/executions:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Routine manuell auslösen
+      description: |
+        Erstellt eine Execution im Status PENDING und antwortet sofort (202).
+        Die Verarbeitung erfolgt asynchron. Mit `Idempotency-Key` führt ein
+        wiederholter Aufruf (z. B. Client-Retry) nicht zu einer zweiten
+        Ausführung – die bestehende wird mit 200 zurückgegeben.
+      operationId: triggerRoutine
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '202':
+          description: Ausführung angenommen
+          headers:
+            Location: { schema: { type: string } }
+            X-Correlation-Id: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Execution' } } }
+        '200':
+          description: bereits mit diesem Idempotency-Key ausgelöst
+          content: { application/json: { schema: { $ref: '#/components/schemas/Execution' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: Routine ist nicht aktiv
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    get:
+      summary: Ausführungen einer Routine
+      operationId: listRoutineExecutions
+      parameters: [{ $ref: '#/components/parameters/Status' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200':
+          description: Ausführungen (neueste zuerst)
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Execution' } } } }
+
+  /api/v1/executions:
+    get:
+      summary: Alle eigenen Ausführungen
+      operationId: listExecutions
+      parameters: [{ $ref: '#/components/parameters/Status' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200':
+          description: Ausführungen (neueste zuerst)
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Execution' } } } }
+
+  /api/v1/executions/{executionId}:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Status einer Ausführung inkl. Aktionen und Verlauf
+      operationId: getExecution
+      responses:
+        '200': { description: Ausführung, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  parameters:
+    RoutineId: { name: routineId, in: path, required: true, schema: { type: string, format: uuid } }
+    Status:
+      name: status
+      in: query
+      schema: { $ref: '#/components/schemas/ExecutionStatus' }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+
+  responses:
+    Unauthorized:
+      description: fehlendes oder ungültiges Token
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Problem:
+      description: Fehler
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    InvalidRoutine:
+      description: fachlich ungültige Routine (unbekannter Typ, fehlende Parameter, ungültiger Cron …)
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        errors: { description: Einzelne Validierungsfehler }
+
+    ActionType:
+      type: object
+      properties:
+        type: { type: string, examples: [weather.get] }
+        description: { type: string }
+        requiredParams: { type: array, items: { type: string } }
+        example: { type: object }
+
+    Trigger:
+      oneOf:
+        - type: object
+          required: [type]
+          properties: { type: { const: manual } }
+        - type: object
+          required: [type, cron]
+          properties:
+            type: { const: schedule }
+            cron: { type: string, description: 'Cron mit 5 oder 6 Feldern (Sekunden), min. Intervall 10 s', examples: ['30 7 * * 1-5'] }
+            timezone: { type: string, default: Europe/Zurich }
+
+    ActionInput:
+      type: object
+      required: [key, type]
+      additionalProperties: false
+      properties:
+        key: { type: string, pattern: '^[a-zA-Z][a-zA-Z0-9_-]{0,39}$' }
+        type: { type: string, examples: [task.create] }
+        step:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: Aktionen mit gleichem Schritt laufen parallel. Standard = Schritt der vorherigen Aktion + 1.
+        params:
+          type: object
+          description: 'Strings dürfen Platzhalter enthalten: {{actions.<key>.<pfad>}}, {{routine.name}}, {{execution.id}}, {{now}}'
+
+    RoutineInput:
+      type: object
+      required: [name, trigger, actions]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        trigger: { $ref: '#/components/schemas/Trigger' }
+        actions: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ActionInput' } }
+
+    Routine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        trigger: { $ref: '#/components/schemas/Trigger' }
+        actions:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              type: { type: string }
+              step: { type: integer }
+              params: { type: object }
+        active: { type: boolean }
+        nextRunAt: { type: [string, 'null'], format: date-time }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ExecutionStatus:
+      type: string
+      enum: [PENDING, RUNNING, WAITING, COMPLETED, FAILED]
+      description: |
+        PENDING → RUNNING → COMPLETED; RUNNING → WAITING (Retry geplant oder kein
+        Worker antwortet) → RUNNING; jederzeit → FAILED bei permanentem Fehler.
+
+    Execution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        routineId: { type: string, format: uuid }
+        routineName: { type: string }
+        status: { $ref: '#/components/schemas/ExecutionStatus' }
+        trigger: { enum: [manual, schedule] }
+        scheduledFor: { type: [string, 'null'], format: date-time }
+        correlationId: { type: string, description: Gemeinsame ID in allen Logs und Nachrichten dieser Ausführung }
+        currentStep: { type: integer }
+        error: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+
+    ExecutionDetail:
+      allOf:
+        - $ref: '#/components/schemas/Execution'
+        - type: object
+          properties:
+            actions:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid, description: actionId – Idempotenzschlüssel in den Workern }
+                  key: { type: string }
+                  type: { type: string }
+                  step: { type: integer }
+                  status: { enum: [PENDING, DISPATCHED, RETRYING, COMPLETED, FAILED, SKIPPED] }
+                  attempts: { type: integer }
+                  params: { type: object, description: aufgelöste Parameter (nach Dispatch) }
+                  output: { type: [object, 'null'] }
+                  error: { type: [string, 'null'] }
+                  processedBy: { type: [string, 'null'], description: 'Service-Instanz, z. B. integration-worker@3f2a…' }
+                  dispatchedAt: { type: [string, 'null'], format: date-time }
+                  finishedAt: { type: [string, 'null'], format: date-time }
+            log:
+              type: array
+              items:
+                type: object
+                properties:
+                  at: { type: string, format: date-time }
+                  kind: { type: string, examples: [ACTION_RETRY] }
+                  actionKey: { type: [string, 'null'] }
+                  message: { type: string }

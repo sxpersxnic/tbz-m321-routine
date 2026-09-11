@@ -1,0 +1,206 @@
+# Routine – complete system. Start everything with:
+#   docker compose up -d --build --wait
+#
+# UI / API:        http://localhost:8080
+# RabbitMQ:        http://localhost:15672   (routine / routine)
+# Jaeger tracing:  http://localhost:16686
+# Mock external:   http://localhost:8090
+
+name: routine
+
+x-node-service: &node-service
+  init: true
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+    start_period: 10s
+
+x-build: &build
+  context: .
+  dockerfile: docker/node-service.Dockerfile
+
+x-common-env: &common-env
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  AMQP_URL: amqp://routine:routine@rabbitmq:5672
+  JWKS_URL: http://identity-service:3000/.well-known/jwks.json
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+
+x-postgres: &postgres
+  image: postgres:17-alpine
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+    interval: 3s
+    timeout: 3s
+    retries: 30
+
+services:
+  # ------------------------------------------------------------ infrastructure
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    hostname: rabbitmq # stable node name → durable queues survive container re-creation
+    restart: unless-stopped
+    ports:
+      - "15672:15672"
+    volumes:
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-routine.conf:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  jaeger:
+    image: jaegertracing/jaeger:2.10.0
+    restart: unless-stopped
+    ports:
+      - "16686:16686"
+
+  # one database per service – no service can reach another service's data
+  identity-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: identity, POSTGRES_PASSWORD: identity, POSTGRES_DB: identity }
+    volumes: [identity-db-data:/var/lib/postgresql/data]
+  routine-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: routine, POSTGRES_PASSWORD: routine, POSTGRES_DB: routine }
+    volumes: [routine-db-data:/var/lib/postgresql/data]
+  task-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: task, POSTGRES_PASSWORD: task, POSTGRES_DB: task }
+    volumes: [task-db-data:/var/lib/postgresql/data]
+  notification-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: notification, POSTGRES_PASSWORD: notification, POSTGRES_DB: notification }
+    volumes: [notification-db-data:/var/lib/postgresql/data]
+  integration-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: integration, POSTGRES_PASSWORD: integration, POSTGRES_DB: integration }
+    volumes: [integration-db-data:/var/lib/postgresql/data]
+
+  # ------------------------------------------------------------ services
+  gateway:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: gateway } }
+    image: routine/gateway:latest
+    ports:
+      - "${GATEWAY_PORT:-8080}:3000"
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: gateway
+      IDENTITY_URL: http://identity-service:3000
+      ROUTINE_URL: http://routine-service:3000
+      TASK_URL: http://task-service:3000
+      NOTIFICATION_URL: http://notification-service:3000
+      INTEGRATION_WORKER_URL: http://integration-worker:3000
+      EXTERNAL_API_URL: http://mock-external:8090
+      RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+
+  identity-service:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: identity-service } }
+    image: routine/identity-service:latest
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: identity-service
+      DATABASE_URL: postgres://identity:identity@identity-db:5432/identity
+      DEMO_USER_EMAIL: demo@routine.local
+      DEMO_USER_PASSWORD: demo12345
+    depends_on:
+      identity-db: { condition: service_healthy }
+
+  routine-service:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: routine-service } }
+    image: routine/routine-service:latest
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: routine-service
+      DATABASE_URL: postgres://routine:routine@routine-db:5432/routine
+      # Schema evolution phase of ExecutionCompleted: v1 | expand | v2
+      EXECUTION_COMPLETED_FORMAT: ${EXECUTION_COMPLETED_FORMAT:-v2}
+      WAITING_AFTER_MS: ${WAITING_AFTER_MS:-10000}
+      CHAOS_DUPLICATE_PUBLISH_RATE: ${CHAOS_DUPLICATE_PUBLISH_RATE:-0}
+    depends_on:
+      routine-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  task-service:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: task-service } }
+    image: routine/task-service:latest
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: task-service
+      DATABASE_URL: postgres://task:task@task-db:5432/task
+      CHAOS_FAILURE_RATE: ${TASK_CHAOS_FAILURE_RATE:-0}
+    depends_on:
+      task-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  notification-service:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: notification-service } }
+    image: routine/notification-service:latest
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: notification-service
+      DATABASE_URL: postgres://notification:notification@notification-db:5432/notification
+      # Consumer version for ExecutionCompleted: legacy (v1 only) | tolerant (v1 + v2)
+      COMPLETION_EVENT_READER: ${COMPLETION_EVENT_READER:-tolerant}
+      CHAOS_FAILURE_RATE: ${NOTIFICATION_CHAOS_FAILURE_RATE:-0}
+    depends_on:
+      notification-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  integration-worker:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: integration-worker } }
+    image: routine/integration-worker:latest
+    deploy:
+      replicas: ${INTEGRATION_WORKER_REPLICAS:-2} # stateless → scale with `docker compose up -d --scale integration-worker=5`
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: integration-worker
+      DATABASE_URL: postgres://integration:integration@integration-db:5432/integration
+      EXTERNAL_API_URL: http://mock-external:8090
+      HTTP_ALLOWED_HOSTS: mock-external
+      PREFETCH: ${INTEGRATION_WORKER_PREFETCH:-1}
+      CHAOS_FAILURE_RATE: ${INTEGRATION_CHAOS_FAILURE_RATE:-0}
+    depends_on:
+      integration-db: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  # simulated third-party APIs (not part of the platform)
+  mock-external:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: mock-external } }
+    image: routine/mock-external:latest
+    ports:
+      - "8090:8090"
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: mock-external
+      PORT: 8090
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  rabbitmq-data:
+  identity-db-data:
+  routine-db-data:
+  task-db-data:
+  notification-db-data:
+  integration-db-data:

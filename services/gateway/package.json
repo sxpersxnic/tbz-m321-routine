@@ -1,0 +1,13 @@
+{
+  "name": "@routine/gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API gateway: single entry point, authentication, correlation ids, routing, web UI.",
+  "type": "module",
+  "dependencies": {
+    "@fastify/http-proxy": "^11.6.2",
+    "@fastify/static": "^10.1.3",
+    "@routine/service-kit": "*",
+    "fastify": "^5.12.4"
+  }
+}

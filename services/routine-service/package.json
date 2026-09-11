@@ -1,0 +1,12 @@
+{
+  "name": "@routine/routine-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Owns routine definitions and orchestrates executions (API, scheduler, outbox).",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*",
+    "cron-parser": "^5.10.0",
+    "fastify": "^5.12.4"
+  }
+}

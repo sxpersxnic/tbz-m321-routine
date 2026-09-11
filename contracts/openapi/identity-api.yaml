@@ -1,0 +1,97 @@
+openapi: 3.1.0
+info:
+  title: Identity Service API
+  version: 1.0.0
+  description: |
+    Eigenständiger Identity Provider. Stellt RS256-signierte Access Tokens aus
+    (iss = routine-identity, aud = routine-api, sub = Benutzer-ID). Alle anderen
+    Services prüfen Tokens selbst anhand des öffentlichen JWKS – ohne geteiltes
+    Geheimnis und ohne Aufruf des Identity Service pro Anfrage.
+servers:
+  - url: http://localhost:8080
+    description: über das API Gateway (JWKS nur intern erreichbar)
+
+paths:
+  /api/v1/auth/register:
+    post:
+      summary: Benutzer registrieren
+      operationId: register
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Credentials' } } }
+      responses:
+        '201': { description: registriert, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/auth/login:
+    post:
+      summary: Anmelden und Access Token erhalten
+      operationId: login
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Credentials' } } }
+      responses:
+        '200':
+          description: angemeldet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken: { type: string }
+                  tokenType: { const: Bearer }
+                  expiresIn: { type: integer, description: Sekunden }
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/auth/me:
+    get:
+      summary: Aktueller Benutzer
+      operationId: me
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Benutzer, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /.well-known/jwks.json:
+    get:
+      summary: Öffentliche Signaturschlüssel (JWKS) – nur service-intern
+      operationId: jwks
+      responses:
+        '200':
+          description: JSON Web Key Set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys: { type: array, items: { type: object } }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: Fehler (RFC 9457)
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string } }
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 200 }
+        password: { type: string, minLength: 8, maxLength: 200 }
+        displayName: { type: string, minLength: 1, maxLength: 80 }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        createdAt: { type: string, format: date-time }
