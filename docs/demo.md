@@ -3,7 +3,7 @@
 ## Vorbereitung
 
 ```bash
-docker compose up -d --build --wait    # ganzes System (15 Container)
+docker compose up -d --build --wait    # ganzes System (16 Container)
 scripts/demo.sh status                  # alles "up"?
 ```
 
@@ -28,12 +28,15 @@ Jedes Szenario kann im Terminal (`scripts/demo.sh <szenario>`) oder im UI gezeig
 
 ### Manuell im UI (für die Präsentation)
 
-1. **Routinen** → Vorlage „Weekly Review“ → *Erstellen & aktivieren* → *Jetzt ausführen*.
-2. **Ausführungen** zeigt Status-Pipeline, Aktionen (inkl. `verarbeitet von`) und Verlauf live.
-3. **System** zeigt Services und Queue-Tiefen. Für die Resilienz-Demo im Terminal
-   `docker compose stop integration-worker`, Routine ausführen → Queue `integration-worker.actions` zeigt
-   wartende Nachricht und 0 Consumer, Execution wird `WAITING`; `docker compose start integration-worker` → `COMPLETED`.
-4. Vorlage „Flaky Webhook (Retry)“ zeigt Retries, „Fehlerhafter Endpunkt“ einen permanenten Fehler.
+1. **Routinen → Neue Routine**: Vorlage „Weekly Review“ – der Editor zeigt rechts den Ablauf (Schritt 1 parallel),
+   Verweise wie `{{actions.weather.summary}}` lassen sich per Klick einfügen. *Routine erstellen*.
+2. **Jetzt ausführen** → die Ausführungsansicht zeigt live Status-Pipeline, Schritte mit verarbeitender Service-Instanz,
+   Verlauf und „Trace in Jaeger“. Eine Aktion anklicken zeigt aufgelöste Parameter und Ergebnis.
+3. **System** zeigt die Live-Topologie. Für die Resilienz-Demo im Terminal `docker compose stop integration-worker`,
+   Routine ausführen → Kante zum Worker wird rot (0 Consumer), 1 Nachricht wartet, Execution wird nach 10 s `WAITING`;
+   `docker compose start integration-worker` → Kante grün, Execution `COMPLETED`.
+4. Vorlage „Load Test“ und `docker compose up -d --scale integration-worker=4` zeigen die Verteilung auf Replikas
+   (Ausführungsansicht → verarbeitet von). „Flaky Webhook“ zeigt Retries, „Fehlerhafter Endpunkt“ einen permanenten Fehler.
 
 ### Chaos-Schalter (optional)
 

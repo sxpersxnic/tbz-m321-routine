@@ -7,6 +7,7 @@ Dieses Dokument beschreibt die Umsetzung der in der [README](../README.md) besch
 ```mermaid
 flowchart LR
     Client([Browser / curl]) -->|HTTPS/JSON| GW[API Gateway]
+    GW -->|/ statische UI| WEB[Web-Client]
     GW -->|/auth| ID[Identity Service]
     GW -->|/routines /executions| RS[Routine Service]
     GW -->|/tasks| TS[Task Service]
@@ -29,11 +30,15 @@ flowchart LR
 
 Alle Services, Datenbanken, der Broker und Jaeger werden mit **einem** Befehl gestartet: `docker compose up -d --build --wait`.
 
+Der Web-Client ist ein eigener Service mit eigenem Build und Deployment. Das Gateway leitet alle Nicht-API-Pfade an ihn weiter –
+der Browser sieht dadurch nur einen Origin (kein CORS), und der Client teilt keinen Code mit den Services (eigene Typen in `web/src/types.ts`).
+
 ## 2. Service-Zuschnitt
 
 | Service | Verantwortung | Daten (eigene DB) | Schnittstellen |
 | --- | --- | --- | --- |
-| **gateway** | Einziger Einstiegspunkt, Routing, Token-Prüfung am Rand, Correlation-ID, Web-UI, Systemstatus | – (stateless) | HTTP |
+| **gateway** | Einziger Einstiegspunkt, Routing, Token-Prüfung am Rand, Correlation-ID, Systemstatus | – (stateless) | HTTP |
+| **web** | Web-Client (React + Vite, von nginx ausgeliefert); spricht ausschliesslich über das Gateway mit der API | – (statisch) | HTTP |
 | **identity-service** | Benutzer, Login, Ausstellen von RS256-Tokens, JWKS | `users`, `signing_keys` | HTTP |
 | **routine-service** | Routinen verwalten, Ausführungen orchestrieren, Zeitplan, Status | `routines`, `executions`, `execution_actions`, `execution_log`, `outbox` | HTTP, publiziert Commands/Events, konsumiert Ergebnisse |
 | **task-service** | Aufgaben-System; führt `task.create` aus | `tasks` | HTTP, konsumiert Actions |
@@ -137,7 +142,10 @@ Auch routine-service, task-service und notification-service könnten mehrfach la
   her. Eine manuelle Ausführung ergibt so **einen** Trace über Gateway, Routine Service, Broker, alle Worker und
   den externen Dienst.
 * **Health/Readiness**: `/health` (Liveness, für Docker) und `/ready` (DB + Broker).
-* **Systemstatus** im UI bzw. `scripts/demo.sh status`: Services und Queue-Tiefen live.
+* **Systemstatus** im UI (Seite *System*: Live-Topologie mit Queue-Tiefen und Consumern) bzw. `scripts/demo.sh status`.
+  Quorum Queues melden ihre Metriken auf einem eigenen Tick – `infra/rabbitmq/advanced.config` setzt ihn auf 1 s.
+* **Trace pro Execution**: jede Ausführung speichert ihre `traceId` (auch zeitgesteuerte – der Scheduler startet dafür einen
+  eigenen Span). Das UI verlinkt direkt auf den Trace in Jaeger.
 
 ## 8. Security
 
@@ -173,6 +181,7 @@ Phase gegen die JSON Schemas.
 | PostgreSQL pro Service | Autonome Daten, Transaktionen für Outbox & Idempotenz | gemeinsame DB (verletzt Autonomie) |
 | Orchestrierung im Routine Service | Schritte, Abhängigkeiten, Datenfluss, zentraler Status | reine Choreografie |
 | Topologie als Code (`definitions.json`) | Queues existieren, bevor Consumer laufen → kein Nachrichtenverlust | Consumer deklarieren Queues selbst |
+| Web-Client als eigener Service (React, Vite, nginx) | UI unabhängig baubar/deploybar; nginx liefert statische Dateien effizient aus | UI im Gateway ausliefern |
 | Service-Kit als technisches Chassis | Logging, Broker, DB, Auth einheitlich; **keine Domain-Modelle** geteilt | Code-Duplikation in jedem Service |
 | Monorepo | Einfache Abgabe; jeder Service hat trotzdem eigenes Image & Deployment | Repo pro Service |
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { currentContext, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
+import { currentContext, currentTraceId, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import {
@@ -77,6 +77,7 @@ export class ExecutionEngine {
       scheduledFor: trigger.scheduledFor ?? null,
       idempotencyKey: trigger.idempotencyKey ?? null,
       correlationId,
+      traceId: currentTraceId(),
     });
     if (!execution) return null; // this scheduled slot was already taken
 

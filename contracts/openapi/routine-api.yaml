@@ -296,6 +296,7 @@ components:
         trigger: { enum: [manual, schedule] }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: Gemeinsame ID in allen Logs und Nachrichten dieser Ausführung }
+        traceId: { type: [string, 'null'], description: 'OpenTelemetry-Trace der Ausführung (Jaeger: /trace/{traceId}); additiv in v1 ergänzt' }
         currentStep: { type: integer }
         error: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }

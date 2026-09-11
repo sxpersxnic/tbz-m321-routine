@@ -1,7 +1,7 @@
 # Routine – complete system. Start everything with:
 #   docker compose up -d --build --wait
 #
-# UI / API:        http://localhost:8080
+# UI / API:        http://localhost:8080   (gateway → web + services)
 # RabbitMQ:        http://localhost:15672   (routine / routine)
 # Jaeger tracing:  http://localhost:16686
 # Mock external:   http://localhost:8090
@@ -51,6 +51,7 @@ services:
     volumes:
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-routine.conf:ro
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/advanced.config:/etc/rabbitmq/advanced.config:ro
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
@@ -88,6 +89,17 @@ services:
     volumes: [integration-db-data:/var/lib/postgresql/data]
 
   # ------------------------------------------------------------ services
+  # web client (React/Vite, served by nginx) – reached through the gateway
+  web:
+    build: ./web
+    image: routine/web:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   gateway:
     <<: *node-service
     build: { <<: *build, args: { SERVICE: gateway } }
@@ -102,6 +114,7 @@ services:
       TASK_URL: http://task-service:3000
       NOTIFICATION_URL: http://notification-service:3000
       INTEGRATION_WORKER_URL: http://integration-worker:3000
+      WEB_URL: http://web:80
       EXTERNAL_API_URL: http://mock-external:8090
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
 

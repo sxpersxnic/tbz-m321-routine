@@ -28,6 +28,7 @@ export interface ExecutionRow {
   status: ExecutionStatus;
   current_step: number;
   correlation_id: string;
+  trace_id: string | null;
   error: string | null;
   created_at: Date;
   started_at: Date | null;
@@ -139,11 +140,12 @@ export async function insertExecution(
     scheduledFor: Date | null;
     idempotencyKey: string | null;
     correlationId: string;
+    traceId: string | null;
   },
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
-    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
+    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -155,6 +157,7 @@ export async function insertExecution(
       execution.scheduledFor,
       execution.idempotencyKey,
       execution.correlationId,
+      execution.traceId,
     ],
   );
   return rows[0] ?? null;
@@ -343,6 +346,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     trigger: row.trigger_type,
     scheduledFor: row.scheduled_for,
     correlationId: row.correlation_id,
+    traceId: row.trace_id,
     currentStep: row.current_step,
     error: row.error,
     createdAt: row.created_at,

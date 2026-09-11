@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { withContext, withTransaction, type Logger, type Pool } from '@routine/service-kit';
+import { withContext, withSpan, withTransaction, type Logger, type Pool } from '@routine/service-kit';
 import { nextRun } from './domain/schedule.ts';
 import type { ExecutionEngine } from './engine.ts';
 import { lockDueRoutines, setNextRun } from './store.ts';
@@ -30,10 +30,13 @@ export class Scheduler {
           continue;
         }
         const slot = routine.next_run_at;
-        await withContext({ correlationId: randomUUID(), routineId: routine.id }, async () => {
-          const result = await this.#engine.createExecution(client, routine, { type: 'schedule', scheduledFor: slot });
-          if (!result) this.#logger.info({ slot }, 'scheduled slot already executed');
-        });
+        // every scheduled run starts its own trace, just like a manual run starts with an HTTP request
+        await withSpan('scheduler trigger', { 'routine.id': routine.id }, () =>
+          withContext({ correlationId: randomUUID(), routineId: routine.id }, async () => {
+            const result = await this.#engine.createExecution(client, routine, { type: 'schedule', scheduledFor: slot });
+            if (!result) this.#logger.info({ slot }, 'scheduled slot already executed');
+          }),
+        );
         const now = new Date();
         const following = nextRun(routine.trigger.cron, routine.trigger.timezone, slot > now ? slot : now);
         await setNextRun(client, routine.id, following);

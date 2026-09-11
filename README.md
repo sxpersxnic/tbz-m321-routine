@@ -703,25 +703,28 @@ docker compose down -v                # stoppen und Daten löschen
 ## Aufbau
 
 ```text
-compose.yaml                 Gesamtsystem (15 Container)
+compose.yaml                 Gesamtsystem (16 Container)
 contracts/                   OpenAPI, AsyncAPI, JSON Schemas (unabhängig von den Services)
 infra/rabbitmq/              Broker-Topologie als Code
 libs/service-kit/            technisches Chassis (Logging, HTTP, DB, Broker, Auth, Tracing) – keine Domain-Modelle
 services/
-  gateway/                   API Gateway + Web-UI
+  gateway/                   API Gateway (einziger Einstiegspunkt)
   identity-service/          Benutzer, Login, JWT/JWKS
   routine-service/           Routinen, Orchestrierung, Scheduler, Outbox
   task-service/              Aufgaben (Action task.create)
   notification-service/      Posteingang (notification.send, Execution-Events)
   integration-worker/        skalierbarer Worker für externe Aufrufe
   mock-external/             simulierte Drittanbieter
+web/                         Web-Client (React + Vite, nginx) – eigener Service
 scripts/demo.sh              Demo-Szenarien / Abnahmetest
 ```
 
 ## Entwicklung
 
 ```bash
-npm install          # Abhängigkeiten (Node ≥ 24)
+npm install          # Abhängigkeiten der Services (Node ≥ 24)
+npm --prefix web install   # Abhängigkeiten des Web-Clients
+npm --prefix web run dev   # UI mit Hot Reload auf :5173 (API via laufendem Gateway)
 npm run typecheck    # TypeScript
 npm test             # Unit- und Contract-Tests
 ```

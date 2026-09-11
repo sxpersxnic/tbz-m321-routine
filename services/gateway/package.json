@@ -6,7 +6,6 @@
   "type": "module",
   "dependencies": {
     "@fastify/http-proxy": "^11.6.2",
-    "@fastify/static": "^10.1.3",
     "@routine/service-kit": "*",
     "fastify": "^5.12.4"
   }

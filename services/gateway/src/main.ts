@@ -1,6 +1,4 @@
-import { join } from 'node:path';
 import proxy from '@fastify/http-proxy';
-import fastifyStatic from '@fastify/static';
 import {
   createHttpServer,
   createLogger,
@@ -19,6 +17,7 @@ const upstreams = {
   routine: env('ROUTINE_URL', 'http://routine-service:3000'),
   task: env('TASK_URL', 'http://task-service:3000'),
   notification: env('NOTIFICATION_URL', 'http://notification-service:3000'),
+  web: env('WEB_URL', 'http://web:80'),
 };
 
 /** Path prefix → upstream service. The gateway knows routes, not business logic. */
@@ -65,6 +64,7 @@ const rabbit = {
 
 const probes: Record<string, string> = {
   gateway: 'http://127.0.0.1:3000',
+  web: upstreams.web,
   'identity-service': upstreams.identity,
   'routine-service': upstreams.routine,
   'task-service': upstreams.task,
@@ -119,8 +119,15 @@ app.get('/api/v1/system/status', async () => {
 });
 
 // ---------------------------------------------------------------- web UI
+// Everything that is not an API route is served by the independent `web` service
+// (single origin for the browser → no CORS, one entry point).
 
-await app.register(fastifyStatic, { root: join(import.meta.dirname, '..', 'public'), prefix: '/', wildcard: false });
+await app.register(proxy, {
+  upstream: upstreams.web,
+  prefix: '/',
+  logLevel: 'warn',
+  replyOptions: { rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }) },
+});
 
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });
 logger.info({ upstreams }, 'gateway ready');

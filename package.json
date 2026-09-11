@@ -12,7 +12,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && npm --prefix web run typecheck",
     "test": "node --test --disable-warning=ExperimentalWarning \"libs/*/test/**/*.test.ts\" \"services/*/test/**/*.test.ts\"",
     "up": "docker compose up -d --build --wait",
     "down": "docker compose down",
