@@ -304,12 +304,13 @@ export function RoutineDetail({ id }: { id: string }) {
     <div className="page">
       <a className="back" href="#/routines"><Icon name="back" size={18} /> Routines</a>
 
-      <header className={`detail-hero tint-${look.tint} ${r.active ? 'on-tint' : 'paused'}`}>
+      {/* always in the routine's own colour – paused is said by the badge, not by losing the colour */}
+      <header className={`detail-hero on-tint tint-${look.tint}`}>
         <button type="button" className="hero-icon" onClick={() => setPickingLook(true)} aria-label="Change icon and colour" title="Change icon and colour">
           <Icon name={look.glyph} size={36} />
         </button>
         <div className="grow">
-          <h1>{r.name}</h1>
+          <h1>{r.name}{!r.active && <span className="hero-state">Paused</span>}</h1>
           {r.description && <p>{r.description}</p>}
         </div>
         <div className="hero-actions">

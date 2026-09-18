@@ -622,23 +622,18 @@ button.story-block:hover { box-shadow: var(--shadow-hover); }
   background: linear-gradient(155deg, var(--tint-a), var(--tint-b));
   box-shadow: 0 10px 34px color-mix(in srgb, var(--tint-b) 30%, transparent);
 }
-.detail-hero.paused { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .detail-hero .hero-icon {
   width: 72px; height: 72px; border-radius: 20px; display: grid; place-items: center; background: rgb(255 255 255 / 0.22); flex: none;
   border: 0; color: inherit; cursor: pointer; transition: background var(--soft) var(--ease), transform var(--soft) var(--ease);
 }
 .detail-hero .hero-icon:hover { background: rgb(255 255 255 / 0.32); transform: scale(1.04); }
-.detail-hero.paused .hero-icon { background: var(--surface-2); color: var(--muted); }
-.detail-hero.paused .hero-icon:hover { background: var(--surface-3); }
 .detail-hero h1 { font-size: 30px; }
+.hero-state { display: inline-block; vertical-align: middle; margin-left: 10px; font: 600 13px/1 var(--font); background: rgb(0 0 0 / 0.2); border-radius: 99px; padding: 5px 10px; }
 .detail-hero p { opacity: 0.92; margin-top: 4px; font-size: 16px; }
-.detail-hero.paused p { color: var(--muted); opacity: 1; }
 .detail-hero .hero-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
 .btn.on-tint { background: #fff; color: var(--tint-b); }
 .btn.on-tint-soft { background: rgb(255 255 255 / 0.2); color: #fff; }
 .btn.on-tint-soft:hover { background: rgb(255 255 255 / 0.3); filter: none; }
-.detail-hero.paused .btn.on-tint-soft { background: var(--surface-3); color: var(--text); }
-.detail-hero.paused .btn.on-tint { background: var(--accent-fill); color: #fff; }
 
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .fact { background: var(--surface); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); display: flex; gap: 12px; align-items: flex-start; }
