@@ -4,7 +4,7 @@
 
 - [x] In "Notifications" page, notifications are marked as read when the user clicks on the notification card. This is not intuitive and can be confusing. Clicking the notification card should open the notification details and mark it as read only when the user clicks on "Mark as read" button (displayed as icon).
 
-- [ ] Currently a routines card shows all steps of the routine as icon. This is not scalable for routines with many steps. Don't show steps in the routines card.
+- [x] Currently a routines card shows all steps of the routine as icon. This is not scalable for routines with many steps. Don't show steps in the routines card.
 
 - [ ] Currently a routine cards color and icon are based on the first step of the routine. Instead, users should be able to customize the color and icon of the routine card. Icon and colors can be set on creation of the routine, on edit of the routine, and when clicking the icon in the routine details page.
 

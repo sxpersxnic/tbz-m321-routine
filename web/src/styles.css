@@ -585,8 +585,7 @@ button.story-block:hover { box-shadow: var(--shadow-hover); }
 .tile-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: rgb(255 255 255 / 0.22); }
 .tile-name { font: 600 17px/1.25 var(--font-display); letter-spacing: -0.015em; margin-top: auto; }
 .tile-when { font-size: 13px; opacity: 0.9; display: flex; align-items: center; gap: 5px; }
-.tile-foot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 12px 16px; }
-.tile .glyph { box-shadow: 0 0 0 1.5px rgb(255 255 255 / 0.5); }
+.tile-foot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 12px 12px 16px; }
 .tile-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .tile-state { font-size: 12px; font-weight: 600; background: rgb(0 0 0 / 0.18); border-radius: 99px; padding: 2px 9px; }
 .tile.paused { color: light-dark(#1d1d1f, #f5f5f7); background: var(--surface); box-shadow: var(--shadow); }

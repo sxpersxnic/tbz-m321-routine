@@ -4,7 +4,7 @@ import { api } from '../api.ts';
 import { TemplateGallery } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton } from '../components/ui.tsx';
-import { ActionFlow, GlyphRow, RunHistory, StatusIcon } from '../components/visual.tsx';
+import { ActionFlow, RunHistory, StatusIcon } from '../components/visual.tsx';
 import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, useNow, usePolling } from '../hooks.ts';
 import type { Routine } from '../types.ts';
@@ -102,7 +102,6 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
         </span>
       </a>
       <div className="tile-foot">
-        <GlyphRow types={routine.actions.map((action) => action.type)} size={20} max={4} />
         {active ? (
           <button type="button" className="play" aria-label={`${runLabel(routine)}: ${routine.name}`} title={runLabel(routine)} disabled={run.running} onClick={() => void run(routine)}>
             {run.running ? <span className="spinner" /> : <Icon name="play" size={16} />}
