@@ -144,14 +144,23 @@ const app = createHttpServer({
 });
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/']);
 
-app.get<{ Querystring: { unread?: boolean } }>(
+app.get<{ Querystring: { unread?: boolean; category?: 'action' | 'execution' } }>(
   '/api/v1/notifications',
-  { schema: { querystring: { type: 'object', properties: { unread: { type: 'boolean' } } } } },
+  {
+    schema: {
+      querystring: {
+        type: 'object',
+        properties: { unread: { type: 'boolean' }, category: { type: 'string', enum: ['action', 'execution'] } },
+      },
+    },
+  },
   async (request) => {
     const user = requireUser(request);
     const { rows } = await pool.query<NotificationRow>(
-      `SELECT * FROM notifications WHERE owner_id = $1 AND (NOT $2 OR read_at IS NULL) ORDER BY created_at DESC LIMIT 200`,
-      [user.id, request.query.unread === true],
+      `SELECT * FROM notifications
+        WHERE owner_id = $1 AND (NOT $2 OR read_at IS NULL) AND ($3::text IS NULL OR category = $3)
+        ORDER BY created_at DESC LIMIT 200`,
+      [user.id, request.query.unread === true, request.query.category ?? null],
     );
     return { items: rows.map(notificationDto) };
   },

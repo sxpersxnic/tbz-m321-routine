@@ -930,17 +930,14 @@ input.task-check.prio-high:not(:checked) { border-color: var(--err-fill); }
 .notice-main { display: block; width: 100%; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; }
 button.notice-main { cursor: pointer; }
 .notice-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
-.notice-source { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .notice-time { font-size: 13px; color: var(--muted); white-space: nowrap; }
-.notice-title { display: block; font-weight: 600; margin-top: 1px; }
+.notice-title { display: block; font-weight: 600; min-width: 0; }
 .notice.read .notice-title { font-weight: 500; }
 .notice-body { display: block; white-space: pre-wrap; margin-top: 2px; color: var(--text); }
 .notice.read { background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 .notice.read .notice-body { color: var(--muted); }
 .unread-dot { position: absolute; left: -4px; top: 50%; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: var(--accent-fill); }
 .notice.prio-high .unread-dot { background: var(--err-fill); }
-.notice-link { font-size: 13.5px; color: var(--accent); display: inline-flex; gap: 2px; align-items: center; margin-top: 6px; }
-.notice-link:hover { text-decoration: underline; }
 
 /* ================================================================== system */
 .explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }

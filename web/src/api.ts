@@ -193,8 +193,11 @@ export const api = {
     send<Task>('POST', '/api/v1/tasks', input),
   setTaskStatus: (id: string, status: Task['status']) => send<Task>('PATCH', `/api/v1/tasks/${id}`, { status }),
 
-  notifications: async (unread = false) =>
-    (await get<{ items: Notification[] }>(`/api/v1/notifications${unread ? '?unread=true' : ''}`)).items,
+  /** Only what routine steps sent – run outcomes live on the Runs page, not in the inbox. */
+  notifications: async (unread = false) => {
+    const query = new URLSearchParams({ category: 'action', ...(unread ? { unread: 'true' } : {}) });
+    return (await get<{ items: Notification[] }>(`/api/v1/notifications?${query}`)).items;
+  },
   markRead: (id: string) => send<Notification>('POST', `/api/v1/notifications/${id}/read`),
 
   system: () => get<SystemStatus>('/api/v1/system/status'),

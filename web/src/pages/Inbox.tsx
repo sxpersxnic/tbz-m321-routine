@@ -212,16 +212,14 @@ export function Notifications({ onChange }: { onChange: () => void }) {
 
   const card = (notification: Notification) => {
     const read = Boolean(notification.readAt);
-    const fromRun = notification.category === 'execution';
     const body = (
       <>
         <span className="notice-top">
-          <span className="notice-source">{fromRun ? 'Run' : 'Routine'}</span>
+          <span className="notice-title">
+            {!read && <span className="sr-only">Unread: </span>}
+            {notification.title}
+          </span>
           <span className="notice-time">{relative(notification.createdAt, now)}</span>
-        </span>
-        <span className="notice-title">
-          {!read && <span className="sr-only">Unread: </span>}
-          {notification.title}
         </span>
         {notification.body && <span className="notice-body">{notification.body}</span>}
       </>
@@ -229,14 +227,11 @@ export function Notifications({ onChange }: { onChange: () => void }) {
     return (
       <li key={notification.id} className={`notice ${read ? 'read' : ''} prio-${notification.priority}`}>
         {!read && <span className="unread-dot" aria-hidden="true" />}
-        <span className={`glyph tint-${fromRun ? 'sky' : 'pink'}`} aria-hidden="true"><Icon name={fromRun ? 'routines' : 'bell'} size={20} /></span>
+        <span className="glyph tint-pink" aria-hidden="true"><Icon name="bell" size={20} /></span>
         <div className="grow">
           {read
             ? <div className="notice-main">{body}</div>
             : <button type="button" className="notice-main" onClick={() => void markRead([notification.id])} title="Mark as read">{body}</button>}
-          {notification.executionId && (
-            <a className="notice-link" href={`#/executions/${notification.executionId}`}>View run <Icon name="chevron" size={12} /></a>
-          )}
         </div>
       </li>
     );

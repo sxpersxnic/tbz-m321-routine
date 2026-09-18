@@ -18,6 +18,7 @@ paths:
       operationId: listNotifications
       parameters:
         - { name: unread, in: query, schema: { type: boolean }, description: unread only }
+        - { name: category, in: query, schema: { enum: [action, execution] }, description: 'action = sent by a routine step, execution = run outcome' }
       responses:
         '200':
           description: notifications (newest first)

@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] "Notifications" page shows notifications but also shows runs, so two different things are shown in the same page. This is not only confusing but brings unwanted behavior, e.g. Every card shows "view run" but notifications don't have executions and just show an error. Separate notifications and runs into two different pages.
+- [x] "Notifications" page shows notifications but also shows runs, so two different things are shown in the same page. This is not only confusing but brings unwanted behavior, e.g. Every card shows "view run" but notifications don't have executions and just show an error. Separate notifications and runs into two different pages.
 
 - [ ] In "Notifications" page, notifications are marked as read when the user clicks on the notification card. This is not intuitive and can be confusing. Clicking the notification card should open the notification details and mark it as read only when the user clicks on "Mark as read" button (displayed as icon).
 
