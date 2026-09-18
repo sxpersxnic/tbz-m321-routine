@@ -8,7 +8,7 @@
 
 - [x] Currently a routine cards color and icon are based on the first step of the routine. Instead, users should be able to customize the color and icon of the routine card. Icon and colors can be set on creation of the routine, on edit of the routine, and when clicking the icon in the routine details page.
 
-- [ ] In routine details page, the hero section shows icon, title, description, active toggle button, edit button (icon and label), copy button (icon only, secondary), delete button (icon only, secondary), execute button (icon and label, primary). This is too much information in a small space and is not scalable. The hero section should only show icon, title, description, active toggle button, edit button (icon only), and execute button (icon and label, primary). The copy and delete buttons should be moved to the "..." menu.
+- [x] In routine details page, the hero section shows icon, title, description, active toggle button, edit button (icon and label), copy button (icon only, secondary), delete button (icon only, secondary), execute button (icon and label, primary). This is too much information in a small space and is not scalable. The hero section should only show icon, title, description, active toggle button, edit button (icon only), and execute button (icon and label, primary). The copy and delete buttons should be moved to the "..." menu.
 
 - [ ] In "Tasks" page, the component to create a new task is shown at the bottom of the page as inline form. This is not intuitive and can be confusing. Instead, the page should have a "Create Task" button at the top of the page, which opens a modal to create a new task.
 

@@ -1103,3 +1103,18 @@ button.notice-main { cursor: pointer; }
 .editor-head { display: flex; gap: 16px; align-items: flex-start; }
 .editor-look { width: 56px; height: 56px; border-radius: 16px; border: 0; cursor: pointer; flex: none; margin-top: 4px; transition: transform var(--soft) var(--ease); }
 .editor-look:hover { transform: scale(1.05); }
+
+/* ---------------------------------------------------------------- menu */
+.menu-root { position: relative; display: inline-flex; }
+.menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 180px; padding: 6px;
+  background: var(--surface); color: var(--text); border-radius: 12px; box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; animation: pop 0.16s var(--ease);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px;
+  background: none; color: inherit; font: inherit; font-size: 14.5px; text-align: left; cursor: pointer;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+.menu-item:disabled { opacity: 0.5; cursor: default; }
+.menu-item.danger { color: light-dark(#d70015, #ff6961); }

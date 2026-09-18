@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { THEME_ICONS, THEME_LABELS, THEME_ORDER, themeStore } from '../theme.ts';
 import { useToast } from './toast.tsx';
 
@@ -77,7 +77,13 @@ const ICONS: Record<string, ReactNode> = {
   inbox: <path d="M3 13l3-8h12l3 8v6H3zM3 13h5l1.5 2.5h5L16 13h5" />,
   flag: <path d="M5 21V4M5 4h11l-2 4 2 4H5" />,
   stack: <path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" />,
-  more: <path d="M5 12h.01M12 12h.01M19 12h.01" />,
+  more: (
+    <g fill="currentColor" stroke="none">
+      <circle cx="5.5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="18.5" cy="12" r="1.7" />
+    </g>
+  ),
   link: <path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" />,
   info: (
     <>
@@ -385,6 +391,69 @@ export function ConfirmDialog({ open, title, children, confirmLabel, danger, onC
     }>
       {children}
     </Modal>
+  );
+}
+
+export interface MenuItem {
+  label: string;
+  icon: string;
+  onSelect: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}
+
+/**
+ * A "…" button with a small menu of secondary actions. Keyboard: arrows move,
+ * Escape closes and returns focus to the button, a click outside closes too.
+ */
+export function Menu({ label, items, buttonClassName = 'btn ghost icon-only' }: { label: string; items: MenuItem[]; buttonClassName?: string }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    list.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    const outside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+
+  function onKeyDown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const options = [...(list.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    const index = options.indexOf(document.activeElement as HTMLButtonElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    options[(index + step + options.length) % options.length]?.focus();
+  }
+
+  return (
+    <div className="menu-root" ref={root} onKeyDown={onKeyDown}>
+      <button type="button" ref={button} className={buttonClassName} aria-haspopup="menu" aria-expanded={open}
+        aria-label={label} title={label} onClick={() => setOpen(!open)}>
+        <Icon name="more" size={18} />
+      </button>
+      {open && (
+        <div className="menu" role="menu" ref={list} aria-label={label}>
+          {items.map((item) => (
+            <button key={item.label} type="button" role="menuitem" className={`menu-item ${item.danger ? 'danger' : ''}`} disabled={item.disabled}
+              onClick={() => { setOpen(false); item.onSelect(); }}>
+              <Icon name={item.icon} size={16} /> {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 import { TemplateGallery } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
-import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton } from '../components/ui.tsx';
+import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Menu, Section, Skeleton } from '../components/ui.tsx';
 import { ActionFlow, AppearanceDialog, routineLook, RunHistory, StatusIcon, type Appearance } from '../components/visual.tsx';
 import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, useNow, usePolling } from '../hooks.ts';
@@ -314,15 +314,13 @@ export function RoutineDetail({ id }: { id: string }) {
         </div>
         <div className="hero-actions">
           <ActiveToggle routine={r} onChange={routine.reload} />
-          <button type="button" className="btn on-tint-soft" onClick={() => navigate(`/routines/${r.id}/edit`)}>
-            <Icon name="edit" size={16} /> Edit
+          <button type="button" className="btn on-tint-soft icon-only" onClick={() => navigate(`/routines/${r.id}/edit`)} aria-label="Edit routine" title="Edit">
+            <Icon name="edit" size={16} />
           </button>
-          <button type="button" className="btn on-tint-soft icon-only" disabled={duplicating} onClick={() => void duplicate()} aria-label="Duplicate routine" title="Duplicate">
-            <Icon name="copy" size={16} />
-          </button>
-          <button type="button" className="btn on-tint-soft icon-only" onClick={() => setConfirmDelete(true)} aria-label="Delete routine" title="Delete">
-            <Icon name="trash" size={16} />
-          </button>
+          <Menu label="More actions" buttonClassName="btn on-tint-soft icon-only" items={[
+            { label: 'Duplicate', icon: 'copy', onSelect: () => void duplicate(), disabled: duplicating },
+            { label: 'Delete', icon: 'trash', onSelect: () => setConfirmDelete(true), danger: true },
+          ]} />
           {r.active && (
             <button type="button" className="btn on-tint large" disabled={run.running} onClick={() => (r.webhookPath ? openTest() : void run(r))}>
               {run.running ? <span className="spinner" /> : <Icon name="play" size={16} />} {runLabel(r)}
