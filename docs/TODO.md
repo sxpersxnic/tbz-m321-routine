@@ -14,6 +14,6 @@
 
 - [x] Users should be able to create custom lists for tasks. A custom list can have a name, description, and color. Users should be able to create a new list from the "Tasks" page, and when creating a new task, users should be able to select which list the task belongs to (needs to be configurable in routines aswell). The default list is "Todo". But keep the tabs to switch between "Today", "Scheduled", "Open", and "Done" at the top of the page, followed by the list of lists. When a user clicks on a list, the page should show all tasks in that list. The "Today", "Scheduled", "Open", and "Done" tabs should show tasks from all lists.
 
-- [ ] "Inbox" page needs search, sort and filter functionality additional to "Mark all read" button.
+- [x] "Inbox" page needs search, sort and filter functionality additional to "Mark all read" button.
 
 - [ ] Single entries in "Inbox" page should be selectable, when atleast one entry is selected, a "Mark as read" and "Delete" buttons should be shown at the top of the page.

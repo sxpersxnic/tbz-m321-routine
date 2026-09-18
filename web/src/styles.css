@@ -1128,3 +1128,9 @@ button.notice-main { cursor: pointer; }
 .task-list-row.selected { background: var(--accent-soft); }
 .list-tag { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
 .list-tag i { width: 8px; height: 8px; border-radius: 50%; background: var(--tint-a); }
+.compact-select { width: auto; padding: 8px 30px 8px 12px; font-size: 14px; background-color: var(--surface-3); border-color: transparent; border-radius: 10px; }
+.inbox-controls { display: flex; flex-direction: column; gap: 10px; }
+.search.wide { max-width: none; }
+.filter-selects { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.inbox-count { color: var(--muted); font-size: 13px; margin: -6px 0 -10px; }
+@media (max-width: 600px) { .filter-selects { margin-left: 0; } }
