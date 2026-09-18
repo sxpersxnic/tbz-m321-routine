@@ -199,7 +199,7 @@ export function Notifications({ onChange }: { onChange: () => void }) {
           {groups.map((group, index) => (
             <section key={group.label} aria-labelledby={`notice-group-${index}`}>
               <h2 id={`notice-group-${index}`} className="group-label">{group.label}</h2>
-              <ul className="notice-list">{group.items.map(card)}</ul>
+              <ul className={`notice-list ${chosen.length > 0 ? 'selecting' : ''}`}>{group.items.map(card)}</ul>
             </section>
           ))}
         </>

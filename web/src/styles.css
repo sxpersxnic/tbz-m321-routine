@@ -1138,5 +1138,10 @@ button.notice-main { cursor: pointer; }
   padding: 8px 12px 8px 8px; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   animation: pop 0.18s var(--ease);
 }
-.notice-select { width: 18px; height: 18px; margin: 10px 0 0; flex: none; accent-color: var(--accent-fill); cursor: pointer; }
+.notice-select { width: 18px; height: 18px; margin: 3px 0 0; flex: none; accent-color: var(--accent-fill); cursor: pointer; }
+/* Hidden until wanted, but its space stays reserved so the card never shifts. Keyboard focus,
+   an ongoing selection and touch screens (no hover to discover it with) always show it. */
+.notice-select { opacity: 0; transition: opacity var(--fast) var(--ease); }
+.notice:hover .notice-select, .notice:focus-within .notice-select, .notice-select:checked, .notice-list.selecting .notice-select { opacity: 1; }
+@media (hover: none) { .notice-select { opacity: 1; } }
 .notice.selected { box-shadow: 0 0 0 2px var(--accent-fill); }
