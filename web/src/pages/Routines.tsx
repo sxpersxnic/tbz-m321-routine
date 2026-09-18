@@ -1,95 +1,200 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { actionGlyph, actionTint } from '../action-forms.ts';
 import { api } from '../api.ts';
-import { actionIcon } from '../action-forms.ts';
-import { StepFlow } from '../components/execution.tsx';
+import { TemplateGallery } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
-import { Card, Empty, ErrorNote, Icon, Loading } from '../components/ui.tsx';
-import { dateTime, describeTrigger, relative } from '../format.ts';
+import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton } from '../components/ui.tsx';
+import { ActionFlow, GlyphRow, RunHistory, StatusIcon } from '../components/visual.tsx';
+import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, useNow, usePolling } from '../hooks.ts';
 import type { Routine } from '../types.ts';
 import { ExecutionRow } from './Executions.tsx';
 
-/** Shared "run now" behaviour: trigger, then jump to the live execution view. */
+/**
+ * Starts a routine the way its trigger would: a webhook routine gets a test event through its
+ * own URL – so the run has a body to work with – everything else a manual trigger.
+ */
+export async function startRoutine(routine: Pick<Routine, 'id' | 'webhookPath'>, payload?: Record<string, unknown>): Promise<string> {
+  if (routine.webhookPath) return (await api.callWebhook(routine.webhookPath, payload ?? testPayload())).executionId;
+  return (await api.trigger(routine.id)).id;
+}
+
+/** "Run now" or, for webhook routines, "Send test". */
+export const runLabel = (routine: Pick<Routine, 'webhookPath'>) => (routine.webhookPath ? 'Send test' : 'Run now');
+
+/** Shared "run now" behaviour: trigger, then jump to the live execution view. `running` drives the button spinner. */
 export function useRunRoutine() {
   const toast = useToast();
-  return async (routine: Routine) => {
+  const [running, setRunning] = useState(false);
+  const run = async (routine: Routine) => {
+    setRunning(true);
     try {
-      const execution = await api.trigger(routine.id);
-      navigate(`/executions/${execution.id}`);
+      navigate(`/executions/${await startRoutine(routine)}`);
     } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      setRunning(false);
+    }
+  };
+  return Object.assign(run, { running });
+}
+
+/**
+ * Flips the switch at once and lets the server catch up: waiting a round trip to
+ * see your own click land is what makes a tool feel slow. `override` is the
+ * optimistic value until the reload arrives; a failure rolls it back.
+ */
+function useSetActive(routine: Routine, onChange: () => void) {
+  const toast = useToast();
+  const [override, setOverride] = useState<boolean>();
+  // the poll caught up – from here on the server's value is the truth again
+  useEffect(() => {
+    if (override === routine.active) setOverride(undefined);
+  }, [override, routine.active]);
+  const set = async (active: boolean) => {
+    setOverride(active);
+    try {
+      await api.setActive(routine.id, active);
+      onChange();
+    } catch (error) {
+      setOverride(undefined);
       toast(error instanceof Error ? error.message : String(error), 'error');
     }
   };
+  return { set, active: override ?? routine.active };
 }
 
 function ActiveToggle({ routine, onChange }: { routine: Routine; onChange: () => void }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
+  const { set, active } = useSetActive(routine, onChange);
   return (
-    <label className="switch" title={routine.active ? 'Deaktivieren' : 'Aktivieren'}>
-      <input type="checkbox" checked={routine.active} disabled={busy}
-        onChange={async () => {
-          setBusy(true);
-          try {
-            await api.setActive(routine.id, !routine.active);
-            toast(routine.active ? `„${routine.name}“ deaktiviert` : `„${routine.name}“ aktiviert`);
-            onChange();
-          } catch (error) {
-            toast(error instanceof Error ? error.message : String(error), 'error');
-          } finally {
-            setBusy(false);
-          }
-        }} />
+    <label className="switch">
+      <input type="checkbox" checked={active} onChange={() => void set(!active)} />
       <span className="switch-track" />
-      <span className="switch-label">{routine.active ? 'Aktiv' : 'Inaktiv'}</span>
+      <span className="switch-label">Active</span>
     </label>
   );
 }
 
+/** "Manual" / "Every weekday at 07:30" – when, as a label. */
+const whenText = (routine: Routine) => describeTrigger(routine.trigger);
+
+/**
+ * A routine as a Shortcuts-style tile: colour and symbol from its first action,
+ * the whole tile opens it, and the round button runs it. A paused routine turns
+ * plain white and offers "Activate" instead – a disabled play button would not
+ * say what to do about it.
+ */
+export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routine; onChanged: () => void; level?: 2 | 3 }) {
+  const Heading = level === 2 ? 'h2' : 'h3';
+  const run = useRunRoutine();
+  const { set, active } = useSetActive(routine, onChanged);
+  const first = routine.actions[0]?.type ?? '';
+  return (
+    <article className={`tile tint-${actionTint(first)} ${active ? '' : 'paused'}`}>
+      <a className="tile-link" href={`#/routines/${routine.id}`}>
+        <span className="tile-top">
+          <span className="tile-icon" aria-hidden="true"><Icon name={actionGlyph(first)} size={21} /></span>
+          {!active && <span className="tile-state">Paused</span>}
+        </span>
+        <Heading className="tile-name">{routine.name}</Heading>
+        <span className="tile-when">
+          <Icon name={TRIGGER_ICONS[routine.trigger.type]} size={13} />
+          <span className="ellipsis">{whenText(routine)}</span>
+        </span>
+      </a>
+      <div className="tile-foot">
+        <GlyphRow types={routine.actions.map((action) => action.type)} size={20} max={4} />
+        {active ? (
+          <button type="button" className="play" aria-label={`${runLabel(routine)}: ${routine.name}`} title={runLabel(routine)} disabled={run.running} onClick={() => void run(routine)}>
+            {run.running ? <span className="spinner" /> : <Icon name="play" size={16} />}
+          </button>
+        ) : (
+          <button type="button" className="btn small tinted" onClick={() => void set(true)}>
+            Activate
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+const SCOPES = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'inactive', label: 'Paused' },
+] as const;
+
 export function Routines() {
   const routines = usePolling(() => api.routines(), 5000);
-  const run = useRunRoutine();
-  const now = useNow(10_000);
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<(typeof SCOPES)[number]['key']>('all');
+  const [showTemplates, setShowTemplates] = useState(false);
+
+  const all = routines.data ?? [];
+  const term = search.trim().toLowerCase();
+  const visible = all.filter((routine) => {
+    if (scope === 'active' && !routine.active) return false;
+    if (scope === 'inactive' && routine.active) return false;
+    if (!term) return true;
+    return `${routine.name} ${routine.description}`.toLowerCase().includes(term);
+  });
+  const count = (key: (typeof SCOPES)[number]['key']) =>
+    key === 'all' ? all.length : all.filter((routine) => routine.active === (key === 'active')).length;
 
   return (
     <div className="page">
       <header className="page-head">
         <div>
-          <h1>Routinen</h1>
-          <p className="muted">Abläufe aus mehreren Aktionen – manuell oder per Zeitplan ausgelöst.</p>
+          <h1>Routines</h1>
         </div>
-        <button type="button" className="btn primary" onClick={() => navigate('/routines/new')}>
-          <Icon name="plus" size={16} /> Neue Routine
-        </button>
+        <div className="row">
+          {all.length > 0 && (
+            <button type="button" className="btn" aria-expanded={showTemplates} onClick={() => setShowTemplates(!showTemplates)}>
+              <Icon name="sparkles" size={16} /> Templates
+            </button>
+          )}
+          <button type="button" className="btn primary" onClick={() => navigate('/routines/new')}>
+            <Icon name="plus" size={16} /> New routine
+          </button>
+        </div>
       </header>
-      <ErrorNote error={routines.error} />
-      {routines.loading ? <Loading /> : routines.data?.length === 0 ? (
-        <Card><Empty>Noch keine Routinen. <a className="link" href="#/routines/new">Erste Routine erstellen</a></Empty></Card>
+      <ErrorNote error={routines.error} onRetry={routines.reload} />
+
+      {showTemplates && all.length > 0 && <TemplateGallery onCreated={routines.reload} />}
+
+      {all.length > 3 && (
+        <div className="filter-bar">
+          <div className="segmented" role="tablist" aria-label="Filter routines">
+            {SCOPES.map((item) => (
+              <button key={item.key} type="button" role="tab" aria-selected={scope === item.key}
+                className={scope === item.key ? 'active' : ''} onClick={() => setScope(item.key)}>
+                {item.label} <span className="seg-count">{count(item.key)}</span>
+              </button>
+            ))}
+          </div>
+          <div className="search">
+            <Icon name="search" size={16} />
+            <input type="search" value={search} placeholder="Search" aria-label="Search routines"
+              onChange={(event) => setSearch(event.target.value)} />
+          </div>
+        </div>
+      )}
+
+      {routines.loading ? <div className="card"><Skeleton lines={4} /></div> : all.length === 0 ? (
+        // the same gallery as the welcome screen: an empty list is the moment a
+        // ready-made example is worth most, not a sentence about one
+        <TemplateGallery onCreated={routines.reload} />
+      ) : visible.length === 0 ? (
+        <div className="card">
+          <Empty icon="search" title="No matching routine"
+            action={<button type="button" className="btn" onClick={() => { setSearch(''); setScope('all'); }}>Reset filters</button>}>
+</Empty>
+        </div>
       ) : (
-        <div className="routine-grid">
-          {routines.data?.map((routine) => (
-            <article key={routine.id} className={`routine-card ${routine.active ? '' : 'inactive'}`}>
-              <a href={`#/routines/${routine.id}`} className="routine-card-body">
-                <h3>{routine.name}</h3>
-                {routine.description && <p className="muted small clamp">{routine.description}</p>}
-                <div className="routine-card-meta">
-                  <span className="chip"><Icon name={routine.trigger.type === 'schedule' ? 'clock' : 'play'} size={12} /> {describeTrigger(routine.trigger)}</span>
-                  <span className="chip">{routine.actions.length} Aktionen</span>
-                </div>
-                <div className="action-icons" role="group" aria-label="Aktionen">
-                  {routine.actions.map((action) => <span key={action.key} title={`${action.key} (${action.type})`}>{actionIcon(action.type)}</span>)}
-                </div>
-                {routine.active && routine.nextRunAt && <p className="muted small">Nächster Lauf {relative(routine.nextRunAt, now)}</p>}
-              </a>
-              <footer className="routine-card-foot">
-                <ActiveToggle routine={routine} onChange={routines.reload} />
-                <button type="button" className="btn small" disabled={!routine.active} onClick={() => run(routine)}
-                  title={routine.active ? 'Jetzt ausführen' : 'Erst aktivieren'}>
-                  <Icon name="play" size={14} /> Ausführen
-                </button>
-              </footer>
-            </article>
-          ))}
+        <div className="tile-grid">
+          {visible.map((routine) => <RoutineTile key={routine.id} routine={routine} onChanged={routines.reload} level={2} />)}
+          {!term && scope !== 'inactive' && (
+            <a className="tile-new" href="#/routines/new"><Icon name="plus" size={26} /> New routine</a>
+          )}
         </div>
       )}
     </div>
@@ -100,18 +205,82 @@ export function RoutineDetail({ id }: { id: string }) {
   const toast = useToast();
   const run = useRunRoutine();
   const now = useNow(5000);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  // webhook routines: a hand-written test event, for trying the routine without an external system
+  const [testBody, setTestBody] = useState<string | null>(null);
+  const [testError, setTestError] = useState<string>();
   const routine = usePolling(() => api.routine(id), 5000, [id]);
-  const executions = usePolling(() => api.routineExecutions(id), 2000, [id]);
+  const executions = usePolling(() => api.routineExecutions(id, 40), 2000, [id]);
 
-  if (routine.error) return <div className="page"><ErrorNote error={routine.error} /><a className="link" href="#/routines">Zurück</a></div>;
-  if (!routine.data) return <div className="page"><Loading /></div>;
+  if (routine.error && !routine.data) {
+    return (
+      <div className="page">
+        <a className="back" href="#/routines"><Icon name="back" size={18} /> Routines</a>
+        <ErrorNote error={routine.error} onRetry={routine.reload} />
+      </div>
+    );
+  }
+  // Keep the chrome while loading: a bare spinner would drop the way back out.
+  if (!routine.data) {
+    return (
+      <div className="page">
+        <a className="back" href="#/routines"><Icon name="back" size={18} /> Routines</a>
+        <div className="card"><Skeleton lines={2} /></div>
+        <div className="card"><Skeleton lines={4} /></div>
+      </div>
+    );
+  }
   const r = routine.data;
+  const runs = executions.data ?? [];
+  const last = runs[0];
+  const finished = runs.filter((execution) => execution.status === 'COMPLETED' || execution.status === 'FAILED');
+  const ok = finished.filter((execution) => execution.status === 'COMPLETED').length;
+  const first = r.actions[0]?.type ?? '';
+
+  function openTest() {
+    setTestError(undefined);
+    setTestBody(JSON.stringify(testPayload(), null, 2));
+  }
+
+  async function sendTest() {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(testBody ?? '{}');
+    } catch {
+      setTestError('This is not valid JSON.');
+      return;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      setTestError('Send a JSON object, e.g. { "name": "value" }.');
+      return;
+    }
+    setTestBody(null);
+    try {
+      navigate(`/executions/${await startRoutine(r, payload as Record<string, unknown>)}`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  }
+
+  /** A copy starts paused, so it cannot fire twice alongside the original before it is edited. */
+  async function duplicate() {
+    setDuplicating(true);
+    try {
+      const copy = await api.createRoutine({ name: `${r.name} (copy)`.slice(0, 120), description: r.description, trigger: r.trigger, actions: r.actions });
+      toast(`"${copy.name}" created`);
+      navigate(`/routines/${copy.id}/edit`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      setDuplicating(false);
+    }
+  }
 
   async function remove() {
-    if (!confirm(`„${r.name}“ inklusive aller Ausführungen löschen?`)) return;
+    setConfirmDelete(false);
     try {
       await api.deleteRoutine(r.id);
-      toast(`„${r.name}“ gelöscht`);
+      toast(`"${r.name}" deleted`);
       navigate('/routines');
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), 'error');
@@ -120,35 +289,142 @@ export function RoutineDetail({ id }: { id: string }) {
 
   return (
     <div className="page">
-      <a className="back" href="#/routines"><Icon name="back" size={16} /> Routinen</a>
-      <header className="page-head">
-        <div>
-          <h1>{r.name} {!r.active && <span className="badge">Inaktiv</span>}</h1>
-          {r.description && <p className="muted">{r.description}</p>}
+      <a className="back" href="#/routines"><Icon name="back" size={18} /> Routines</a>
+
+      <header className={`detail-hero tint-${actionTint(first)} ${r.active ? 'on-tint' : 'paused'}`}>
+        <span className="hero-icon" aria-hidden="true"><Icon name={actionGlyph(first)} size={36} /></span>
+        <div className="grow">
+          <h1>{r.name}</h1>
+          {r.description && <p>{r.description}</p>}
         </div>
-        <div className="row">
+        <div className="hero-actions">
           <ActiveToggle routine={r} onChange={routine.reload} />
-          <button type="button" className="btn ghost" onClick={() => navigate(`/routines/${r.id}/edit`)}><Icon name="edit" size={16} /> Bearbeiten</button>
-          <button type="button" className="btn ghost danger" onClick={remove}><Icon name="trash" size={16} /> Löschen</button>
-          <button type="button" className="btn primary" disabled={!r.active} onClick={() => run(r)}><Icon name="play" size={16} /> Jetzt ausführen</button>
+          <button type="button" className="btn on-tint-soft" onClick={() => navigate(`/routines/${r.id}/edit`)}>
+            <Icon name="edit" size={16} /> Edit
+          </button>
+          <button type="button" className="btn on-tint-soft icon-only" disabled={duplicating} onClick={() => void duplicate()} aria-label="Duplicate routine" title="Duplicate">
+            <Icon name="copy" size={16} />
+          </button>
+          <button type="button" className="btn on-tint-soft icon-only" onClick={() => setConfirmDelete(true)} aria-label="Delete routine" title="Delete">
+            <Icon name="trash" size={16} />
+          </button>
+          {r.active && (
+            <button type="button" className="btn on-tint large" disabled={run.running} onClick={() => (r.webhookPath ? openTest() : void run(r))}>
+              {run.running ? <span className="spinner" /> : <Icon name="play" size={16} />} {runLabel(r)}
+            </button>
+          )}
         </div>
       </header>
 
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Delete "${r.name}"?`}
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => void remove()}
+      >
+        <p>The routine and its history will be removed permanently. To stop it for a while, pause it instead.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={testBody !== null}
+        title="Send a test event"
+        confirmLabel="Send"
+        onCancel={() => setTestBody(null)}
+        onConfirm={() => void sendTest()}
+      >
+        <label className="field">
+          <span>JSON body – steps read it as {'{{trigger.body.…}}'}</span>
+          <textarea className={`mono ${testError ? 'invalid' : ''}`} rows={8} value={testBody ?? ''} spellCheck={false}
+            aria-invalid={testError ? true : undefined} onChange={(event) => { setTestBody(event.target.value); setTestError(undefined); }} />
+          {testError && <small className="field-error">{testError}</small>}
+        </label>
+      </ConfirmDialog>
+
       <div className="facts">
-        <div><span>Auslöser</span><strong>{describeTrigger(r.trigger)}</strong>{r.trigger.type === 'schedule' && <code>{r.trigger.cron} · {r.trigger.timezone}</code>}</div>
-        <div><span>Nächster Lauf</span><strong>{r.active && r.nextRunAt ? relative(r.nextRunAt, now) : '–'}</strong>{r.nextRunAt && <small>{dateTime(r.nextRunAt)}</small>}</div>
-        <div><span>Version</span><strong>{r.version}</strong><small>geändert {relative(r.updatedAt, now)}</small></div>
+        {/* "when" is told once – here, as the first block of the flow below says it too */}
+        <div className="fact">
+          <span className="glyph tint-sky" aria-hidden="true"><Icon name={TRIGGER_ICONS[r.trigger.type]} size={18} /></span>
+          <span className="grow">
+            <span className="fact-label">{whenText(r)}</span>
+            <span className="fact-value">
+              {!r.active ? 'Paused' : r.nextRunAt ? relative(r.nextRunAt, now) : r.trigger.type === 'webhook' ? 'On each call' : r.trigger.type === 'manual' ? 'On demand' : '–'}
+            </span>
+            {r.active && r.nextRunAt && <span className="fact-sub">{dayClock(r.nextRunAt)}</span>}
+            {r.webhookPath && (
+              <span className="fact-sub webhook-line">
+                <code className="ellipsis">{webhookUrl(r.webhookPath)}</code>
+                <CopyButton value={webhookUrl(r.webhookPath)} what="webhook URL" />
+              </span>
+            )}
+          </span>
+        </div>
+        <div className="fact">
+          {last ? <StatusIcon status={last.status} size={32} /> : <span className="glyph tint-grey" aria-hidden="true"><Icon name="executions" size={18} /></span>}
+          <span>
+            <span className="fact-label">Last run</span>
+            <span className="fact-value">{last ? relative(last.createdAt, now) : 'Never'}</span>
+            {finished.length > 0 && <span className="fact-sub">{ok} of {finished.length} succeeded</span>}
+          </span>
+        </div>
       </div>
 
-      <Card title="Ablauf">
-        <StepFlow items={r.actions} />
-      </Card>
+      <div className="grid-2">
+        <Section id="story-title" title="Steps">
+          <ActionFlow actions={r.actions} />
+        </Section>
+        <Section id="runs-title" title="Runs" action={runs.length > 0 ? <a className="see-all" href="#/executions">All <Icon name="chevron" size={14} /></a> : undefined}>
+          {executions.loading ? <div className="card"><Skeleton lines={3} /></div> : runs.length === 0 ? (
+            <div className="card">
+              <Empty icon="executions" title="Never run"
+                action={r.active
+                  ? <button type="button" className="btn primary" disabled={run.running} onClick={() => (r.webhookPath ? openTest() : void run(r))}><Icon name="play" size={16} /> {runLabel(r)}</button>
+                  : <span className="muted small">Activate it to run it.</span>} />
+            </div>
+          ) : (
+            <>
+              {runs.length >= 5 && <div className="card"><RunHistory executions={runs} now={now} /></div>}
+              <ul className="list">
+                {runs.slice(0, 6).map((execution) => (
+                  <li key={execution.id}><ExecutionRow execution={execution} now={now} hideName /></li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Section>
+      </div>
 
-      <Card title="Ausführungen">
-        {executions.loading ? <Loading /> : executions.data?.length === 0 ? <Empty>Diese Routine wurde noch nie ausgeführt.</Empty> : (
-          <div className="rows">{executions.data?.map((execution) => <ExecutionRow key={execution.id} execution={execution} now={now} hideName />)}</div>
-        )}
-      </Card>
+      <details className="under-hood">
+        <summary>
+          <span className="glyph tint-grey" aria-hidden="true"><Icon name="stack" size={20} /></span>
+          <span className="grow">
+            <strong className="block">Technical details</strong>
+            <span className="muted small">{r.trigger.type === 'webhook' ? 'ID, webhook call, version, JSON' : r.trigger.type === 'schedule' ? 'ID, cron, version, JSON' : 'ID, version, JSON'}</span>
+          </span>
+          <Icon name="chevron" size={18} />
+        </summary>
+        <div className="under-hood-body">
+          <dl className="kv">
+            <dt>ID</dt><dd><code>{r.id}</code> <CopyButton value={r.id} what="ID" /></dd>
+            <dt>Trigger</dt><dd>{r.trigger.type === 'schedule' ? <code>{r.trigger.cron} · {r.trigger.timezone}</code> : <code>{r.trigger.type}</code>}</dd>
+            <dt>Version</dt><dd>{r.version} · Optimistic Locking</dd>
+            <dt>Updated</dt><dd>{relative(r.updatedAt, now)}</dd>
+            <dt>Created</dt><dd>{dateTime(r.createdAt)}</dd>
+          </dl>
+          {r.webhookPath && (
+            <div>
+              <h3>Call the webhook</h3>
+              {/* Idempotency-Key: a sender that retries still starts only one run */}
+              <div className="command">
+                <code>{`curl -X POST ${webhookUrl(r.webhookPath)} -H 'content-type: application/json' -H "idempotency-key: $(uuidgen)" -d '{"hello":"world"}'`}</code>
+                <CopyButton value={`curl -X POST ${webhookUrl(r.webhookPath)} -H 'content-type: application/json' -H "idempotency-key: $(uuidgen)" -d '{"hello":"world"}'`} what="command" />
+              </div>
+            </div>
+          )}
+          <JsonBlock value={{ trigger: r.trigger, actions: r.actions }} />
+        </div>
+      </details>
     </div>
   );
 }

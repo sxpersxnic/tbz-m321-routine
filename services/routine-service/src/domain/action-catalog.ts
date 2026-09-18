@@ -13,33 +13,33 @@ export interface ActionTypeInfo {
 export const ACTION_TYPES: readonly ActionTypeInfo[] = [
   {
     type: 'weather.get',
-    description: 'Aktuelles Wetter bei einem externen Dienst abrufen',
+    description: 'Get the current weather from an external service',
     requiredParams: ['city'],
-    example: { city: 'Zürich' },
+    example: { city: 'Zurich' },
   },
   {
     type: 'http.request',
-    description: 'HTTP-Anfrage an einen externen Dienst oder Webhook senden',
+    description: 'Send an HTTP request to an external service or webhook',
     requiredParams: ['url'],
     example: { method: 'POST', url: 'http://mock-external:8090/webhooks/demo', body: { hello: 'world' } },
   },
   {
     type: 'summary.generate',
-    description: 'Zusammenfassung aus Ergebnissen früherer Aktionen erzeugen',
+    description: 'Build a summary from the results of earlier actions',
     requiredParams: ['title'],
-    example: { title: 'Weekly Review', sections: { Wetter: '{{actions.weather.summary}}' } },
+    example: { title: 'Weekly Review', sections: { Weather: '{{actions.weather.summary}}' } },
   },
   {
     type: 'task.create',
-    description: 'Aufgabe im Task-System erstellen',
+    description: 'Create a task in the task system',
     requiredParams: ['title'],
-    example: { title: 'Wochenrückblick schreiben', dueInDays: 2, priority: 'high' },
+    example: { title: 'Write weekly review', dueInDays: 2, priority: 'high' },
   },
   {
     type: 'notification.send',
-    description: 'Benachrichtigung an den Benutzer senden',
+    description: 'Send a notification to the user',
     requiredParams: ['title'],
-    example: { title: 'Guten Morgen', body: '{{actions.weather.summary}}' },
+    example: { title: 'Good morning', body: '{{actions.weather.summary}}' },
   },
 ];
 

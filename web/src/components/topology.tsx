@@ -75,8 +75,9 @@ export function Topology({ status }: { status: SystemStatus | undefined }) {
   const dlq = queues.filter((queue) => queue.name.endsWith('.dlq')).reduce((total, queue) => total + queue.ready, 0);
 
   return (
-    <div className="topology-wrap">
-      <svg className="topology" viewBox="0 0 1290 460" role="img" aria-label="Systemtopologie mit Queue-Tiefen">
+    // focusable: a horizontally scrolling region is unreachable by keyboard otherwise
+    <section className="topology-wrap" tabIndex={0} aria-label="Topology diagram, scrolls horizontally">
+      <svg className="topology" viewBox="0 0 1290 460" role="img" aria-label="System topology with queue depths">
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" className="arrow-head" />
@@ -102,9 +103,10 @@ export function Topology({ status }: { status: SystemStatus | undefined }) {
             <g key={edge.to} className={`queue-edge tone-${tone}`}>
               <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className={`edge async ${ready > 0 ? 'flowing' : ''}`} markerEnd="url(#arrow)" />
               <g transform={`translate(${mx}, ${my})`}>
-                <rect x={-54} y={-13} width={108} height={26} rx={13} className="edge-label" />
+                <rect x={-50} y={-13} width={100} height={26} rx={13} className="edge-label" />
                 <text textAnchor="middle" dy="4" className="edge-text">
-                  {ready} wartend · {consumers} C
+                  <title>{`${ready} Ready, ${consumers} Consumer`}</title>
+                  {ready} · {consumers}×
                 </text>
               </g>
             </g>
@@ -116,23 +118,27 @@ export function Topology({ status }: { status: SystemStatus | undefined }) {
           const label = node.id === 'integration-worker' && replicas > 0 ? `${node.label} ×${replicas}` : node.label;
           return (
             <g key={node.id} className={`node ${node.kind ?? 'service'} ${up ? 'up' : 'down'}`} transform={`translate(${node.x - W / 2}, ${node.y - H / 2})`}>
+              <title>{`${node.label}: ${up ? 'online' : 'offline'}`}</title>
               <rect width={W} height={H} rx={node.kind === 'broker' ? 25 : 10} />
-              <circle cx={16} cy={H / 2} r={5} className="node-dot" />
+              {/* a cross, not just a red dot: the state has to survive colour blindness */}
+              {up
+                ? <circle cx={16} cy={H / 2} r={5} className="node-dot" />
+                : <path d={`M 12 ${H / 2 - 4.5} l 9 9 M 21 ${H / 2 - 4.5} l -9 9`} className="node-down-mark" />}
               <text x={28} y={H / 2 + 4} className="node-label">{label}</text>
               {node.kind === 'broker' && dlq > 0 && (
-                <text x={W / 2} y={H + 18} textAnchor="middle" className="dlq-label">DLQ: {dlq} Nachricht(en)</text>
+                <text x={W / 2} y={H + 18} textAnchor="middle" className="dlq-label">DLQ: {dlq}</text>
               )}
             </g>
           );
         })}
       </svg>
       <div className="legend">
-        <span><i className="swatch http" /> synchron (HTTP)</span>
-        <span><i className="swatch async" /> asynchron (Queue, wartend · Consumer)</span>
-        <span><i className="swatch warn" /> Nachrichten warten</span>
-        <span><i className="swatch err" /> kein Consumer</span>
+        <span><i className="swatch http" /> HTTP</span>
+        <span><i className="swatch async" /> Queue (Ready · Consumer)</span>
+        <span><i className="swatch warn" /> Backlog</span>
+        <span><i className="swatch err" /> No consumer</span>
       </div>
-    </div>
+    </section>
   );
 }
 

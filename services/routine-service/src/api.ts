@@ -8,13 +8,16 @@ import type { ExecutionEngine } from './engine.ts';
 import {
   deleteRoutine,
   executionDto,
+  executionStats,
   getExecution,
   getRoutine,
   insertRoutine,
   listExecutionActions,
   listExecutions,
   listLog,
+  getRoutineByWebhookToken,
   listRoutines,
+  rotateWebhookToken,
   routineDto,
   setRoutineActive,
   updateRoutine,
@@ -38,7 +41,7 @@ const triggerSchema = {
   required: ['type'],
   additionalProperties: false,
   properties: {
-    type: { type: 'string', enum: ['manual', 'schedule'] },
+    type: { type: 'string', enum: ['manual', 'schedule', 'webhook'] },
     cron: { type: 'string', minLength: 1 },
     timezone: { type: 'string', minLength: 1 },
   },
@@ -77,6 +80,27 @@ const executionQuery = {
     status: { type: 'string', enum: ['PENDING', 'RUNNING', 'WAITING', 'COMPLETED', 'FAILED'] },
     limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
   },
+} as const;
+
+const triggerHeaders = {
+  type: 'object',
+  properties: { 'idempotency-key': { type: 'string', maxLength: 200 } },
+} as const;
+
+const hookParams = {
+  type: 'object',
+  required: ['token'],
+  properties: { token: { type: 'string', pattern: '^[A-Za-z0-9_-]{20,100}$' } },
+} as const;
+
+/** A webhook sends a JSON object (or nothing); anything else would not be addressable as {{trigger.body.x}}. */
+const hookBody = { anyOf: [{ type: 'object' }, { type: 'null' }] } as const;
+
+const WEBHOOK_BODY_LIMIT = 64 * 1024;
+
+const statsQuery = {
+  type: 'object',
+  properties: { hours: { type: 'integer', minimum: 1, maximum: 720, default: 24 } },
 } as const;
 
 type RoutineBody = RoutineInput & { version?: number };
@@ -170,30 +194,64 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
     );
   }
 
+  app.post<{ Params: { routineId: string } }>(
+    '/api/v1/routines/:routineId/webhook/rotate',
+    { schema: { params: routineParams } },
+    async (request) => {
+      const user = requireUser(request);
+      const updated = await withTransaction(pool, async (client) => {
+        const routine = await getRoutine(client, user.id, request.params.routineId, true);
+        if (!routine) throw notFound('Routine');
+        if (routine.trigger.type !== 'webhook') throw conflict('Routine is not triggered by a webhook');
+        return rotateWebhookToken(client, routine.id);
+      });
+      request.log.info({ routineId: updated.id }, 'webhook token rotated');
+      return routineDto(updated);
+    },
+  );
+
   // ------------------------------------------------------------ executions
 
-  app.post<{ Params: { routineId: string } }>(
+  app.post<{ Params: { routineId: string }; Headers: { 'idempotency-key'?: string } }>(
     '/api/v1/routines/:routineId/executions',
-    { schema: { params: routineParams } },
+    { schema: { params: routineParams, headers: triggerHeaders } },
     async (request, reply) => {
       const user = requireUser(request);
-      const idempotencyKey = request.headers['idempotency-key'];
+      const idempotencyKey = request.headers['idempotency-key'] || undefined;
       const result = await withTransaction(pool, async (client) => {
+        // The row lock serialises concurrent triggers of this routine, retries included.
         const routine = await getRoutine(client, user.id, request.params.routineId, true);
         if (!routine) throw notFound('Routine');
         if (!routine.active) throw conflict('Routine is not active – activate it before triggering');
-        return withContext({ routineId: routine.id }, () =>
-          engine.createExecution(client, routine, {
-            type: 'manual',
-            idempotencyKey: typeof idempotencyKey === 'string' && idempotencyKey ? idempotencyKey.slice(0, 200) : undefined,
-          }),
-        );
+        return withContext({ routineId: routine.id }, () => engine.createExecution(client, routine, { type: 'manual', idempotencyKey }));
       });
       if (!result) throw conflict('Execution could not be created');
       return reply
         .status(result.created ? 202 : 200)
         .header('location', `/api/v1/executions/${result.execution.id}`)
         .send(executionDto(result.execution));
+    },
+  );
+
+  // External systems start a routine here. No user token: the unguessable path segment is the
+  // credential, and an unknown token and a non-webhook routine look the same (404). Senders that
+  // retry (most webhook providers do) pass an Idempotency-Key and still start only one run.
+  app.post<{ Params: { token: string }; Headers: { 'idempotency-key'?: string }; Body: Record<string, unknown> | null }>(
+    '/api/v1/hooks/:token',
+    { bodyLimit: WEBHOOK_BODY_LIMIT, schema: { params: hookParams, headers: triggerHeaders, body: hookBody } },
+    async (request, reply) => {
+      const idempotencyKey = request.headers['idempotency-key'] || undefined;
+      const result = await withTransaction(pool, async (client) => {
+        const routine = await getRoutineByWebhookToken(client, request.params.token);
+        if (!routine) throw notFound('Webhook');
+        if (!routine.active) throw conflict('Routine is not active');
+        return withContext({ routineId: routine.id }, () =>
+          engine.createExecution(client, routine, { type: 'webhook', idempotencyKey, payload: request.body ?? {} }),
+        );
+      });
+      if (!result) throw conflict('Execution could not be created');
+      // deliberately small: the caller is not the owner and learns nothing about the routine
+      return reply.status(result.created ? 202 : 200).send({ executionId: result.execution.id, status: result.execution.status });
     },
   );
 
@@ -216,6 +274,12 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
       return { items: (await listExecutions(pool, user.id, request.query)).map((row) => executionDto(row)) };
     },
   );
+
+  app.get<{ Querystring: { hours: number } }>('/api/v1/executions/stats', { schema: { querystring: statsQuery } }, async (request) => {
+    const user = requireUser(request);
+    const since = new Date(Date.now() - request.query.hours * 3_600_000);
+    return { since, ...(await executionStats(pool, user.id, since)) };
+  });
 
   app.get<{ Params: { executionId: string } }>(
     '/api/v1/executions/:executionId',

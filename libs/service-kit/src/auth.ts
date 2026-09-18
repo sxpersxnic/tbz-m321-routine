@@ -47,12 +47,16 @@ export function bearerToken(request: FastifyRequest): string | undefined {
   return header.slice('Bearer '.length).trim();
 }
 
-/** Registers `request.user` and a hook that rejects unauthenticated requests on the given prefixes. */
-export function installAuth(app: FastifyInstance, verifier: TokenVerifier, protectedPrefixes: string[]): void {
+/**
+ * Registers `request.user` and a hook that rejects unauthenticated requests on the given prefixes.
+ * `publicPrefixes` carves exceptions out of them – routes that authenticate by other means (webhook tokens).
+ */
+export function installAuth(app: FastifyInstance, verifier: TokenVerifier, protectedPrefixes: string[], publicPrefixes: string[] = []): void {
   app.decorateRequest('user', null);
   app.addHook('preHandler', async (request) => {
     const path = request.url.split('?')[0];
     if (!protectedPrefixes.some((prefix) => path.startsWith(prefix))) return;
+    if (publicPrefixes.some((prefix) => path.startsWith(prefix))) return;
     const token = bearerToken(request);
     if (!token) throw new HttpError(401, 'unauthorized', 'Missing bearer token');
     try {

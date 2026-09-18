@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
+import type { TriggerType } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import {
   actionRequested,
@@ -36,10 +37,18 @@ export interface EngineOptions {
 }
 
 export interface TriggerRequest {
-  type: 'manual' | 'schedule';
+  type: TriggerType;
   scheduledFor?: Date;
   idempotencyKey?: string;
+  /** Body of a webhook call. */
+  payload?: Record<string, unknown>;
 }
+
+const TRIGGER_LOG: Record<TriggerType, (trigger: TriggerRequest) => string> = {
+  manual: () => 'Started manually',
+  schedule: (trigger) => `Started by schedule (${trigger.scheduledFor?.toISOString()})`,
+  webhook: () => 'Started by webhook',
+};
 
 /**
  * Orchestrates executions. Every state transition happens in one database
@@ -65,7 +74,7 @@ export class ExecutionEngine {
     trigger: TriggerRequest,
   ): Promise<{ execution: ExecutionRow; created: boolean } | null> {
     if (trigger.idempotencyKey) {
-      const existing = await findExecutionByIdempotencyKey(client, routine.owner_id, trigger.idempotencyKey);
+      const existing = await findExecutionByIdempotencyKey(client, routine.id, trigger.idempotencyKey);
       if (existing) return { execution: existing, created: false };
     }
 
@@ -76,10 +85,19 @@ export class ExecutionEngine {
       trigger: trigger.type,
       scheduledFor: trigger.scheduledFor ?? null,
       idempotencyKey: trigger.idempotencyKey ?? null,
+      payload: trigger.payload ?? null,
       correlationId,
       traceId: currentTraceId(),
     });
-    if (!execution) return null; // this scheduled slot was already taken
+    if (!execution) {
+      // Lost an insert race: a concurrent request with the same key won (the caller's routine
+      // lock normally prevents this) – answer with its execution, like a sequential retry.
+      if (trigger.idempotencyKey) {
+        const existing = await findExecutionByIdempotencyKey(client, routine.id, trigger.idempotencyKey);
+        if (existing) return { execution: existing, created: false };
+      }
+      return null; // this scheduled slot was already taken
+    }
 
     await insertExecutionActions(
       client,
@@ -90,7 +108,7 @@ export class ExecutionEngine {
       client,
       execution.id,
       'TRIGGERED',
-      trigger.type === 'manual' ? 'Manuell gestartet' : `Durch Zeitplan gestartet (${trigger.scheduledFor?.toISOString()})`,
+      TRIGGER_LOG[trigger.type](trigger),
     );
     await enqueue(
       client,
@@ -120,7 +138,7 @@ export class ExecutionEngine {
         return;
       }
       await updateExecutionStatus(client, execution.id, 'RUNNING');
-      await appendLog(client, execution.id, 'STARTED', 'Ausführung gestartet');
+      await appendLog(client, execution.id, 'STARTED', 'Execution started');
       execution.status = 'RUNNING';
       execution.started_at = new Date();
       this.#logger.info({ executionId }, 'execution started');
@@ -150,13 +168,13 @@ export class ExecutionEngine {
       switch (result.kind) {
         case 'completed':
           await markActionCompleted(client, action.id, result.output, result.processedBy);
-          await appendLog(client, execution.id, 'ACTION_COMPLETED', `${action.type} erledigt durch ${result.processedBy}`, action.key);
+          await appendLog(client, execution.id, 'ACTION_COMPLETED', `${action.type} completed by ${result.processedBy}`, action.key);
           Object.assign(action, { status: 'COMPLETED', output: result.output, processed_by: result.processedBy });
           this.#logger.info({ actionKey: action.key, processedBy: result.processedBy }, 'action completed');
           break;
         case 'failed':
           await markActionFailed(client, action.id, result.error, result.processedBy, result.attempts);
-          await appendLog(client, execution.id, 'ACTION_FAILED', `Fehlgeschlagen nach ${result.attempts} Versuch(en): ${result.error}`, action.key);
+          await appendLog(client, execution.id, 'ACTION_FAILED', `Failed after ${result.attempts} attempt(s): ${result.error}`, action.key);
           Object.assign(action, { status: 'FAILED', error: result.error });
           this.#logger.warn({ actionKey: action.key, err: result.error }, 'action failed');
           break;
@@ -166,7 +184,7 @@ export class ExecutionEngine {
             client,
             execution.id,
             'ACTION_RETRY',
-            `Versuch ${result.attempt} fehlgeschlagen (${result.error}) – neuer Versuch in ${result.nextAttemptInMs / 1000} s`,
+            `Attempt ${result.attempt} failed (${result.error}) – retrying in ${result.nextAttemptInMs / 1000} s`,
             action.key,
           );
           Object.assign(action, { status: 'RETRYING' });
@@ -227,7 +245,7 @@ export class ExecutionEngine {
                 correlationId: execution.correlation_id,
               }),
             );
-            await appendLog(client, execution.id, 'ACTION_DISPATCHED', `${action.type} an Broker übergeben`, action.key);
+            await appendLog(client, execution.id, 'ACTION_DISPATCHED', `${action.type} handed to the broker`, action.key);
             Object.assign(action, { status: 'DISPATCHED', dispatched_at: new Date() });
           }
           await updateExecutionStatus(client, execution.id, 'RUNNING', { currentStep: decision.step });
@@ -237,7 +255,7 @@ export class ExecutionEngine {
 
         case 'complete': {
           await updateExecutionStatus(client, execution.id, 'COMPLETED');
-          await appendLog(client, execution.id, 'COMPLETED', 'Alle Aktionen erfolgreich abgeschlossen');
+          await appendLog(client, execution.id, 'COMPLETED', 'All actions completed successfully');
           const durationMs = Date.now() - (execution.started_at ?? execution.created_at).getTime();
           await enqueue(
             client,
@@ -259,7 +277,7 @@ export class ExecutionEngine {
 
         case 'fail': {
           const failed = actions.find((action) => action.key === decision.failedKey);
-          const reason = `Aktion "${decision.failedKey}" fehlgeschlagen: ${failed?.error ?? 'unbekannter Fehler'}`;
+          const reason = `Action "${decision.failedKey}" failed: ${failed?.error ?? 'unknown error'}`;
           await skipPendingActions(client, execution.id);
           await updateExecutionStatus(client, execution.id, 'FAILED', { error: reason });
           await appendLog(client, execution.id, 'FAILED', reason);
@@ -291,7 +309,7 @@ export class ExecutionEngine {
               client,
               execution.id,
               status,
-              status === 'WAITING' ? 'Wartet auf erneuten Versuch einer Aktion' : 'Verarbeitung läuft wieder',
+              status === 'WAITING' ? 'Waiting for an action to be retried' : 'Processing resumed',
             );
           }
           return;
@@ -308,6 +326,7 @@ export class ExecutionEngine {
         trigger: execution.trigger_type,
         startedAt: (execution.started_at ?? new Date()).toISOString(),
       },
+      trigger: { type: execution.trigger_type, body: execution.trigger_payload ?? {} },
       actions: Object.fromEntries(
         actions.filter((action) => action.status === 'COMPLETED').map((action) => [action.key, action.output ?? {}]),
       ),

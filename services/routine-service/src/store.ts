@@ -1,5 +1,6 @@
 import type { Queryable } from '@routine/service-kit';
-import type { ActionDefinition, RoutineDefinition, TriggerDefinition } from './domain/definition.ts';
+import { randomBytes } from 'node:crypto';
+import type { ActionDefinition, RoutineDefinition, TriggerDefinition, TriggerType } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 
 // ---------------------------------------------------------------- rows
@@ -13,6 +14,7 @@ export interface RoutineRow {
   actions: ActionDefinition[];
   active: boolean;
   next_run_at: Date | null;
+  webhook_token: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -23,8 +25,9 @@ export interface ExecutionRow {
   routine_id: string;
   owner_id: string;
   routine_name: string;
-  trigger_type: 'manual' | 'schedule';
+  trigger_type: TriggerType;
   scheduled_for: Date | null;
+  trigger_payload: Record<string, unknown> | null;
   status: ExecutionStatus;
   current_step: number;
   correlation_id: string;
@@ -61,6 +64,14 @@ export interface ExecutionLogRow {
 
 // ---------------------------------------------------------------- routines
 
+/** 32 random bytes – the token is the webhook's only credential. */
+export const newWebhookToken = () => randomBytes(32).toString('base64url');
+
+export const webhookPath = (token: string) => `/api/v1/hooks/${token}`;
+
+/** A webhook routine needs a token; any other routine keeps whatever it had (so switching back keeps the URL). */
+const tokenFor = (definition: RoutineDefinition) => (definition.trigger.type === 'webhook' ? newWebhookToken() : null);
+
 export async function listRoutines(db: Queryable, ownerId: string): Promise<RoutineRow[]> {
   const { rows } = await db.query<RoutineRow>('SELECT * FROM routines WHERE owner_id = $1 ORDER BY created_at DESC', [ownerId]);
   return rows;
@@ -76,9 +87,9 @@ export async function getRoutine(db: Queryable, ownerId: string, id: string, for
 
 export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
-    `INSERT INTO routines (id, owner_id, name, description, trigger, actions)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [id, ownerId, definition.name, definition.description, JSON.stringify(definition.trigger), JSON.stringify(definition.actions)],
+    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [id, ownerId, definition.name, definition.description, JSON.stringify(definition.trigger), JSON.stringify(definition.actions), tokenFor(definition)],
   );
   return rows[0];
 }
@@ -92,9 +103,18 @@ export async function updateRoutine(
   const { rows } = await db.query<RoutineRow>(
     `UPDATE routines
         SET name = $2, description = $3, trigger = $4, actions = $5, next_run_at = $6,
+            webhook_token = COALESCE(webhook_token, $7),
             version = version + 1, updated_at = now()
       WHERE id = $1 RETURNING *`,
-    [routine.id, definition.name, definition.description, JSON.stringify(definition.trigger), JSON.stringify(definition.actions), nextRunAt],
+    [
+      routine.id,
+      definition.name,
+      definition.description,
+      JSON.stringify(definition.trigger),
+      JSON.stringify(definition.actions),
+      nextRunAt,
+      tokenFor(definition),
+    ],
   );
   return rows[0];
 }
@@ -103,6 +123,24 @@ export async function setRoutineActive(db: Queryable, id: string, active: boolea
   const { rows } = await db.query<RoutineRow>(
     'UPDATE routines SET active = $2, next_run_at = $3, version = version + 1, updated_at = now() WHERE id = $1 RETURNING *',
     [id, active, nextRunAt],
+  );
+  return rows[0];
+}
+
+/** The routine behind a webhook URL – regardless of owner, the token is the credential. Locked for the trigger. */
+export async function getRoutineByWebhookToken(db: Queryable, token: string): Promise<RoutineRow | null> {
+  const { rows } = await db.query<RoutineRow>(
+    `SELECT * FROM routines WHERE webhook_token = $1 AND trigger->>'type' = 'webhook' FOR UPDATE`,
+    [token],
+  );
+  return rows[0] ?? null;
+}
+
+/** Invalidates the old URL at once – for a leaked link. */
+export async function rotateWebhookToken(db: Queryable, id: string): Promise<RoutineRow> {
+  const { rows } = await db.query<RoutineRow>(
+    'UPDATE routines SET webhook_token = $2, version = version + 1, updated_at = now() WHERE id = $1 RETURNING *',
+    [id, newWebhookToken()],
   );
   return rows[0];
 }
@@ -136,16 +174,17 @@ export async function insertExecution(
   execution: {
     id: string;
     routine: RoutineRow;
-    trigger: 'manual' | 'schedule';
+    trigger: TriggerType;
     scheduledFor: Date | null;
     idempotencyKey: string | null;
+    payload: Record<string, unknown> | null;
     correlationId: string;
     traceId: string | null;
   },
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
-    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9)
+    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -158,6 +197,7 @@ export async function insertExecution(
       execution.idempotencyKey,
       execution.correlationId,
       execution.traceId,
+      execution.payload === null ? null : JSON.stringify(execution.payload),
     ],
   );
   return rows[0] ?? null;
@@ -177,8 +217,8 @@ export async function insertExecutionActions(
   }
 }
 
-export async function findExecutionByIdempotencyKey(db: Queryable, ownerId: string, key: string): Promise<ExecutionRow | null> {
-  const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE owner_id = $1 AND idempotency_key = $2', [ownerId, key]);
+export async function findExecutionByIdempotencyKey(db: Queryable, routineId: string, key: string): Promise<ExecutionRow | null> {
+  const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE routine_id = $1 AND idempotency_key = $2', [routineId, key]);
   return rows[0] ?? null;
 }
 
@@ -208,6 +248,27 @@ export async function listExecutions(
     [ownerId, filter.routineId ?? null, filter.status ?? null, filter.limit],
   );
   return rows;
+}
+
+const IN_FLIGHT_STATUSES: ExecutionStatus[] = ['PENDING', 'RUNNING', 'WAITING'];
+
+/** Counts per status: executions created since `since`, plus all still in flight (however old). */
+export async function executionStats(
+  db: Queryable,
+  ownerId: string,
+  since: Date,
+): Promise<{ byStatus: Partial<Record<ExecutionStatus, number>>; inFlight: Partial<Record<ExecutionStatus, number>> }> {
+  const { rows } = await db.query<{ status: ExecutionStatus; recent: number; total: number }>(
+    `SELECT status, count(*) FILTER (WHERE created_at >= $2)::int AS recent, count(*)::int AS total
+       FROM executions
+      WHERE owner_id = $1 AND (created_at >= $2 OR status = ANY($3))
+      GROUP BY status`,
+    [ownerId, since, IN_FLIGHT_STATUSES],
+  );
+  return {
+    byStatus: Object.fromEntries(rows.filter((row) => row.recent > 0).map((row) => [row.status, row.recent])),
+    inFlight: Object.fromEntries(rows.filter((row) => IN_FLIGHT_STATUSES.includes(row.status)).map((row) => [row.status, row.total])),
+  };
 }
 
 export async function updateExecutionStatus(
@@ -313,7 +374,7 @@ export async function markStaleExecutionsWaiting(db: Queryable, waitingAfterMs: 
         RETURNING e.id
      )
      INSERT INTO execution_log (execution_id, kind, message)
-     SELECT id, 'WAITING', 'Keine Rückmeldung eines Workers – Nachricht wartet im Broker' FROM stale
+     SELECT id, 'WAITING', 'No response from a worker – message is waiting in the broker' FROM stale
      RETURNING execution_id`,
     [waitingAfterMs],
   );
@@ -331,6 +392,8 @@ export function routineDto(row: RoutineRow) {
     actions: row.actions,
     active: row.active,
     nextRunAt: row.next_run_at,
+    // only the owner ever gets a routine DTO, and only a webhook routine has a usable URL
+    webhookPath: row.trigger.type === 'webhook' && row.webhook_token ? webhookPath(row.webhook_token) : null,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -352,6 +415,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({
         id: action.id,

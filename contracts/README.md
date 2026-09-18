@@ -1,29 +1,28 @@
-# Verträge (Contracts)
+# Contracts
 
-Alle Schnittstellen zwischen den Services sind hier – unabhängig vom Code der
-Services – formal beschrieben. Services teilen **keine** Domain-Klassen: jeder
-Service übersetzt Nachrichten in seinem eigenen `src/messages.ts` in sein
-internes Modell.
+All interfaces between the services are described formally here – independent of
+the services' code. Services share **no** domain classes: each service translates
+messages into its own internal model in its own `src/messages.ts`.
 
-| Datei | Inhalt |
+| File | Contents |
 | --- | --- |
-| `openapi/identity-api.yaml` | Registrierung, Login, JWKS (synchron) |
-| `openapi/routine-api.yaml` | Routinen, Auslösen, Ausführungsstatus (synchron) |
-| `openapi/task-api.yaml` | Aufgaben (synchron) |
-| `openapi/notification-api.yaml` | Posteingang (synchron) |
-| `asyncapi/routine-messaging.yaml` | Exchanges, Routing-Keys, Producer/Consumer (asynchron) |
-| `schemas/*.schema.json` | JSON Schemas aller Nachrichten inkl. Envelope und beider Versionen von `ExecutionCompleted` |
-| `validate.ts` | Helfer für Contract-Tests (nur Tests, nie zur Laufzeit) |
+| `openapi/identity-api.yaml` | Registration, login, JWKS (synchronous) |
+| `openapi/routine-api.yaml` | Routines, triggering, execution status (synchronous) |
+| `openapi/task-api.yaml` | Tasks (synchronous) |
+| `openapi/notification-api.yaml` | Inbox (synchronous) |
+| `asyncapi/routine-messaging.yaml` | Exchanges, routing keys, producers/consumers (asynchronous) |
+| `schemas/*.schema.json` | JSON Schemas of all messages, including the envelope and both versions of `ExecutionCompleted` |
+| `validate.ts` | Helper for contract tests (tests only, never at runtime) |
 
-## Versionierung
+## Versioning
 
-* **HTTP**: Pfad-Version `/api/v1`. Additive Änderungen bleiben in v1, Breaking Changes erhalten `/api/v2` parallel zu v1.
-* **Events**: Feld `version` im Envelope. Consumer sind *tolerant readers* (unbekannte Felder werden ignoriert).
-  Felder werden nie direkt entfernt, sondern per **Expand and Contract** – siehe `ExecutionCompleted` v1 → v2 und
+* **HTTP**: path version `/api/v1`. Additive changes stay in v1; breaking changes get `/api/v2` alongside v1.
+* **Events**: `version` field in the envelope. Consumers are *tolerant readers* (unknown fields are ignored).
+  Fields are never removed directly but via **expand and contract** – see `ExecutionCompleted` v1 → v2 and
   `scripts/demo.sh evolution`.
 
-## Contract-Tests
+## Contract tests
 
-`npm test` prüft, dass jede produzierte Nachricht ihrem Schema entspricht
-(`services/*/test/contracts.test.ts`). Damit fällt ein versehentlich
-inkompatibler Producer auf, bevor er deployt wird.
+`npm test` checks that every produced message matches its schema
+(`services/*/test/contracts.test.ts`). An accidentally incompatible producer is
+caught before it is deployed.

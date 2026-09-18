@@ -26,14 +26,17 @@ const routes: Array<{ prefix: string; upstream: string }> = [
   { prefix: '/api/v1/routines', upstream: upstreams.routine },
   { prefix: '/api/v1/executions', upstream: upstreams.routine },
   { prefix: '/api/v1/action-types', upstream: upstreams.routine },
+  // public: the secret token in the path is the credential, checked by the routine service
+  { prefix: '/api/v1/hooks', upstream: upstreams.routine },
   { prefix: '/api/v1/tasks', upstream: upstreams.task },
   { prefix: '/api/v1/notifications', upstream: upstreams.notification },
 ];
 
-/** Everything except login/register requires a valid token. */
+/** Everything except login/register and webhook calls requires a valid token. */
+const PUBLIC_PREFIXES = new Set(['/api/v1/auth', '/api/v1/hooks']);
 const PROTECTED_PREFIXES = [
   '/api/v1/auth/me',
-  ...routes.map((route) => route.prefix).filter((prefix) => prefix !== '/api/v1/auth'),
+  ...routes.map((route) => route.prefix).filter((prefix) => !PUBLIC_PREFIXES.has(prefix)),
   '/api/v1/system',
 ];
 

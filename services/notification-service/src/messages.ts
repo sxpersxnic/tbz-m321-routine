@@ -83,7 +83,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
     return {
       ownerId,
       executionId,
-      title: `Routine "${routineName}" fehlgeschlagen`,
+      title: `Routine "${routineName}" failed`,
       body: text(data.reason) ?? '',
       priority: 'high',
       category: 'execution',

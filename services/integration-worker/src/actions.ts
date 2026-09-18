@@ -11,17 +11,58 @@ export interface ActionEnvironment {
 export type Output = Record<string, unknown>;
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+/** Larger answers are cut off instead of being buffered – a routine must not exhaust the worker's memory. */
+const MAX_BODY_BYTES = 256 * 1024;
+const MAX_TEXT_OUTPUT = 2_000;
 
-async function call(url: URL, init: RequestInit, environment: ActionEnvironment): Promise<Response> {
-  try {
-    return await fetch(url, {
-      ...init,
-      // The actionId doubles as idempotency key for the external system.
-      headers: { 'idempotency-key': environment.actionId, ...(init.headers as Record<string, string>) },
-      signal: AbortSignal.timeout(environment.timeoutMs),
-    });
-  } catch (error) {
-    throw new TransientError(`request to ${url.host} failed: ${error instanceof Error ? error.message : String(error)}`);
+interface Outgoing {
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+function assertAllowedTarget(url: URL, environment: ActionEnvironment) {
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new PermanentError('only http(s) URLs are allowed');
+  if (!environment.allowedHosts.includes('*') && !environment.allowedHosts.includes(url.hostname)) {
+    throw new PermanentError(`host "${url.hostname}" is not on the allow-list`);
+  }
+}
+
+/**
+ * fetch with manually followed redirects: fetch would follow them on its own, so an
+ * allowed host could bounce the worker to an internal one (SSRF). Every hop is
+ * therefore checked against the allow-list like the original URL.
+ */
+async function call(url: URL, outgoing: Outgoing, environment: ActionEnvironment): Promise<Response> {
+  const signal = AbortSignal.timeout(environment.timeoutMs);
+  // The actionId doubles as idempotency key for the external system – set last so params cannot override it.
+  let request: Outgoing = { ...outgoing, headers: { ...outgoing.headers, 'idempotency-key': environment.actionId } };
+  let target = url;
+  for (let redirects = 0; ; redirects++) {
+    let response: Response;
+    try {
+      response = await fetch(target, { ...request, redirect: 'manual', signal });
+    } catch (error) {
+      throw new TransientError(`request to ${target.host} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const location = response.headers.get('location');
+    if (!REDIRECT_STATUSES.has(response.status) || !location) return response;
+    await response.body?.cancel();
+    if (redirects === MAX_REDIRECTS) throw new PermanentError(`${target.host} redirected more than ${MAX_REDIRECTS} times`);
+
+    const next = new URL(location, target);
+    assertAllowedTarget(next, environment);
+    // Same rules fetch applies when it follows redirects itself:
+    if (next.origin !== target.origin) {
+      const { authorization: _dropped, ...headers } = request.headers;
+      request = { ...request, headers };
+    }
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && request.method === 'POST')) {
+      request = { ...request, method: 'GET', body: undefined };
+    }
+    target = next;
   }
 }
 
@@ -33,16 +74,34 @@ function assertSuccess(response: Response, what: string) {
   throw new PermanentError(message);
 }
 
+/** Streams the body and stops after MAX_BODY_BYTES instead of buffering whatever the server sends. */
+async function readLimited(response: Response): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) return { text: '', truncated: false };
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return { text: Buffer.concat(chunks).toString('utf8'), truncated: false };
+    chunks.push(value);
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      return { text: Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES).toString('utf8'), truncated: true };
+    }
+  }
+}
+
 async function readBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if ((response.headers.get('content-type') ?? '').includes('json')) {
+  const { text, truncated } = await readLimited(response);
+  if (!truncated && (response.headers.get('content-type') ?? '').includes('json')) {
     try {
       return JSON.parse(text);
     } catch {
       // fall through to text
     }
   }
-  return text.length > 2_000 ? `${text.slice(0, 2_000)}…` : text;
+  return text.length > MAX_TEXT_OUTPUT ? `${text.slice(0, MAX_TEXT_OUTPUT)}…` : text;
 }
 
 async function getWeather(params: Record<string, unknown>, environment: ActionEnvironment): Promise<Output> {
@@ -50,7 +109,7 @@ async function getWeather(params: Record<string, unknown>, environment: ActionEn
   if (typeof city !== 'string' || city.trim() === '') throw new PermanentError('param "city" is required');
   const url = new URL('/weather', environment.externalApiUrl);
   url.searchParams.set('city', city);
-  const response = await call(url, { method: 'GET' }, environment);
+  const response = await call(url, { method: 'GET', headers: {} }, environment);
   assertSuccess(response, 'weather service');
   const body = (await response.json()) as { city: string; temperatureC: number; condition: string };
   return {
@@ -68,10 +127,7 @@ async function httpRequest(params: Record<string, unknown>, environment: ActionE
   } catch {
     throw new PermanentError('param "url" is not a valid URL');
   }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new PermanentError('only http(s) URLs are allowed');
-  if (!environment.allowedHosts.includes('*') && !environment.allowedHosts.includes(url.hostname)) {
-    throw new PermanentError(`host "${url.hostname}" is not on the allow-list`);
-  }
+  assertAllowedTarget(url, environment);
   const method = String(params.method ?? 'GET').toUpperCase();
   if (!METHODS.has(method)) throw new PermanentError(`unsupported method ${method}`);
 

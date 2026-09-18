@@ -1,157 +1,157 @@
-# Routine – Verteiltes Automatisierungssystem
+# Routine – Distributed Automation System
 
-## 1. Projektübersicht
+## 1. Project overview
 
-**Projektname:** Routine
-**Projektart:** Verteiltes System / Microservices
-**Modul:** M321 – Verteilte Systeme
-**Projektteam:** 3–4 Personen
-**Geplanter Aufwand:** ca. 20 Lektionen pro Person
-
----
-
-## 2. Projektidee
-
-Routine ist eine Plattform, mit der Benutzer wiederkehrende Abläufe definieren und automatisiert ausführen lassen können.
-
-Eine Routine besteht aus einem Auslöser und mehreren Aktionen. Der Auslöser kann beispielsweise ein Zeitplan oder eine manuelle Ausführung sein. Die einzelnen Aktionen werden anschliessend von spezialisierten Systemkomponenten verarbeitet.
-
-Ein Beispiel:
-
-> Jeden Montagmorgen soll eine Routine gestartet werden, welche Informationen abruft, eine Aufgabe erstellt und anschliessend eine Benachrichtigung versendet.
-
-Für den Benutzer erscheint dies als ein einziger Ablauf. Intern wird die Verarbeitung jedoch auf mehrere autonome Services verteilt.
-
-Der Schwerpunkt des Projekts liegt deshalb nicht auf einer umfangreichen Benutzeroberfläche, sondern auf der Umsetzung eines funktionierenden verteilten Systems mit klaren Schnittstellen, asynchroner Kommunikation und Massnahmen für Hochverfügbarkeit.
+**Project name:** Routine
+**Project type:** Distributed system / microservices
+**Module:** M321 – Distributed Systems
+**Project team:** 3–4 people
+**Planned effort:** about 20 lessons per person
 
 ---
 
-# 3. Zielsetzung
+## 2. Project idea
 
-Mit Routine soll ein praxisnahes verteiltes System entwickelt werden, bei dem die einzelnen Teammitglieder eigenständig für Systemkomponenten verantwortlich sind.
+Routine is a platform that lets users define recurring workflows and have them run automatically.
 
-Dabei sollen insbesondere folgende Ziele erreicht werden:
+A routine consists of a trigger and several actions. The trigger can be, for example, a schedule or a manual start. The individual actions are then processed by specialised system components.
 
-* Entwicklung mehrerer voneinander unabhängiger Systemkomponenten
-* Definition und Einhaltung klarer Schnittstellen
-* Kommunikation zwischen den Systemkomponenten
-* Verwendung synchroner und asynchroner Kommunikation
-* Einsatz eines Message Brokers
-* zuverlässige Verarbeitung von Nachrichten
-* Umgang mit mehrfach zugestellten Nachrichten
-* horizontale Skalierung mindestens einer Systemkomponente
-* Umsetzung von Massnahmen zur Hochverfügbarkeit
-* nachvollziehbare Fehlerbehandlung
-* zentrale Nachvollziehbarkeit von verteilten Abläufen
-* Integration der einzelnen Komponenten zu einem funktionierenden Gesamtsystem
+An example:
+
+> Every Monday morning a routine should start that fetches information, creates a task and then sends a notification.
+
+To the user this appears as a single workflow. Internally, however, the processing is spread across several autonomous services.
+
+The focus of the project is therefore not an extensive user interface but the implementation of a working distributed system with clear interfaces, asynchronous communication and measures for high availability.
 
 ---
 
-# 4. Anforderungen an das System
+## 3. Objectives
 
-## 4.1 Funktionale Anforderungen
+Routine is meant to be a realistic distributed system in which the individual team members are each responsible for their own system components.
 
-### Muss-Anforderungen
+In particular, the following goals should be achieved:
 
-Das System muss:
-
-1. Benutzer authentifizieren können.
-2. Benutzern ermöglichen, Routinen zu erstellen.
-3. Routinen aktivieren und deaktivieren können.
-4. Routinen manuell ausführen können.
-5. Routinen zeitgesteuert ausführen können.
-6. Eine Routine aus mehreren Aktionen aufbauen können.
-7. Für jede Ausführung einen eigenen Ausführungsstatus führen.
-8. Aktionen asynchron an zuständige Systemkomponenten übergeben.
-9. Erfolgreiche und fehlgeschlagene Aktionen erkennen.
-10. Wiederholungen fehlgeschlagener Aktionen ermöglichen.
-11. Bereits verarbeitete Nachrichten erkennen können.
-12. Den Status einer Routine-Ausführung anzeigen können.
-
-### Optionale Anforderungen
-
-Je nach verfügbarem Zeitaufwand können zusätzlich umgesetzt werden:
-
-* weitere Trigger-Typen
-* zusätzliche Action-Typen
-* Wiederholungsregeln für einzelne Aktionen
-* Prioritäten für Aktionen
-* Ausführungsverlauf
-* einfache Statistiken
-* Webhooks als externe Aktionen
+* developing several independent system components
+* defining and adhering to clear interfaces
+* communication between the system components
+* using synchronous and asynchronous communication
+* using a message broker
+* reliable message processing
+* handling messages that are delivered more than once
+* horizontal scaling of at least one system component
+* implementing high-availability measures
+* comprehensible error handling
+* central traceability of distributed workflows
+* integrating the individual components into a working overall system
 
 ---
 
-# 5. Nicht-funktionale Anforderungen
+## 4. System requirements
 
-Das System soll folgende Eigenschaften erfüllen:
+### 4.1 Functional requirements
 
-### Schnittstellen
+#### Must-have requirements
 
-Alle Kommunikation zwischen den Systemkomponenten erfolgt über klar definierte und dokumentierte Schnittstellen.
+The system must:
 
-Die Schnittstellen werden vor bzw. parallel zur Implementierung formal beschrieben.
+1. Be able to authenticate users.
+2. Let users create routines.
+3. Be able to activate and deactivate routines.
+4. Be able to run routines manually.
+5. Be able to run routines on a schedule.
+6. Be able to build a routine from several actions.
+7. Keep a separate status for every run.
+8. Hand actions asynchronously to the responsible system components.
+9. Recognise successful and failed actions.
+10. Allow failed actions to be retried.
+11. Be able to recognise messages that have already been processed.
+12. Be able to show the status of a routine run.
 
-### Autonomie
+#### Optional requirements
 
-Jede Systemkomponente besitzt einen klar abgegrenzten Verantwortungsbereich.
+Depending on the time available, the following can also be implemented:
 
-Die Komponenten dürfen nicht direkt auf die Datenbanken anderer Komponenten zugreifen.
+* additional trigger types
+* additional action types
+* retry rules for individual actions
+* priorities for actions
+* execution history
+* simple statistics
+* webhooks as external actions
 
-### Asynchronität
+---
 
-Lang laufende oder voneinander unabhängige Verarbeitung soll über einen Message Broker erfolgen.
+## 5. Non-functional requirements
 
-Der Ausfall eines Consumers soll den Publisher nicht blockieren.
+The system should have the following properties:
 
-### Idempotenz
+### Interfaces
 
-Nachrichten können aufgrund von Wiederholungen mehrfach eintreffen. Die Verarbeitung muss deshalb so implementiert werden, dass eine Nachricht nicht zu unerwünschten mehrfachen Aktionen führt.
+All communication between the system components happens through clearly defined and documented interfaces.
 
-### Skalierbarkeit
+The interfaces are described formally before or alongside the implementation.
 
-Mindestens eine Systemkomponente soll horizontal skalierbar sein.
+### Autonomy
 
-Mehrere Instanzen derselben Komponente sollen gleichzeitig Nachrichten verarbeiten können.
+Each system component has a clearly bounded area of responsibility.
 
-### Hochverfügbarkeit
+Components must not access other components' databases directly.
 
-Das System soll auch bei einem Ausfall einzelner Komponenten möglichst funktionsfähig bleiben.
+### Asynchrony
 
-Mindestens zwei konkrete Massnahmen zur Hochverfügbarkeit sollen umgesetzt und demonstriert werden.
+Long-running or mutually independent processing should go through a message broker.
+
+A consumer outage must not block the publisher.
+
+### Idempotency
+
+Messages can arrive more than once because of retries. Processing must therefore be implemented so that a message does not lead to unwanted repeated actions.
+
+### Scalability
+
+At least one system component should be horizontally scalable.
+
+Several instances of the same component should be able to process messages at the same time.
+
+### High availability
+
+The system should remain as functional as possible even when individual components fail.
+
+At least two concrete high-availability measures should be implemented and demonstrated.
 
 ### Observability
 
-Verteilte Vorgänge sollen über strukturierte Logs und eine gemeinsame Korrelations- bzw. Trace-ID nachvollziehbar sein.
+Distributed operations should be traceable through structured logs and a shared correlation or trace ID.
 
 ### Deployment
 
-Alle für das Gesamtsystem benötigten Komponenten sollen auf LernMAAS lauffähig installiert und gestartet werden können.
+All components needed for the overall system should be installable and runnable on LernMAAS.
 
 ---
 
-# 6. Systemkomponenten
+## 6. System components
 
-Das System wird in mehrere autonome Komponenten aufgeteilt.
+The system is split into several autonomous components.
 
-Die genaue Aufteilung wird gemeinsam im Team festgelegt. Eine mögliche Aufteilung ist:
+The exact split is decided together as a team. One possible split is:
 
-| Komponente                     | Verantwortung                                  |
-| ------------------------------ | ---------------------------------------------- |
-| **Routine Service**            | Verwaltung von Routinen und deren Ausführungen |
-| **Execution / Worker Service** | Verarbeitung und Ausführung von Aktionen       |
-| **Integration Service**        | Kommunikation mit externen Diensten            |
-| **Notification Service**       | Versand von Benachrichtigungen                 |
+| Component                      | Responsibility                               |
+| ------------------------------ | -------------------------------------------- |
+| **Routine Service**            | Managing routines and their executions       |
+| **Execution / Worker Service** | Processing and executing actions             |
+| **Integration Service**        | Communicating with external services         |
+| **Notification Service**       | Sending notifications                        |
 
-Zusätzlich werden Infrastrukturkomponenten wie ein Message Broker und gegebenenfalls ein API Gateway eingesetzt.
+In addition, infrastructure components such as a message broker and possibly an API gateway are used.
 
-Die konkrete Verantwortungsverteilung wird bei der Projektplanung festgehalten. Jedes Teammitglied übernimmt mindestens eine Systemkomponente vollständig und ist für deren Implementierung, Integration und Dokumentation verantwortlich.
+The concrete division of responsibility is recorded during project planning. Each team member takes full ownership of at least one system component and is responsible for its implementation, integration and documentation.
 
 ---
 
-# 7. Zusammenspiel der Komponenten
+## 7. How the components interact
 
-Die zentrale Kommunikation erfolgt beispielsweise nach folgendem Prinzip:
+Central communication follows, for example, this principle:
 
 ```text
                          ┌───────────────┐
@@ -183,27 +183,27 @@ Die zentrale Kommunikation erfolgt beispielsweise nach folgendem Prinzip:
                          Action Completed
 ```
 
-Die einzelnen Services kommunizieren dabei nicht über gemeinsame Domain-Modelle oder gemeinsam genutzte Datenbanken.
+The individual services do not communicate through shared domain models or shared databases.
 
 ---
 
-# 8. Beispiel eines Systemdurchlaufs
+## 8. Example system run
 
-Ein Benutzer erstellt die Routine **"Weekly Review"**:
+A user creates the routine **"Weekly Review"**:
 
 ```text
 Trigger:
-Jeden Montag um 08:00
+Every Monday at 08:00
 
-Aktionen:
-1. Informationen abrufen
-2. Aufgabe erstellen
-3. Benachrichtigung senden
+Actions:
+1. Fetch information
+2. Create a task
+3. Send a notification
 ```
 
-Zum Ausführungszeitpunkt wird eine neue Routine-Ausführung erstellt.
+At the scheduled time, a new routine run is created.
 
-Anschliessend werden die benötigten Aktionen als Nachrichten veröffentlicht.
+The required actions are then published as messages.
 
 ```text
 Routine Service
@@ -219,15 +219,15 @@ Message Broker
       └──► Notification Service
 ```
 
-Die Services verarbeiten ihre jeweiligen Aufgaben unabhängig voneinander und melden das Ergebnis wiederum über definierte Nachrichten zurück.
+The services process their respective work independently and report the result back, again through defined messages.
 
 ---
 
-# 9. Hochverfügbarkeit und Fehlertoleranz
+## 9. High availability and fault tolerance
 
-Ein wesentlicher Bestandteil des Projekts ist der Umgang mit Ausfällen.
+A key part of the project is dealing with outages.
 
-Beispielsweise kann der Notification Service während der Ausführung einer Routine nicht verfügbar sein.
+For example, the notification service may be unavailable while a routine is running.
 
 ```text
 Routine Service
@@ -236,50 +236,50 @@ Routine Service
 Message Broker
       │
       X
-Notification Service nicht verfügbar
+Notification Service unavailable
 ```
 
-Die Nachricht wird nicht verworfen, sondern bleibt im Message Broker bestehen.
+The message is not discarded; it stays in the message broker.
 
-Nach dem Neustart des Notification Services kann die Nachricht verarbeitet werden.
+Once the notification service restarts, the message can be processed.
 
 ```text
-Notification Service startet
+Notification Service starts
             │
             ▼
-wartende Nachricht wird gelesen
+waiting message is read
             │
             ▼
-Aktion wird verarbeitet
+action is processed
             │
             ▼
-Ergebnis wird veröffentlicht
+result is published
 ```
 
-Dadurch muss die gesamte Routine nicht erneut gestartet werden.
+This way the whole routine does not have to be started again.
 
-Weitere mögliche Hochverfügbarkeitsmassnahmen sind:
+Further possible high-availability measures are:
 
-* mehrere Worker-Instanzen
-* automatische Wiederholung fehlgeschlagener Nachrichten
-* Timeouts
-* Dead-Letter-Queue
-* Health Checks
-* horizontale Skalierung
+* several worker instances
+* automatic retries of failed messages
+* timeouts
+* dead letter queue
+* health checks
+* horizontal scaling
 
-Mindestens zwei dieser Massnahmen sollen funktional umgesetzt werden.
+At least two of these measures should be implemented and working.
 
 ---
 
-# 10. Schnittstellen
+## 10. Interfaces
 
-Die Schnittstellen zwischen den Systemkomponenten werden unabhängig von deren Implementierung definiert.
+The interfaces between the system components are defined independently of their implementation.
 
-Für synchrone Kommunikation werden API-Spezifikationen verwendet.
+API specifications are used for synchronous communication.
 
-Für asynchrone Kommunikation werden Event- bzw. Nachrichtenschemas definiert.
+Event or message schemas are defined for asynchronous communication.
 
-Beispielsweise:
+For example:
 
 ```json
 {
@@ -292,17 +292,17 @@ Beispielsweise:
 }
 ```
 
-Die Schnittstellen werden versioniert und Änderungen sollen ohne unnötige Abhängigkeiten zwischen den Teammitgliedern möglich sein.
+The interfaces are versioned, and changes should be possible without unnecessary dependencies between team members.
 
-Gemeinsame Business-Logik oder gemeinsame Domain-Klassen werden nicht als Shared Library verwendet.
+Shared business logic or shared domain classes are not used as a shared library.
 
 ---
 
-# 11. Breaking Changes
+## 11. Breaking changes
 
-Während der Projektarbeit soll mindestens eine Schnittstellenänderung demonstriert werden.
+At least one interface change should be demonstrated during the project.
 
-Beispielsweise wird ein bestehendes Event erweitert:
+For example, an existing event is extended:
 
 ### Version 1
 
@@ -326,19 +326,19 @@ Beispielsweise wird ein bestehendes Event erweitert:
 }
 ```
 
-Die Änderung soll nach Möglichkeit ohne gleichzeitiges Deployment aller betroffenen Services erfolgen können.
+Where possible, the change should work without deploying all affected services at the same time.
 
-Damit wird die Evolution einer Schnittstelle innerhalb eines verteilten Systems demonstriert.
+This demonstrates how an interface evolves within a distributed system.
 
 ---
 
-# 12. Observability
+## 12. Observability
 
-Da eine Routine mehrere Systemkomponenten durchläuft, muss eine einzelne Ausführung über die verschiedenen Services hinweg nachvollziehbar sein.
+Since a routine passes through several system components, a single run must be traceable across the different services.
 
-Dazu wird eine Korrelations- bzw. Trace-ID verwendet.
+A correlation or trace ID is used for this.
 
-Beispiel:
+Example:
 
 ```text
 Trace ID: 7f91a2
@@ -356,142 +356,142 @@ Message Broker
     └──► Notification Service
 ```
 
-Die beteiligten Services schreiben strukturierte Logs mit dieser ID.
+The involved services write structured logs containing this ID.
 
-Dadurch kann nachvollzogen werden, wann und wo eine Routine oder einzelne Aktion verarbeitet wurde.
-
----
-
-# 13. Projektvorgehen
-
-Das Projekt wird schrittweise umgesetzt.
-
-## Phase 1 – Konzeption
-
-* Anforderungen definieren
-* Features festlegen und priorisieren
-* Systemkomponenten bestimmen
-* Verantwortlichkeiten verteilen
-* Architektur entwerfen
-* Hochverfügbarkeitsmassnahmen definieren
-
-## Phase 2 – Schnittstellenplanung
-
-* synchrone Schnittstellen definieren
-* Event-Schemas definieren
-* Datenverantwortlichkeiten festlegen
-* Fehlerfälle betrachten
-* Versionierung planen
-
-## Phase 3 – Machbarkeitsprüfung
-
-* Message Broker testen
-* Hochverfügbarkeitskonzepte testen
-* Deployment auf LernMAAS überprüfen
-* grundlegende Kommunikation zwischen Komponenten testen
-
-## Phase 4 – Individuelle Entwicklung
-
-Jedes Teammitglied entwickelt seine zugewiesene Systemkomponente unabhängig.
-
-Dabei werden die zuvor definierten Schnittstellen eingehalten.
-
-## Phase 5 – Integration
-
-Die einzelnen Komponenten werden miteinander verbunden.
-
-Anschliessend wird der vollständige End-to-End-Workflow getestet.
-
-## Phase 6 – Hochverfügbarkeit
-
-Die geplanten Massnahmen für Hochverfügbarkeit werden umgesetzt und getestet.
-
-## Phase 7 – Testing und Fehlerbehebung
-
-Das Gesamtsystem wird unter normalen Bedingungen sowie bei Ausfällen einzelner Komponenten getestet.
-
-## Phase 8 – Dokumentation und Abgabe
-
-Die Dokumentation wird vervollständigt und Code sowie Dokumentation werden für die Abgabe vorbereitet.
+This makes it possible to see when and where a routine or an individual action was processed.
 
 ---
 
-# 14. Testing
+## 13. Project approach
 
-Das Testing erfolgt parallel zur Entwicklung.
+The project is implemented step by step.
 
-Für die Systemkomponenten werden Testfälle definiert und dokumentiert.
+### Phase 1 – Concept
 
-Besonders getestet werden:
+* define requirements
+* decide on and prioritise features
+* identify system components
+* assign responsibilities
+* design the architecture
+* define high-availability measures
 
-* erfolgreiche Routine-Ausführung
-* fehlerhafte Aktionen
-* wiederholte Nachrichten
-* Ausfall eines Consumers
-* Wiederaufnahme nach einem Ausfall
-* parallele Verarbeitung
-* horizontale Skalierung
-* Schnittstellenänderungen
-* End-to-End-Kommunikation
+### Phase 2 – Interface planning
 
-Zusätzlich sollen, sofern zeitlich möglich, automatisierte Tests für die einzelnen Komponenten erstellt werden.
+* define synchronous interfaces
+* define event schemas
+* decide data ownership
+* consider failure cases
+* plan versioning
+
+### Phase 3 – Feasibility check
+
+* test the message broker
+* test high-availability concepts
+* verify deployment on LernMAAS
+* test basic communication between components
+
+### Phase 4 – Individual development
+
+Each team member develops their assigned system component independently.
+
+The previously defined interfaces are respected.
+
+### Phase 5 – Integration
+
+The individual components are connected to each other.
+
+The complete end-to-end workflow is then tested.
+
+### Phase 6 – High availability
+
+The planned high-availability measures are implemented and tested.
+
+### Phase 7 – Testing and bug fixing
+
+The overall system is tested under normal conditions as well as with individual components failing.
+
+### Phase 8 – Documentation and submission
+
+The documentation is completed, and code and documentation are prepared for submission.
 
 ---
 
-# 15. Deployment
+## 14. Testing
 
-Das Gesamtsystem soll auf LernMAAS betrieben werden können.
+Testing happens alongside development.
 
-Die benötigten Services und Infrastrukturkomponenten werden containerisiert und über eine gemeinsame Deployment-Konfiguration gestartet.
+Test cases are defined and documented for the system components.
 
-Ziel ist ein möglichst einfacher Start des Gesamtsystems.
+The following are tested in particular:
 
-Beispielsweise:
+* successful routine runs
+* failing actions
+* repeated messages
+* a consumer outage
+* recovery after an outage
+* parallel processing
+* horizontal scaling
+* interface changes
+* end-to-end communication
+
+If time allows, automated tests should also be written for the individual components.
+
+---
+
+## 15. Deployment
+
+It should be possible to run the overall system on LernMAAS.
+
+The required services and infrastructure components are containerised and started through a shared deployment configuration.
+
+The goal is to start the overall system as simply as possible.
+
+For example:
 
 ```bash
 docker compose up
 ```
 
-Nach dem Start sollen alle für den Systemdurchlauf benötigten Komponenten verfügbar sein.
+After starting, all components needed for a system run should be available.
 
 ---
 
-# 16. Abgrenzung
+## 16. Scope boundaries
 
-Routine ist keine vollständige Workflow-Automatisierungsplattform wie kommerzielle Lösungen.
+Routine is not a complete workflow automation platform like commercial solutions.
 
-Der Fokus des Projekts liegt auf der Demonstration der technischen Eigenschaften eines verteilten Systems.
+The project focuses on demonstrating the technical properties of a distributed system.
 
-Daher werden bewusst keine umfangreichen Funktionen wie komplexe Benutzerverwaltung, umfangreiche Integrationskataloge oder ein visueller Workflow-Editor umgesetzt.
+It therefore deliberately does not implement extensive features such as complex user management, large integration catalogues or a visual workflow editor.
 
-Die vorhandene Entwicklungszeit soll stattdessen für saubere Schnittstellen, autonome Komponenten, asynchrone Kommunikation, Hochverfügbarkeit und Testing eingesetzt werden.
-
----
-
-# 17. Erwartetes Projektergebnis
-
-Am Ende des Projekts steht ein funktionsfähiges verteiltes System, mit dem Benutzer Routinen erstellen und ausführen können.
-
-Das System besteht aus mehreren unabhängig entwickelten Systemkomponenten und ermöglicht einen vollständigen End-to-End-Durchlauf.
-
-Zusätzlich kann demonstriert werden, dass:
-
-* eine Komponente unabhängig ausfallen kann,
-* bereits publizierte Aufgaben nicht verloren gehen,
-* Aufgaben nach einem Ausfall weiterverarbeitet werden,
-* Worker horizontal skaliert werden können,
-* Nachrichten idempotent verarbeitet werden,
-* verteilte Abläufe nachvollziehbar sind,
-* Schnittstellen weiterentwickelt werden können, ohne das Gesamtsystem gleichzeitig zu aktualisieren.
-
-Damit deckt Routine die zentralen Lernziele der Projektarbeit ab und bietet gleichzeitig einen überschaubaren Umfang für die verfügbare Projektzeit.
+The available development time should instead go into clean interfaces, autonomous components, asynchronous communication, high availability and testing.
 
 ---
 
-# 18. Fazit
+## 17. Expected project outcome
 
-Mit Routine wird ein praxisnahes Beispiel für ein verteiltes System umgesetzt. Die Anwendung selbst bleibt bewusst einfach, während die technische Architektur verschiedene zentrale Herausforderungen verteilter Systeme sichtbar macht.
+At the end of the project there is a working distributed system with which users can create and run routines.
 
-Die Aufteilung in autonome Services ermöglicht es den Teammitgliedern, unabhängig voneinander zu entwickeln und gleichzeitig über definierte Schnittstellen ein gemeinsames Gesamtsystem zu erstellen.
+The system consists of several independently developed system components and supports a complete end-to-end run.
 
-Der wichtigste Mehrwert des Projekts liegt deshalb nicht in der Anzahl der Funktionen, sondern darin, dass Verteilung, Asynchronität, Service-Autonomie, Hochverfügbarkeit und Schnittstellen-Evolution praktisch umgesetzt und demonstriert werden können.
+In addition, it can be demonstrated that:
+
+* a component can fail independently,
+* tasks already published are not lost,
+* tasks continue to be processed after an outage,
+* workers can be scaled horizontally,
+* messages are processed idempotently,
+* distributed workflows are traceable,
+* interfaces can evolve without updating the whole system at once.
+
+Routine thus covers the central learning goals of the project while keeping the scope manageable for the available project time.
+
+---
+
+## 18. Conclusion
+
+Routine implements a realistic example of a distributed system. The application itself stays deliberately simple, while the technical architecture makes several central challenges of distributed systems visible.
+
+Splitting the system into autonomous services lets team members develop independently while still building one overall system through defined interfaces.
+
+The main value of the project therefore lies not in the number of features but in the fact that distribution, asynchrony, service autonomy, high availability and interface evolution are implemented and demonstrated in practice.

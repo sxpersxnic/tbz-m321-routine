@@ -15,7 +15,18 @@ const seenKeys: string[] = [];
 before(async () => {
   server = createServer((request, response) => {
     seenKeys.push(String(request.headers['idempotency-key']));
-    const status = Number(new URL(request.url ?? '/', 'http://x').searchParams.get('status') ?? 200);
+    const url = new URL(request.url ?? '/', 'http://x');
+    if (url.pathname === '/redirect') {
+      response.writeHead(302, { location: url.searchParams.get('to') ?? '/' });
+      response.end();
+      return;
+    }
+    if (url.pathname === '/huge') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(`[${'1,'.repeat(1024 * 1024)}1]`);
+      return;
+    }
+    const status = Number(url.searchParams.get('status') ?? 200);
     response.writeHead(status, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ city: 'Bern', temperatureC: 20, condition: 'sonnig', ok: status < 400 }));
   });
@@ -49,8 +60,27 @@ describe('integration-worker actions', () => {
     await assert.rejects(executeAction('http.request', { url: 'http://routine-db:5432/' }, environment()), /allow-list/);
   });
 
+  it('re-checks every redirect target against the allow-list', async () => {
+    const internal = encodeURIComponent('http://routine-db:5432/');
+    await assert.rejects(executeAction('http.request', { url: `${baseUrl}/redirect?to=${internal}` }, environment()), /allow-list/);
+    const output = await executeAction('http.request', { url: `${baseUrl}/redirect?to=%2F%3Fstatus%3D200` }, environment());
+    assert.equal(output.status, 200);
+  });
+
+  it('keeps the actionId as idempotency key even if params set one', async () => {
+    const env = environment();
+    await executeAction('http.request', { url: baseUrl, headers: { 'Idempotency-Key': 'forged' } }, env);
+    assert.equal(seenKeys.at(-1), env.actionId);
+  });
+
+  it('cuts off huge response bodies instead of buffering them', async () => {
+    const output = await executeAction('http.request', { url: `${baseUrl}/huge` }, environment());
+    assert.equal(typeof output.body, 'string');
+    assert.equal((output.body as string).length, 2_001);
+  });
+
   it('summary.generate renders sections', async () => {
-    const output = await executeAction('summary.generate', { title: 'KW 37', sections: { Wetter: 'sonnig' }, lines: ['Ende'] }, environment());
-    assert.equal(output.text, 'KW 37\n• Wetter: sonnig\n• Ende');
+    const output = await executeAction('summary.generate', { title: 'Week 37', sections: { Weather: 'sunny' }, lines: ['End'] }, environment());
+    assert.equal(output.text, 'Week 37\n• Weather: sunny\n• End');
   });
 });

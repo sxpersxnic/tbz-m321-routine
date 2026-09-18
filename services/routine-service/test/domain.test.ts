@@ -9,10 +9,10 @@ const weeklyReview: RoutineInput = {
   name: 'Weekly Review',
   trigger: { type: 'schedule', cron: '0 8 * * 1' },
   actions: [
-    { key: 'weather', type: 'weather.get', step: 1, params: { city: 'Zürich' } },
+    { key: 'weather', type: 'weather.get', step: 1, params: { city: 'Zurich' } },
     { key: 'task', type: 'task.create', step: 1, params: { title: 'Review' } },
-    { key: 'summary', type: 'summary.generate', params: { title: 'KW', sections: { Wetter: '{{actions.weather.summary}}' } } },
-    { key: 'notify', type: 'notification.send', params: { title: 'Fertig', body: '{{actions.summary.text}}' } },
+    { key: 'summary', type: 'summary.generate', params: { title: 'Week', sections: { Weather: '{{actions.weather.summary}}' } } },
+    { key: 'notify', type: 'notification.send', params: { title: 'Done', body: '{{actions.summary.text}}' } },
   ],
 };
 
@@ -50,6 +50,26 @@ describe('routine definition', () => {
     );
   });
 
+  it('accepts webhook triggers and lets only them read the call body', () => {
+    const hook: RoutineInput = {
+      name: 'Deploy hook',
+      trigger: { type: 'webhook' },
+      actions: [{ key: 'notify', type: 'notification.send', params: { title: 'Deployed {{trigger.body.version}}', body: '{{trigger.type}}' } }],
+    };
+    assert.deepEqual(validateRoutine(hook).trigger, { type: 'webhook' });
+    assert.throws(
+      () => validateRoutine({ ...hook, trigger: { type: 'manual' } }),
+      /"\{\{trigger\.body\.version\}\}" is only available for webhook triggers/,
+    );
+    // the trigger type itself is known for every run
+    assert.doesNotThrow(() => validateRoutine({ ...hook, trigger: { type: 'manual' }, actions: [{ key: 'n', type: 'notification.send', params: { title: '{{trigger.type}}' } }] }));
+  });
+
+  it('trims the name and rejects blank ones', () => {
+    assert.equal(validateRoutine({ ...weeklyReview, name: '  Weekly Review ' }).name, 'Weekly Review');
+    assert.throws(() => validateRoutine({ ...weeklyReview, name: ' \t ' }), /name must not be blank/);
+  });
+
   it('rejects schedules that fire too often', () => {
     assert.match(validateSchedule('* * * * * *', 'Europe/Zurich')[0], /more often/);
     assert.deepEqual(validateSchedule('*/30 * * * * *', 'Europe/Zurich'), []);
@@ -66,16 +86,25 @@ describe('routine definition', () => {
 describe('templates', () => {
   const scope: TemplateScope = {
     routine: { id: 'r1', name: 'Weekly Review' },
-    execution: { id: 'e1', trigger: 'manual', startedAt: '2026-09-11T08:00:00.000Z' },
-    actions: { weather: { temperatureC: 21, summary: 'Sonnig, 21 °C', details: { wind: 5 } } },
+    execution: { id: 'e1', trigger: 'webhook', startedAt: '2026-09-11T08:00:00.000Z' },
+    trigger: { type: 'webhook', body: { release: { version: '2.4.0' }, tags: ['prod'] } },
+    actions: { weather: { temperatureC: 21, summary: 'Sunny, 21 °C', details: { wind: 5 } } },
     now: '2026-09-11T08:00:01.000Z',
   };
 
   it('interpolates text and keeps raw values for single placeholders', () => {
     assert.deepEqual(
-      resolveTemplates({ body: 'Heute: {{actions.weather.summary}} ({{routine.name}})', temp: '{{actions.weather.temperatureC}}', raw: '{{actions.weather.details}}' }, scope),
-      { body: 'Heute: Sonnig, 21 °C (Weekly Review)', temp: 21, raw: { wind: 5 } },
+      resolveTemplates({ body: 'Today: {{actions.weather.summary}} ({{routine.name}})', temp: '{{actions.weather.temperatureC}}', raw: '{{actions.weather.details}}' }, scope),
+      { body: 'Today: Sunny, 21 °C (Weekly Review)', temp: 21, raw: { wind: 5 } },
     );
+  });
+
+  it('resolves values from the webhook body', () => {
+    assert.deepEqual(
+      resolveTemplates({ title: 'Release {{trigger.body.release.version}}', tags: '{{trigger.body.tags}}' }, scope),
+      { title: 'Release 2.4.0', tags: ['prod'] },
+    );
+    assert.throws(() => resolveTemplates('{{trigger.body.missing}}', scope), TemplateError);
   });
 
   it('fails on unresolved references', () => {

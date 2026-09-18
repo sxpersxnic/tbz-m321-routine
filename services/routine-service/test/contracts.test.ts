@@ -15,6 +15,11 @@ describe('routine-service produces valid messages', () => {
     assert.equal(message.routingKey, 'routine.triggered');
   });
 
+  it('RoutineTriggered v1 for a webhook call', () => {
+    const message = routineTriggered({ ...ids, trigger: 'webhook', scheduledFor: null });
+    assert.deepEqual(contractErrors('routine-triggered.v1.schema.json', message.envelope), []);
+  });
+
   it('ActionRequested v1 routed by action type', () => {
     const message = actionRequested({ ...ids, actionId: randomUUID(), actionKey: 'weather', actionType: 'weather.get', params: { city: 'Bern' } });
     assert.deepEqual(contractErrors('action-requested.v1.schema.json', message.envelope), []);

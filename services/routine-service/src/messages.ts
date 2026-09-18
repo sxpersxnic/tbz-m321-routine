@@ -23,7 +23,7 @@ export function routineTriggered(input: {
   executionId: string;
   routineId: string;
   ownerId: string;
-  trigger: 'manual' | 'schedule';
+  trigger: 'manual' | 'schedule' | 'webhook';
   scheduledFor: Date | null;
   correlationId: string;
 }): OutgoingMessage {
@@ -100,8 +100,8 @@ export function executionCompleted(
   const legacyMessage = `Routine "${input.routineName}" completed`;
   const v2Fields = {
     notification: {
-      title: `Routine "${input.routineName}" abgeschlossen`,
-      body: `Alle Aktionen wurden erfolgreich ausgeführt (Dauer ${(input.durationMs / 1000).toFixed(1)} s).`,
+      title: `Routine "${input.routineName}" completed`,
+      body: `All actions succeeded (took ${(input.durationMs / 1000).toFixed(1)} s).`,
     },
     priority: 'normal',
   };

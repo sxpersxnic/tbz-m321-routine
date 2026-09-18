@@ -47,7 +47,8 @@ const app = createHttpServer({
     },
   },
 });
-installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/']);
+// webhook calls carry their secret in the URL instead of a user token
+installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/'], ['/api/v1/hooks/']);
 registerRoutes(app, { pool, engine });
 
 // The routine service consumes its own RoutineTriggered events: triggering

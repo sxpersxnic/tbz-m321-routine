@@ -1,13 +1,13 @@
-# Architektur
+# Architecture
 
-Dieses Dokument beschreibt die Umsetzung der in der [README](../README.md) beschriebenen Plattform.
+This document describes how the platform outlined in the [README](../README.md) is implemented.
 
-## 1. Überblick
+## 1. Overview
 
 ```mermaid
 flowchart LR
     Client([Browser / curl]) -->|HTTPS/JSON| GW[API Gateway]
-    GW -->|/ statische UI| WEB[Web-Client]
+    GW -->|/ static UI| WEB[Web client]
     GW -->|/auth| ID[Identity Service]
     GW -->|/routines /executions| RS[Routine Service]
     GW -->|/tasks| TS[Task Service]
@@ -28,50 +28,51 @@ flowchart LR
     IW1 --- IWDB[(integration-db)]
 ```
 
-Alle Services, Datenbanken, der Broker und Jaeger werden mit **einem** Befehl gestartet: `docker compose up -d --build --wait`.
+All services, databases, the broker and Jaeger start with **one** command: `docker compose up -d --build --wait`.
 
-Der Web-Client ist ein eigener Service mit eigenem Build und Deployment. Das Gateway leitet alle Nicht-API-Pfade an ihn weiter –
-der Browser sieht dadurch nur einen Origin (kein CORS), und der Client teilt keinen Code mit den Services (eigene Typen in `web/src/types.ts`).
+The web client is a service of its own, with its own build and deployment. The gateway forwards every non-API path to it –
+so the browser only ever sees one origin (no CORS), and the client shares no code with the services (its own types live in `web/src/types.ts`).
 
-## 2. Service-Zuschnitt
+## 2. Service boundaries
 
-| Service | Verantwortung | Daten (eigene DB) | Schnittstellen |
+| Service | Responsibility | Data (own DB) | Interfaces |
 | --- | --- | --- | --- |
-| **gateway** | Einziger Einstiegspunkt, Routing, Token-Prüfung am Rand, Correlation-ID, Systemstatus | – (stateless) | HTTP |
-| **web** | Web-Client (React + Vite, von nginx ausgeliefert); spricht ausschliesslich über das Gateway mit der API | – (statisch) | HTTP |
-| **identity-service** | Benutzer, Login, Ausstellen von RS256-Tokens, JWKS | `users`, `signing_keys` | HTTP |
-| **routine-service** | Routinen verwalten, Ausführungen orchestrieren, Zeitplan, Status | `routines`, `executions`, `execution_actions`, `execution_log`, `outbox` | HTTP, publiziert Commands/Events, konsumiert Ergebnisse |
-| **task-service** | Aufgaben-System; führt `task.create` aus | `tasks` | HTTP, konsumiert Actions |
-| **notification-service** | Posteingang; führt `notification.send` aus, reagiert auf Execution-Events | `notifications` | HTTP, konsumiert Actions + Events |
-| **integration-worker** | Stateless Worker für externe Aufrufe (`weather.get`, `http.request`, `summary.generate`), **horizontal skalierbar** | `action_executions` (Idempotenz) | nur Broker (+ Health) |
-| **mock-external** | *Nicht Teil der Plattform* – simuliert Drittanbieter (Latenz, 503, Webhooks) | – (in-memory) | HTTP |
+| **gateway** | Single entry point, routing, token check at the edge, correlation ID, system status | – (stateless) | HTTP |
+| **web** | Web client (React + Vite, served by nginx); talks to the API only through the gateway | – (static) | HTTP |
+| **identity-service** | Users, login, issuing RS256 tokens, JWKS | `users`, `signing_keys` | HTTP |
+| **routine-service** | Manages routines, orchestrates executions, schedule, status | `routines`, `executions`, `execution_actions`, `execution_log`, `outbox` | HTTP, publishes commands/events, consumes results |
+| **task-service** | Task system; executes `task.create` | `tasks` | HTTP, consumes actions |
+| **notification-service** | Inbox; executes `notification.send`, reacts to execution events | `notifications` | HTTP, consumes actions + events |
+| **integration-worker** | Stateless worker for external calls (`weather.get`, `http.request`, `summary.generate`), **horizontally scalable** | `action_executions` (idempotency) | broker only (+ health) |
+| **mock-external** | *Not part of the platform* – simulates third-party services (latency, 503, webhooks) | – (in-memory) | HTTP |
 
-**Warum so geschnitten?** Jeder Service entspricht einer fachlichen Fähigkeit (Bounded Context). Der Routine Service
-kennt Action-*Typen*, aber nicht, *wer* sie ausführt: er publiziert `ActionRequested` mit Routing-Key `action.<typ>`;
-welche Queue die Nachricht erhält, bestimmen allein die Broker-Bindings. Ein neuer Action-Typ bzw. Service erfordert
-also nur ein neues Binding – kein Deployment des Routine Service (ausser dem Katalog-Eintrag für die Validierung).
+**Why this split?** Each service corresponds to one business capability (bounded context). The routine service
+knows action *types* but not *who* executes them: it publishes `ActionRequested` with the routing key `action.<type>`,
+and the broker bindings alone decide which queue receives the message. A new action type or service therefore only
+needs a new binding – no deployment of the routine service (apart from the catalogue entry used for validation).
 
-## 3. Kommunikation
+## 3. Communication
 
-| Von → Nach | Art | Wofür |
+| From → to | Kind | Purpose |
 | --- | --- | --- |
-| Client → Gateway → Services | synchron HTTP | Benutzeranfragen, CRUD, Status, Login |
-| Services → identity-service (JWKS) | synchron HTTP, gecacht | Token-Prüfung (nur Schlüsselabruf, nicht pro Request) |
-| routine-service → Worker | asynchron, **Command** `ActionRequested` (Topic `routine.actions`) | Ausführung einer Action |
-| Worker → routine-service | asynchron, **Event** `ActionCompleted/Failed/RetryScheduled` | Ergebnis melden |
-| routine-service → alle | asynchron, **Event** `ExecutionCompleted/Failed` (pub/sub) | Notification Service reagiert, ohne dass der Producer ihn kennt |
-| routine-service → routine-service | asynchron `RoutineTriggered` | Auslösen ist schnell und funktioniert auch ohne Broker (Outbox) |
+| Client → gateway → services | synchronous HTTP | user requests, CRUD, status, login |
+| Services → identity-service (JWKS) | synchronous HTTP, cached | token verification (key fetch only, not per request) |
+| routine-service → workers | asynchronous **command** `ActionRequested` (topic `routine.actions`) | executing an action |
+| Workers → routine-service | asynchronous **event** `ActionCompleted/Failed/RetryScheduled` | reporting a result |
+| routine-service → everyone | asynchronous **event** `ExecutionCompleted/Failed` (pub/sub) | the notification service reacts without the producer knowing it |
+| routine-service → routine-service | asynchronous `RoutineTriggered` | triggering is fast and works even without the broker (outbox) |
+| External system → gateway → routine-service | synchronous HTTP, public `POST /api/v1/hooks/{token}` | an external event starts a routine; the JSON body is available to its steps as `{{trigger.body.…}}` |
 
-Die Verträge liegen in [`contracts/`](../contracts/README.md) (OpenAPI 3.1, AsyncAPI 3.0, JSON Schema).
+The contracts live in [`contracts/`](../contracts/README.md) (OpenAPI 3.1, AsyncAPI 3.0, JSON Schema).
 
-### Orchestrierung statt Choreografie
+### Orchestration rather than choreography
 
-Eine Routine hat Schritte, Abhängigkeiten und Datenfluss (`{{actions.weather.summary}}`). Diese Logik liegt
-zentral im Routine Service (Orchestrator); die Worker bleiben einfach und kennen einander nicht. Die Execution
-ist dadurch jederzeit an einer Stelle abfragbar. Reine Benachrichtigungen (`ExecutionCompleted`) sind dagegen
-choreografiert – beliebig viele Consumer können sie abonnieren.
+A routine has steps, dependencies and data flow (`{{actions.weather.summary}}`). This logic sits centrally in the
+routine service (the orchestrator); the workers stay simple and do not know about each other. As a result, an execution
+can be queried in one place at any time. Pure notifications (`ExecutionCompleted`), on the other hand, are
+choreographed – any number of consumers can subscribe to them.
 
-## 4. Ablauf einer Execution
+## 4. Lifecycle of an execution
 
 ```mermaid
 sequenceDiagram
@@ -84,110 +85,115 @@ sequenceDiagram
     C->>R: POST /routines/{id}/executions
     R->>DB: TX: execution PENDING + actions + outbox(RoutineTriggered)
     R-->>C: 202 Accepted (PENDING)
-    R->>B: Outbox-Relay publiziert (Publisher Confirm)
+    R->>B: outbox relay publishes (publisher confirm)
     B->>R: RoutineTriggered
-    R->>DB: TX: RUNNING, Schritt 1 DISPATCHED + outbox(ActionRequested…)
-    R->>B: ActionRequested (action.<typ>)
-    B->>W: zustellen (competing consumers)
-    W->>W: idempotent ausführen (actionId)
+    R->>DB: TX: RUNNING, step 1 DISPATCHED + outbox(ActionRequested…)
+    R->>B: ActionRequested (action.<type>)
+    B->>W: deliver (competing consumers)
+    W->>W: execute idempotently (actionId)
     W->>B: ActionCompleted
-    W-->>B: ack (erst nach bestätigtem Publish)
+    W-->>B: ack (only after a confirmed publish)
     B->>R: ActionCompleted
-    R->>DB: TX (Zeile gesperrt): Action COMPLETED, nächster Schritt oder COMPLETED + outbox(ExecutionCompleted)
+    R->>DB: TX (row locked): action COMPLETED, next step or COMPLETED + outbox(ExecutionCompleted)
 ```
 
-Zustände: `PENDING → RUNNING → COMPLETED`, `RUNNING ⇄ WAITING` (Retry geplant oder kein Worker antwortet innert
-`WAITING_AFTER_MS`), `→ FAILED` bei permanentem Fehler. Die Übergänge sind als reine Funktion in
-`services/routine-service/src/domain/progress.ts` implementiert und unit-getestet.
+States: `PENDING → RUNNING → COMPLETED`, `RUNNING ⇄ WAITING` (retry scheduled, or no worker answers within
+`WAITING_AFTER_MS`), `→ FAILED` on a permanent error. The transitions are implemented as a pure function in
+`services/routine-service/src/domain/progress.ts` and unit-tested.
 
-## 5. Zuverlässigkeit
+## 5. Reliability
 
-| Problem | Lösung | Ort |
+| Problem | Solution | Where |
 | --- | --- | --- |
-| Zustand gespeichert, aber Nachricht verloren (Dual Write) | **Transactional Outbox**: Nachricht wird in derselben DB-Transaktion geschrieben und vom Relay publiziert | `routine-service/src/outbox.ts` |
-| Broker nimmt Nachricht nicht an | Publisher Confirms; Outbox-Zeile bleibt offen, bis bestätigt | `service-kit/src/broker.ts` |
-| Consumer stürzt während Verarbeitung ab | Manuelles `ack` erst nach Erfolg → Broker stellt erneut zu | `broker.ts` |
-| Consumer ist gestoppt | Durable Quorum Queues aus `definitions.json` existieren unabhängig vom Consumer; Nachrichten warten | `infra/rabbitmq/` |
-| Doppelte Zustellung | **Idempotente Consumer**, Schlüssel `actionId`: Unique-Constraint (`tasks.source_action_id`, `notifications.source_key`) bzw. Claim-Tabelle mit Lease (`action_executions`). Duplikate lösen keine zweite Wirkung aus, das gespeicherte Ergebnis wird erneut gemeldet | Worker |
-| Doppelte Ergebnisse / parallele Ergebnisse | Execution-Zeile `FOR UPDATE` gesperrt; bereits abgeschlossene Actions ignorieren weitere Ergebnisse | `engine.ts` |
-| Client wiederholt POST | Header `Idempotency-Key` → gleiche Execution | `api.ts` |
-| Transiente Fehler (503, Timeout) | **Retry mit Backoff** 1 s → 5 s → 15 s über Retry-Queues (TTL + Dead-Lettering zurück), Execution meldet `WAITING` | `broker.ts` |
-| Permanente Fehler (4xx, ungültige Params) | Kein Retry → `ActionFailed` → Execution `FAILED`; Nachricht in `<queue>.dlq` zur Analyse | Worker |
-| Poison Messages / Crash-Loops | Quorum-Queue `x-delivery-limit: 10` → DLQ | `definitions.json` |
-| Broker-Neustart | `amqp-connection-manager` verbindet neu und registriert Consumer automatisch | `broker.ts` |
-| Mehrere Scheduler-Replikas | `FOR UPDATE SKIP LOCKED` + `UNIQUE (routine_id, scheduled_for)` | `scheduler.ts` |
-| Externe Seiteneffekte doppelt | `Idempotency-Key: <actionId>` an externe APIs | `integration-worker/src/actions.ts` |
+| State saved but message lost (dual write) | **Transactional outbox**: the message is written in the same DB transaction and published by the relay | `routine-service/src/outbox.ts` |
+| Broker does not accept the message | Publisher confirms; the outbox row stays open until confirmed | `service-kit/src/broker.ts` |
+| Consumer crashes while processing | Manual `ack` only after success → the broker redelivers | `broker.ts` |
+| Consumer is stopped | Durable quorum queues from `definitions.json` exist independently of the consumer; messages wait | `infra/rabbitmq/` |
+| Duplicate delivery | **Idempotent consumers**, key `actionId`: unique constraint (`tasks.source_action_id`, `notifications.source_key`) or a claim table with a lease (`action_executions`). Duplicates cause no second effect; the stored result is reported again | workers |
+| Duplicate / concurrent results | Execution row locked `FOR UPDATE`; actions already finished ignore further results | `engine.ts` |
+| Client repeats a POST | `Idempotency-Key` header (unique per routine) → same execution | `api.ts` |
+| Transient errors (503, timeout) | **Retry with backoff** 1 s → 5 s → 15 s via retry queues (TTL + dead-lettering back); the execution reports `WAITING` | `broker.ts` |
+| Permanent errors (4xx, invalid params) | No retry → `ActionFailed` → execution `FAILED`; message goes to `<queue>.dlq` for analysis | workers |
+| Poison messages / crash loops | Quorum queue `x-delivery-limit: 10` → DLQ | `definitions.json` |
+| Broker restart | `amqp-connection-manager` reconnects and re-registers consumers automatically | `broker.ts` |
+| Several scheduler replicas | `FOR UPDATE SKIP LOCKED` + `UNIQUE (routine_id, scheduled_for)` | `scheduler.ts` |
+| Duplicate external side effects | `Idempotency-Key: <actionId>` sent to external APIs | `integration-worker/src/actions.ts` |
 
-**Garantie:** at-least-once-Zustellung + idempotente Verarbeitung = *effectively once*.
+**Guarantee:** at-least-once delivery + idempotent processing = *effectively once*.
 
-## 6. Skalierung
+## 6. Scaling
 
-Der integration-worker ist stateless (Zustand nur in der eigenen DB). Replikas konsumieren dieselbe Queue
-(*competing consumers*); `prefetch = 1` sorgt für faire Verteilung. Skalieren ohne Konfigurationsänderung:
+The integration-worker is stateless (its only state is in its own DB). Replicas consume the same queue
+(*competing consumers*); `prefetch = 1` ensures a fair distribution. Scaling needs no configuration change:
 
 ```bash
 docker compose up -d --scale integration-worker=5
 ```
 
-Auch routine-service, task-service und notification-service könnten mehrfach laufen: alle Hintergrundprozesse
-(Outbox-Relay, Scheduler, Migrationen) sind über `SKIP LOCKED` bzw. Advisory Locks replikasicher.
+routine-service, task-service and notification-service could also run several times: all background processes
+(outbox relay, scheduler, migrations) are replica-safe through `SKIP LOCKED` or advisory locks.
 
 ## 7. Observability
 
-* **Strukturierte Logs** (pino, JSON) mit `service`, `instance`, `correlationId`, `executionId`, `actionId`,
-  `trace_id`. Die Correlation-ID entsteht im Gateway (`X-Correlation-Id`), wird in der Execution gespeichert
-  und reist im Envelope jeder Nachricht mit. `scripts/demo.sh trace <id>` zeigt die Logs aller Services zu einer Ausführung.
-* **Distributed Tracing** mit OpenTelemetry → Jaeger (http://localhost:16686). Der W3C-`traceparent` wird über
-  HTTP und AMQP-Header propagiert; das Outbox-Relay stellt den beim Schreiben gespeicherten Trace-Kontext wieder
-  her. Eine manuelle Ausführung ergibt so **einen** Trace über Gateway, Routine Service, Broker, alle Worker und
-  den externen Dienst.
-* **Health/Readiness**: `/health` (Liveness, für Docker) und `/ready` (DB + Broker).
-* **Systemstatus** im UI (Seite *System*: Live-Topologie mit Queue-Tiefen und Consumern) bzw. `scripts/demo.sh status`.
-  Quorum Queues melden ihre Metriken auf einem eigenen Tick – `infra/rabbitmq/advanced.config` setzt ihn auf 1 s.
-* **Trace pro Execution**: jede Ausführung speichert ihre `traceId` (auch zeitgesteuerte – der Scheduler startet dafür einen
-  eigenen Span). Das UI verlinkt direkt auf den Trace in Jaeger.
+* **Structured logs** (pino, JSON) with `service`, `instance`, `correlationId`, `executionId`, `actionId`,
+  `trace_id`. The correlation ID is created in the gateway (`X-Correlation-Id`), stored with the execution
+  and travels in the envelope of every message. `scripts/demo.sh trace <id>` shows the logs of all services for one execution.
+* **Distributed tracing** with OpenTelemetry → Jaeger (<http://localhost:16686>). The W3C `traceparent` is propagated over
+  HTTP and AMQP headers; the outbox relay restores the trace context saved at write time. A manual run
+  therefore produces **one** trace across the gateway, routine service, broker, all workers and
+  the external service.
+* **Health/readiness**: `/health` (liveness, for Docker) and `/ready` (DB + broker).
+* **System status** in the UI (*Infrastructure* page: live topology with queue depths and consumers) or `scripts/demo.sh status`.
+  Quorum queues report their metrics on their own tick – `infra/rabbitmq/advanced.config` sets it to 1 s.
+* **Trace per execution**: every execution stores its `traceId` (scheduled ones too – the scheduler starts its own
+  span for them). The UI links straight to the trace in Jaeger.
 
 ## 8. Security
 
-* Eigenständiger **Identity Service** stellt RS256-JWTs aus; der private Schlüssel verlässt ihn nie.
-* Gateway **und** jeder Service prüfen das Token selbst (Defense in Depth) anhand des öffentlichen JWKS.
-* **Mandantentrennung**: jede Abfrage filtert nach `owner_id = sub`; fremde Ressourcen liefern 404.
-* Passwörter mit scrypt gehasht; identische Antwort bei unbekanntem Benutzer und falschem Passwort.
-* `http.request` nur an Hosts der Allow-List (`HTTP_ALLOWED_HOSTS`) → kein SSRF auf interne Services.
-* Services und Datenbanken sind nicht vom Host erreichbar – nur das Gateway (plus Werkzeuge für die Demo).
+* A standalone **identity service** issues RS256 JWTs; the private key never leaves it.
+* The gateway **and** every service verify the token themselves (defence in depth) against the public JWKS.
+* **Tenant isolation**: every query filters on `owner_id = sub`; other users' resources return 404.
+* Passwords are hashed with scrypt; unknown users and wrong passwords get an identical response – in timing too
+  (unknown emails are checked against a dummy hash, otherwise the response time would reveal registered addresses).
+* `http.request` only reaches hosts on the allow-list (`HTTP_ALLOWED_HOSTS`) → no SSRF against internal services. Redirects
+  are followed manually and every target is checked again; responses are truncated after 256 KiB.
+* **Webhook triggers** are the only unauthenticated write: the credential is a 256-bit random token in the path
+  (unique index, stored per routine). Unknown tokens and non-webhook routines both answer 404, the response reveals
+  only the execution ID, bodies are capped at 64 KiB, and the owner can rotate the token, which invalidates the old URL at once.
+* Services and databases are not reachable from the host – only the gateway is (plus tools for the demo).
 
-## 9. Schnittstellen-Evolution
+## 9. Interface evolution
 
-`ExecutionCompleted` wird von v1 (`message`) zu v2 (`notification{title,body}`, `priority`) weiterentwickelt:
+`ExecutionCompleted` evolves from v1 (`message`) to v2 (`notification{title,body}`, `priority`):
 
 | Phase | routine-service (`EXECUTION_COMPLETED_FORMAT`) | notification-service (`COMPLETION_EVENT_READER`) |
 | --- | --- | --- |
-| 1. Ausgangslage | `v1` | `legacy` |
-| 2. Expand | `expand` (alte **und** neue Felder) | `legacy` – funktioniert weiter |
-| 3. Consumer aktualisieren | `expand` | `tolerant` (bevorzugt v2, fällt auf v1 zurück) |
-| 4. Contract | `v2` (altes Feld entfernt) | `tolerant` |
+| 1. Starting point | `v1` | `legacy` |
+| 2. Expand | `expand` (old **and** new fields) | `legacy` – keeps working |
+| 3. Update consumer | `expand` | `tolerant` (prefers v2, falls back to v1) |
+| 4. Contract | `v2` (old field removed) | `tolerant` |
 
-Pro Phase wird genau **ein** Service neu deployt. Der Breaking Change (Phase 1 → 4 direkt) wird ebenfalls
-demonstriert: der Legacy-Consumer lehnt das Event als permanent fehlerhaft ab, es landet in der DLQ (nicht verloren)
-und kann nach dem Consumer-Update mit `scripts/replay-dlq.sh` erneut eingespielt werden. Contract-Tests prüfen jede
-Phase gegen die JSON Schemas.
+Each phase redeploys exactly **one** service. The breaking change (going from phase 1 straight to 4) is
+demonstrated too: the legacy consumer rejects the event as permanently broken, it lands in the DLQ (not lost)
+and can be replayed with `scripts/replay-dlq.sh` after the consumer update. Contract tests check every
+phase against the JSON Schemas.
 
-## 10. Technologie-Entscheide (ADR-Kurzform)
+## 10. Technology decisions (short ADRs)
 
-| Entscheid | Begründung | Alternative |
+| Decision | Reasoning | Alternative |
 | --- | --- | --- |
-| TypeScript auf Node 24 (Type Stripping, kein Build-Schritt) | Schnelle Iteration, gute Libraries für AMQP/OTel | Java/Spring, .NET |
-| RabbitMQ 4 (Quorum Queues) | Commands mit Routing, Acks, DLX/TTL für Retries, Management-UI für die Demo | Kafka (Log statt Queue, Retries aufwändiger) |
-| PostgreSQL pro Service | Autonome Daten, Transaktionen für Outbox & Idempotenz | gemeinsame DB (verletzt Autonomie) |
-| Orchestrierung im Routine Service | Schritte, Abhängigkeiten, Datenfluss, zentraler Status | reine Choreografie |
-| Topologie als Code (`definitions.json`) | Queues existieren, bevor Consumer laufen → kein Nachrichtenverlust | Consumer deklarieren Queues selbst |
-| Web-Client als eigener Service (React, Vite, nginx) | UI unabhängig baubar/deploybar; nginx liefert statische Dateien effizient aus | UI im Gateway ausliefern |
-| Service-Kit als technisches Chassis | Logging, Broker, DB, Auth einheitlich; **keine Domain-Modelle** geteilt | Code-Duplikation in jedem Service |
-| Monorepo | Einfache Abgabe; jeder Service hat trotzdem eigenes Image & Deployment | Repo pro Service |
+| TypeScript on Node 24 (type stripping, no build step) | Fast iteration, good libraries for AMQP/OTel | Java/Spring, .NET |
+| RabbitMQ 4 (quorum queues) | Commands with routing, acks, DLX/TTL for retries, management UI for the demo | Kafka (a log rather than a queue, retries harder) |
+| PostgreSQL per service | Autonomous data, transactions for outbox and idempotency | shared DB (violates autonomy) |
+| Orchestration in the routine service | Steps, dependencies, data flow, central status | pure choreography |
+| Topology as code (`definitions.json`) | Queues exist before consumers run → no message loss | consumers declare their own queues |
+| Web client as its own service (React, Vite, nginx) | UI builds and deploys independently; nginx serves static files efficiently | serve the UI from the gateway |
+| Service kit as a technical chassis | Consistent logging, broker, DB and auth; **no domain models** shared | duplicated code in every service |
+| Monorepo | Simple submission; every service still has its own image and deployment | one repo per service |
 
-## 11. Bewusste Grenzen
+## 11. Deliberate limits
 
-* Kein produktionsreifes Secret-Management (Passwörter in `compose.yaml`), kein TLS.
-* Jaeger speichert Traces nur im Speicher.
-* Die Retry-Queues verwenden eine TTL pro Queue (eine Queue je Backoff-Stufe), damit kein Head-of-Line-Blocking entsteht.
-* Scheduler holt verpasste Läufe (Service war down) einmal nach, nicht jeden einzelnen verpassten Slot.
+* No production-grade secret management (passwords in `compose.yaml`), no TLS.
+* Jaeger keeps traces in memory only.
+* The retry queues use one TTL per queue (one queue per backoff step), so there is no head-of-line blocking.
+* The scheduler catches up on missed runs (service was down) once, not for every single missed slot.

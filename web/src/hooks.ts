@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { sessionStore } from './api.ts';
+import { connectionStore, sessionStore } from './api.ts';
 
 // ---------------------------------------------------------------- session
 
 export const useSession = () => useSyncExternalStore(sessionStore.subscribe, sessionStore.get);
+
+/** False while the backend is unreachable – the shell warns that shown data may be stale. */
+export const useReachable = () => useSyncExternalStore(connectionStore.subscribe, connectionStore.get);
 
 // ---------------------------------------------------------------- hash router
 
@@ -11,6 +14,7 @@ function currentPath() {
   return window.location.hash.replace(/^#/, '') || '/';
 }
 
+/** The full route including its `?query` part. */
 export function useRoute(): string {
   const [path, setPath] = useState(currentPath);
   useEffect(() => {
@@ -23,6 +27,37 @@ export function useRoute(): string {
 
 export function navigate(path: string) {
   window.location.hash = path;
+}
+
+/**
+ * A filter kept in the URL instead of component state, so reloading, sharing or
+ * going back keeps the view the user had set up.
+ */
+export function useRouteParam(name: string): [string | null, (value: string | null) => void] {
+  const route = useRoute();
+  const [path, query = ''] = route.split('?');
+  const value = new URLSearchParams(query).get(name);
+  const set = useCallback(
+    (next: string | null) => {
+      const params = new URLSearchParams(query);
+      if (next) params.set(name, next);
+      else params.delete(name);
+      const suffix = params.toString();
+      navigate(suffix ? `${path}?${suffix}` : path);
+    },
+    [name, path, query],
+  );
+  return [value, set];
+}
+
+/** Warns before a reload or tab close would throw away unsaved edits. */
+export function useUnsavedGuard(dirty: boolean) {
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 }
 
 /** Matches "/routines/:id/edit" style patterns; returns params or null. */
@@ -45,6 +80,8 @@ export interface Resource<T> {
   error: Error | undefined;
   loading: boolean;
   reload: () => void;
+  /** Optimistic update: shows the expected result now, the next poll confirms or corrects it. */
+  mutate: (update: (current: T) => T) => void;
 }
 
 /**
@@ -57,6 +94,10 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, deps: 
   const [loading, setLoading] = useState(true);
   const loadRef = useRef(load);
   loadRef.current = load;
+  // A ref, not `data`: the effect's closure would keep seeing the initial undefined.
+  const loadedRef = useRef(false);
+  // bumped by mutate(): a poll that started before an optimistic change carries stale data
+  const generation = useRef(0);
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((value) => value + 1), []);
 
@@ -64,10 +105,13 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, deps: 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const run = async () => {
-      if (document.visibilityState === 'visible' || data === undefined) {
+      // Hidden tabs only load once (so a page opened in the background has data), then pause.
+      if (document.visibilityState === 'visible' || !loadedRef.current) {
+        const startedAt = generation.current;
         try {
           const result = await loadRef.current();
-          if (!cancelled) {
+          if (!cancelled && startedAt === generation.current) {
+            loadedRef.current = true;
             setData(result);
             setError(undefined);
           }
@@ -87,7 +131,12 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number, deps: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervalMs, tick, ...deps]);
 
-  return { data, error, loading, reload };
+  const mutate = useCallback((update: (current: T) => T) => {
+    generation.current += 1;
+    setData((current) => (current === undefined ? current : update(current)));
+  }, []);
+
+  return { data, error, loading, reload, mutate };
 }
 
 /** Re-renders every `intervalMs` so relative times ("vor 5 s") stay current. */

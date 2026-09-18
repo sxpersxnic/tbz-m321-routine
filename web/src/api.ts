@@ -2,6 +2,7 @@ import type {
   ActionType,
   Execution,
   ExecutionDetail,
+  ExecutionStats,
   ExecutionStatus,
   Notification,
   Routine,
@@ -57,7 +58,29 @@ export const sessionStore = {
     } catch {
       // storage unavailable – session lives in memory only
     }
-    listeners.forEach((listener) => listener());
+    listeners.forEach((listener) => {listener()});
+  },
+};
+
+// ---------------------------------------------------------------- connection health
+
+// Polling screens keep their last good data when a refresh fails, so a dead
+// backend looks exactly like a quiet one. Every request reports here instead,
+// and the shell turns that into one honest banner for the whole app.
+const connectionListeners = new Set<() => void>();
+let reachable = true;
+
+function setReachable(next: boolean) {
+  if (reachable === next) return;
+  reachable = next;
+  connectionListeners.forEach((listener) => { listener(); });
+}
+
+export const connectionStore = {
+  get: () => reachable,
+  subscribe(listener: () => void) {
+    connectionListeners.add(listener);
+    return () => connectionListeners.delete(listener);
   },
 };
 
@@ -72,23 +95,49 @@ function describeDetail(detail: unknown): string {
   return JSON.stringify(detail);
 }
 
+/** Gateway statuses that mean "the backend is unreachable", not "your request was wrong". */
+const UNREACHABLE = new Set([502, 503, 504]);
+
+/**
+ * A fallback for responses that carry no `detail`. "HTTP 502" tells the user
+ * nothing they can act on; it is a status code shown to someone who never asked
+ * for one.
+ */
+function statusMessage(status: number): string {
+  if (UNREACHABLE.has(status)) return 'The server is not responding. Please try again in a moment.';
+  if (status === 401) return 'Your session has expired or is invalid.';
+  if (status === 403) return 'You are not allowed to do that.';
+  if (status === 404) return 'This no longer exists.';
+  if (status === 409) return 'This was changed by someone else in the meantime.';
+  if (status === 429) return 'Too many requests. Please wait a moment.';
+  if (status >= 500) return 'Something went wrong on the server.';
+  return 'The request was rejected.';
+}
+
 async function request<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
-  const response = await fetch(path, {
-    method,
-    headers: {
-      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(session ? { authorization: `Bearer ${session.token}` } : {}),
-      ...headers,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method,
+      headers: {
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...(session ? { authorization: `Bearer ${session.token}` } : {}),
+        ...headers,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    setReachable(false);
+    throw new ApiError(0, 'The server cannot be reached.');
+  }
+  setReachable(!UNREACHABLE.has(response.status));
   if (response.status === 401 && session && !path.startsWith('/api/v1/auth/login')) {
     sessionStore.set(null);
   }
   const data = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
     const details = Array.isArray(data?.errors) ? data.errors.map(describeDetail) : [];
-    throw new ApiError(response.status, data?.detail ?? `HTTP ${response.status}`, details);
+    throw new ApiError(response.status, data?.detail ?? statusMessage(response.status), details);
   }
   return { data: data as T, headers: response.headers, status: response.status };
 }
@@ -122,6 +171,14 @@ export const api = {
     return data;
   },
 
+  /** Rotating invalidates the old URL immediately. */
+  rotateWebhook: (id: string) => send<Routine>('POST', `/api/v1/routines/${id}/webhook/rotate`),
+  /** Calls a routine's webhook the way an external system would – used for test events and "run again". */
+  async callWebhook(path: string, body: Record<string, unknown>): Promise<{ executionId: string }> {
+    const { data } = await request<{ executionId: string }>('POST', path, body, { 'idempotency-key': crypto.randomUUID() });
+    return data;
+  },
+
   executions: async (filter: { status?: ExecutionStatus; limit?: number } = {}) => {
     const query = new URLSearchParams({ limit: String(filter.limit ?? 50), ...(filter.status ? { status: filter.status } : {}) });
     return (await get<{ items: Execution[] }>(`/api/v1/executions?${query}`)).items;
@@ -129,6 +186,7 @@ export const api = {
   routineExecutions: async (id: string, limit = 20) =>
     (await get<{ items: Execution[] }>(`/api/v1/routines/${id}/executions?limit=${limit}`)).items,
   execution: (id: string) => get<ExecutionDetail>(`/api/v1/executions/${id}`),
+  executionStats: (hours = 24) => get<ExecutionStats>(`/api/v1/executions/stats?hours=${hours}`),
 
   tasks: async (status?: Task['status']) => (await get<{ items: Task[] }>(`/api/v1/tasks${status ? `?status=${status}` : ''}`)).items,
   createTask: (input: { title: string; description?: string; priority?: string; dueDate?: string }) =>

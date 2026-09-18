@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://routine.example/contracts/schemas/routine-triggered.v1.schema.json",
   "title": "RoutineTriggered v1",
-  "description": "A routine was started manually or by its schedule. Routing key: routine.triggered",
+  "description": "A routine was started manually, by its schedule or by a webhook call. Routing key: routine.triggered. The only consumer is the routine service itself, so adding the webhook value stayed within v1.",
   "allOf": [
     {
       "$ref": "envelope.schema.json"
@@ -39,7 +39,8 @@
         "trigger": {
           "enum": [
             "manual",
-            "schedule"
+            "schedule",
+            "webhook"
           ]
         },
         "scheduledFor": {

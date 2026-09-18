@@ -28,6 +28,9 @@ const pool = createPool(env('DATABASE_URL'));
 await waitForDatabase(pool, logger);
 await runMigrations(pool, join(import.meta.dirname, '..', 'migrations'), logger);
 const signingKey = await loadSigningKey(pool);
+// Logins for unknown emails are verified against this throwaway hash, so both failure
+// cases cost one scrypt run – the response time does not reveal which emails exist.
+const dummyPasswordHash = await hashPassword(randomUUID());
 
 interface UserRow {
   id: string;
@@ -91,8 +94,9 @@ app.post<{ Body: Credentials }>('/api/v1/auth/register', { schema: { body: crede
 app.post<{ Body: Credentials }>('/api/v1/auth/login', { schema: { body: credentialsSchema } }, async (request) => {
   const { rows } = await pool.query<UserRow>('SELECT * FROM users WHERE email = $1', [request.body.email.toLowerCase()]);
   const user = rows[0];
-  // Same response for unknown user and wrong password – no user enumeration.
-  if (!user || !(await verifyPassword(request.body.password, user.password_hash))) {
+  // Same response (and same work) for unknown user and wrong password – no user enumeration.
+  const valid = await verifyPassword(request.body.password, user?.password_hash ?? dummyPasswordHash);
+  if (!user || !valid) {
     throw new HttpError(401, 'invalid_credentials', 'Email or password is wrong');
   }
   const accessToken = await issueAccessToken(signingKey, { id: user.id, email: user.email, displayName: user.display_name }, tokenTtlSeconds);

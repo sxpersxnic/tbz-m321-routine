@@ -6,7 +6,7 @@ import { contractErrors } from '../../../contracts/validate.ts';
 import { actionCompleted, parseSendNotification, readExecutionEvent } from '../src/messages.ts';
 
 const base = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), routineName: 'Weekly Review' };
-const v2Fields = { notification: { title: 'Routine abgeschlossen', body: 'Alles erledigt' }, priority: 'high' };
+const v2Fields = { notification: { title: 'Routine completed', body: 'All done' }, priority: 'high' };
 
 const completed = (version: number, data: Record<string, unknown>) =>
   createEnvelope({ type: 'ExecutionCompleted', version, source: 'routine-service', data: { ...base, ...data } });
@@ -34,8 +34,8 @@ describe('ExecutionCompleted reader – every phase of expand and contract', () 
     assert.equal(readExecutionEvent(phases.v1, 'tolerant').title, 'Routine "Weekly Review" completed');
     for (const envelope of [phases.expand, phases.v2]) {
       const draft = readExecutionEvent(envelope, 'tolerant');
-      assert.equal(draft.title, 'Routine abgeschlossen');
-      assert.equal(draft.body, 'Alles erledigt');
+      assert.equal(draft.title, 'Routine completed');
+      assert.equal(draft.body, 'All done');
       assert.equal(draft.priority, 'high');
     }
   });

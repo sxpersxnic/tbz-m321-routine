@@ -3,8 +3,8 @@ info:
   title: Task Service API
   version: 1.0.0
   description: |
-    Aufgaben des Benutzers. Aufgaben entstehen manuell oder durch die Action
-    `task.create` einer Routine (asynchron, siehe asyncapi/routine-messaging.yaml).
+    The user's tasks. Tasks are created manually or by a routine's
+    `task.create` action (asynchronously, see asyncapi/routine-messaging.yaml).
 servers:
   - url: http://localhost:8080
 security:
@@ -13,19 +13,19 @@ security:
 paths:
   /api/v1/tasks:
     get:
-      summary: Eigene Aufgaben
+      summary: Own tasks
       operationId: listTasks
       parameters:
         - { name: status, in: query, schema: { enum: [OPEN, DONE] } }
       responses:
         '200':
-          description: Aufgaben (neueste zuerst)
+          description: tasks (newest first)
           content:
             application/json:
               schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Task' } } } }
         '401': { $ref: '#/components/responses/Problem' }
     post:
-      summary: Aufgabe manuell erstellen
+      summary: Create a task manually
       operationId: createTask
       requestBody:
         required: true
@@ -41,12 +41,12 @@ paths:
                 priority: { enum: [low, normal, high] }
                 dueDate: { type: string, format: date }
       responses:
-        '201': { description: erstellt, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
         '400': { $ref: '#/components/responses/Problem' }
 
   /api/v1/tasks/{taskId}:
     patch:
-      summary: Aufgabe erledigen / wieder öffnen
+      summary: Complete / reopen a task
       operationId: updateTaskStatus
       parameters:
         - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -60,7 +60,7 @@ paths:
               additionalProperties: false
               properties: { status: { enum: [OPEN, DONE] } }
       responses:
-        '200': { description: aktualisiert, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
 components:
@@ -68,7 +68,7 @@ components:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   responses:
     Problem:
-      description: Fehler (RFC 9457)
+      description: Error (RFC 9457)
       content:
         application/problem+json:
           schema:
@@ -84,6 +84,6 @@ components:
         priority: { enum: [low, normal, high] }
         status: { enum: [OPEN, DONE] }
         dueDate: { type: [string, 'null'], format: date }
-        sourceExecutionId: { type: [string, 'null'], format: uuid, description: gesetzt, wenn eine Routine die Aufgabe erstellt hat }
+        sourceExecutionId: { type: [string, 'null'], format: uuid, description: 'set when a routine created the task' }
         createdAt: { type: string, format: date-time }
         completedAt: { type: [string, 'null'], format: date-time }

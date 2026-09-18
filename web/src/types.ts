@@ -5,7 +5,8 @@ export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'COMPLETED' | 
 export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
 export type Priority = 'low' | 'normal' | 'high';
 
-export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string };
+export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
+export type TriggerType = Trigger['type'];
 
 export interface ActionDefinition {
   key: string;
@@ -22,6 +23,8 @@ export interface Routine {
   actions: ActionDefinition[];
   active: boolean;
   nextRunAt: string | null;
+  /** Path of the secret webhook URL – only for webhook routines. */
+  webhookPath: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -47,7 +50,7 @@ export interface Execution {
   routineId: string;
   routineName: string;
   status: ExecutionStatus;
-  trigger: 'manual' | 'schedule';
+  trigger: TriggerType;
   scheduledFor: string | null;
   correlationId: string;
   traceId: string | null;
@@ -56,6 +59,16 @@ export interface Execution {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export type StatusCounts = Partial<Record<ExecutionStatus, number>>;
+
+export interface ExecutionStats {
+  since: string;
+  /** executions created since `since` */
+  byStatus: StatusCounts;
+  /** all executions still in flight, however old */
+  inFlight: StatusCounts;
 }
 
 export interface ExecutionAction {
@@ -81,6 +94,8 @@ export interface ExecutionLogEntry {
 }
 
 export interface ExecutionDetail extends Execution {
+  /** JSON body of the webhook call that started the run. */
+  triggerPayload: Record<string, unknown> | null;
   actions: ExecutionAction[];
   log: ExecutionLogEntry[];
 }

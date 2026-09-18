@@ -1,84 +1,84 @@
 # Routine
 
-## 1. Kurzbeschreibung
+## 1. Summary
 
-**Routine** ist eine Plattform zur Erstellung und automatisierten Ausführung wiederkehrender Abläufe.
+**Routine** is a platform for creating and automatically running recurring workflows.
 
-Benutzer können sogenannte **Routinen** definieren, die aus mehreren unabhängigen Aktionen bestehen. Eine Routine kann beispielsweise jeden Montagmorgen automatisch mehrere Aufgaben ausführen:
+Users define so-called **routines** made up of several independent actions. A routine can, for example, carry out several tasks automatically every Monday morning:
 
-> Informationen abrufen → Aufgabe erstellen → Benachrichtigung senden → externen Dienst aufrufen
+> Fetch information → create a task → send a notification → call an external service
 
-Beim Ausführen einer Routine werden die einzelnen Arbeitsschritte nicht direkt und synchron nacheinander ausgeführt. Stattdessen werden Aufgaben als Nachrichten an einen Message Broker übergeben und von spezialisierten Services verarbeitet.
+When a routine runs, its individual steps are not executed directly and synchronously one after another. Instead, the work is handed to a message broker as messages and processed by specialised services.
 
-Dadurch können einzelne Services unabhängig voneinander betrieben, skaliert, aktualisiert oder vorübergehend abgeschaltet werden.
-
----
-
-## 2. Ziel des Projekts
-
-Das Projekt dient als praktische Umsetzung eines verteilten Systems nach Microservice-Prinzipien.
-
-Der Schwerpunkt liegt nicht auf einer umfangreichen Benutzeroberfläche, sondern auf:
-
-* klar abgegrenzten Services
-* autonomen Datenbeständen
-* formal definierten Schnittstellen
-* synchroner und asynchroner Kommunikation
-* Message-Broker-basierter Entkopplung
-* Idempotenz und Wiederholbarkeit
-* Ausfallsicherheit
-* horizontaler Skalierung
-* Distributed Tracing und Observability
-* Evolution von Schnittstellen ohne Systemunterbruch
-
-Die Anwendung soll dabei trotzdem einen nachvollziehbaren praktischen Nutzen haben.
+This lets individual services be operated, scaled, updated or temporarily shut down independently of each other.
 
 ---
 
-## 3. Grundidee
+## 2. Project goal
 
-Eine **Routine** beschreibt einen wiederkehrenden oder manuell auslösbaren Ablauf.
+The project is a practical implementation of a distributed system following microservice principles.
 
-Beispiel:
+The focus is not on an extensive user interface, but on:
+
+* clearly separated services
+* autonomous data stores
+* formally defined interfaces
+* synchronous and asynchronous communication
+* decoupling through a message broker
+* idempotency and repeatability
+* fault tolerance
+* horizontal scaling
+* distributed tracing and observability
+* evolving interfaces without downtime
+
+The application should still offer a comprehensible, practical benefit.
+
+---
+
+## 3. Core idea
+
+A **routine** describes a workflow that recurs or can be triggered manually.
+
+Example:
 
 ### Routine: "Weekly Review"
 
-Die Routine besteht aus folgenden Aktionen:
+The routine consists of the following actions:
 
-1. Aktuelle Informationen von einem externen Dienst abrufen
-2. Eine Aufgabe im Task-System erstellen
-3. Eine Zusammenfassung generieren
-4. Eine Benachrichtigung senden
+1. Fetch current information from an external service
+2. Create a task in the task system
+3. Generate a summary
+4. Send a notification
 
-Der Benutzer muss nicht wissen, welcher Service welche Aktion ausführt.
+The user does not need to know which service carries out which action.
 
-Aus Sicht des Benutzers ist lediglich sichtbar:
+From the user's point of view, all that is visible is:
 
 ```text
 Weekly Review
      │
      ▼
-  gestartet
+  started
      │
      ▼
-   läuft
+  running
      │
      ▼
- abgeschlossen
+ completed
 ```
 
-Intern entsteht dagegen ein verteiltes Verarbeitungssystem.
+Internally, however, a distributed processing system is at work.
 
 ---
 
-## 4. Beispielablauf
+## 4. Example flow
 
-Ein Benutzer startet eine Routine.
+A user starts a routine.
 
 ```text
 User
  │
- │ Start Routine
+ │ Start routine
  ▼
 Routine Service
  │
@@ -92,7 +92,7 @@ Task Service   Integration Service
  │               │
  │               │
  ▼               ▼
-Task erstellt   Daten abgerufen
+Task created    Data fetched
  │               │
  └───────┬───────┘
          ▼
@@ -102,37 +102,37 @@ Task erstellt   Daten abgerufen
  Notification Service
          │
          ▼
-   Benachrichtigung
+    Notification
 ```
 
-Die Services müssen dabei nicht direkt voneinander abhängig sein.
+The services do not need to depend on each other directly.
 
-Ein Service veröffentlicht ein Ereignis, ohne wissen zu müssen, welcher andere Service es konsumiert.
+A service publishes an event without having to know which other service consumes it.
 
 ---
 
-## 5. Kernkonzepte
+## 5. Core concepts
 
 ### 5.1 Routine
 
-Eine Routine beschreibt einen Ablauf und dessen Aktionen.
+A routine describes a workflow and its actions.
 
-Eine Routine besitzt unter anderem:
+Among other things, a routine has:
 
-* Namen
-* Beschreibung
-* Auslöser
-* Aktionen
-* Reihenfolge bzw. Abhängigkeiten
-* Aktivierungsstatus
+* a name
+* a description
+* a trigger
+* actions
+* an order or dependencies
+* an activation status
 
-Beispiel:
+Example:
 
 ```text
 Routine: Morning Setup
 
 Trigger:
-    Jeden Werktag um 07:30
+    Every weekday at 07:30
 
 Actions:
     1. GetWeather
@@ -144,39 +144,39 @@ Actions:
 
 ### 5.2 Trigger
 
-Ein Trigger bestimmt, wann eine Routine ausgeführt wird.
+A trigger determines when a routine runs.
 
-Mögliche Trigger:
+Possible triggers:
 
-* manueller Start
-* Zeitplan
-* externes Ereignis
+* manual start
+* schedule
+* external event
 
-Für die erste Version reicht ein manueller Trigger und ein zeitbasierter Trigger.
+For the first version, a manual trigger and a time-based trigger are enough. The implementation also supports the external event: every webhook routine gets a secret URL that other systems can call (see `scripts/demo.sh webhook`).
 
 ---
 
 ### 5.3 Action
 
-Eine Action ist eine einzelne ausführbare Aufgabe innerhalb einer Routine.
+An action is a single executable task within a routine.
 
-Beispiele:
+Examples:
 
-* HTTP-Anfrage an einen externen Dienst
-* Aufgabe erstellen
-* Nachricht senden
-* Daten abrufen
-* Webhook auslösen
+* HTTP request to an external service
+* create a task
+* send a message
+* fetch data
+* trigger a webhook
 
-Actions werden von spezialisierten Services verarbeitet.
+Actions are processed by specialised services.
 
 ---
 
-### 5.4 Routine Execution
+### 5.4 Routine execution
 
-Jede Ausführung einer Routine besitzt eine eigene Execution.
+Every run of a routine has its own execution.
 
-Beispiel:
+Example:
 
 ```text
 Routine:
@@ -186,7 +186,7 @@ Execution:
     2026-09-11 08:00
 ```
 
-Eine Execution besitzt einen Status:
+An execution has a status:
 
 ```text
 PENDING
@@ -196,7 +196,7 @@ RUNNING
 COMPLETED
 ```
 
-Bei Fehlern sind beispielsweise folgende Zustände möglich:
+On errors, states like these are possible:
 
 ```text
 RUNNING
@@ -204,7 +204,7 @@ RUNNING
 FAILED
 ```
 
-oder:
+or:
 
 ```text
 RUNNING
@@ -214,15 +214,15 @@ WAITING
 RUNNING
 ```
 
-Dadurch kann eine einzelne Ausführung unabhängig von der Definition der Routine verfolgt werden.
+This way a single run can be followed independently of the routine's definition.
 
 ---
 
-# 6. Verteilte Architektur
+## 6. Distributed architecture
 
-Die Anwendung besteht aus mehreren autonomen Services.
+The application consists of several autonomous services.
 
-Ein möglicher Zuschnitt ist:
+One possible split is:
 
 ```text
                     ┌───────────────┐
@@ -256,17 +256,17 @@ Ein möglicher Zuschnitt ist:
 └──────────────┘      └──────────────┘
 ```
 
-Die konkrete Anzahl und Aufteilung der Services wird während der Architekturplanung festgelegt.
+The exact number and split of services is decided during architecture planning.
 
-Wichtig ist, dass jeder Service für einen klar abgegrenzten Verantwortungsbereich zuständig ist.
+What matters is that each service is responsible for a clearly bounded area.
 
 ---
 
-# 7. Service-Autonomie
+## 7. Service autonomy
 
-Jeder Service besitzt seine eigenen Daten und seine eigene interne Implementierung.
+Each service owns its data and its internal implementation.
 
-Beispielsweise:
+For example:
 
 ```text
 Routine Service
@@ -279,19 +279,19 @@ Task Service
     └── Task Database
 ```
 
-Services greifen nicht direkt auf die Datenbank eines anderen Services zu.
+Services never access another service's database directly.
 
-Kommunikation erfolgt ausschliesslich über definierte Schnittstellen.
+Communication happens exclusively through defined interfaces.
 
-Dadurch kann beispielsweise die interne Datenstruktur des Notification Services verändert werden, ohne dass der Routine Service angepasst werden muss.
+This way, for example, the internal data structure of the notification service can change without the routine service having to be adapted.
 
 ---
 
-# 8. Synchrone Kommunikation
+## 8. Synchronous communication
 
-Synchrone Kommunikation wird verwendet, wenn unmittelbar eine Antwort benötigt wird.
+Synchronous communication is used when an immediate answer is needed.
 
-Beispielsweise:
+For example:
 
 ```text
 Client
@@ -305,22 +305,22 @@ Routine Service
 Client
 ```
 
-Synchrone Kommunikation eignet sich insbesondere für:
+Synchronous communication is particularly suited to:
 
-* Benutzeranfragen
-* Erstellen und Ändern von Routinen
-* Abfragen des aktuellen Status
-* Authentifizierung
+* user requests
+* creating and changing routines
+* querying the current status
+* authentication
 
-Sie soll nicht für lang laufende Hintergrundverarbeitung verwendet werden.
+It should not be used for long-running background processing.
 
 ---
 
-# 9. Asynchrone Kommunikation
+## 9. Asynchronous communication
 
-Die eigentliche Ausführung von Actions erfolgt asynchron.
+The actual execution of actions happens asynchronously.
 
-Beispiel:
+Example:
 
 ```text
 Routine Service
@@ -337,20 +337,20 @@ Worker Service
 Message Broker
 ```
 
-Der Publisher wartet nicht darauf, dass der Consumer die Aufgabe verarbeitet.
+The publisher does not wait for the consumer to process the work.
 
-Dadurch bleibt der auslösende Service funktionsfähig, auch wenn ein Consumer momentan nicht verfügbar ist.
+This keeps the triggering service working even when a consumer is currently unavailable.
 
 ---
 
-# 10. Ausfallszenario
+## 10. Failure scenario
 
-Ein zentraler Bestandteil des Projekts ist die Demonstration eines Service-Ausfalls.
+A central part of the project is demonstrating a service outage.
 
-Beispiel:
+Example:
 
 ```text
-Routine gestartet
+Routine started
       │
       ▼
 ActionRequested
@@ -362,60 +362,60 @@ Message Broker
 Notification Service DOWN
 ```
 
-Die Nachricht bleibt im Broker verfügbar.
+The message stays available in the broker.
 
-Andere Teile der Routine können weiterhin verarbeitet werden.
+Other parts of the routine can still be processed.
 
-Wird der Notification Service später wieder gestartet:
+When the notification service is started again later:
 
 ```text
 Notification Service
         │
         ▼
-liest wartende Nachricht
+reads the waiting message
         │
         ▼
-verarbeitet Action
+processes the action
         │
         ▼
 ActionCompleted
 ```
 
-Der Benutzer muss die Routine nicht erneut starten.
+The user does not have to start the routine again.
 
-Damit wird demonstriert, dass ein temporärer Ausfall eines Consumers nicht automatisch zum Verlust der Arbeit führt.
+This demonstrates that a temporary consumer outage does not automatically lose any work.
 
 ---
 
-# 11. Idempotenz
+## 11. Idempotency
 
-Nachrichten können aufgrund von Retries oder Netzwerkproblemen mehrfach zugestellt werden.
+Messages can be delivered more than once because of retries or network problems.
 
-Ein Consumer darf deshalb nicht davon ausgehen, dass jede Nachricht nur einmal eintrifft.
+A consumer therefore must not assume that each message arrives only once.
 
-Beispiel:
+Example:
 
 ```text
 ActionRequested
       │
-      ├── Delivery 1 → verarbeitet
+      ├── Delivery 1 → processed
       │
-      └── Delivery 2 → bereits verarbeitet → ignorieren
+      └── Delivery 2 → already processed → ignore
 ```
 
-Jede ausführbare Action erhält deshalb eine eindeutige ID.
+Every executable action therefore gets a unique ID.
 
-Der Consumer kann anhand dieser ID erkennen, ob eine Action bereits verarbeitet wurde.
+Using this ID, the consumer can tell whether an action has already been processed.
 
-Damit werden doppelte Aktionen verhindert.
+This prevents duplicate actions.
 
 ---
 
-# 12. Skalierung
+## 12. Scaling
 
-Verarbeitungsservices sollen horizontal skaliert werden können.
+Processing services must be able to scale horizontally.
 
-Beispielsweise:
+For example:
 
 ```text
                  Message Broker
@@ -425,34 +425,34 @@ Beispielsweise:
       Worker 1    Worker 2    Worker 3
 ```
 
-Bei höherer Last können zusätzliche Worker gestartet werden.
+Under higher load, additional workers can be started.
 
 ```text
-1 Worker
+1 worker
    ↓
-3 Worker
+3 workers
    ↓
-5 Worker
+5 workers
 ```
 
-Die Aufgaben werden dabei über den Message Broker verteilt.
+The work is distributed through the message broker.
 
-Die Services sollen möglichst stateless sein, sodass zusätzliche Instanzen ohne spezielle Konfiguration gestartet werden können.
+Services should be as stateless as possible so that extra instances can be started without special configuration.
 
 ---
 
-# 13. Schnittstellen und Verträge
+## 13. Interfaces and contracts
 
-Alle Kommunikation zwischen Services wird über explizite Verträge definiert.
+All communication between services is defined through explicit contracts.
 
-Dabei werden beispielsweise verwendet:
+These include, for example:
 
-* OpenAPI für synchrone HTTP-Schnittstellen
-* AsyncAPI bzw. definierte Event-Schemas für asynchrone Kommunikation
+* OpenAPI for synchronous HTTP interfaces
+* AsyncAPI or defined event schemas for asynchronous communication
 
-Die Verträge liegen unabhängig von den einzelnen Service-Repositories.
+The contracts live independently of the individual services.
 
-Beispielsweise:
+For example:
 
 ```text
 contracts/
@@ -461,17 +461,17 @@ contracts/
 └── notification-events.yaml
 ```
 
-Die Services dürfen keine gemeinsamen Domain-Klassen oder ORM-Modelle verwenden.
+Services must not share domain classes or ORM models.
 
-Jeder Service besitzt eigene interne Modelle und übersetzt eingehende bzw. ausgehende Daten an seinen eigenen Domain-Kontext.
+Each service has its own internal models and translates incoming and outgoing data into its own domain context.
 
 ---
 
-# 14. Evolution einer Schnittstelle
+## 14. Evolving an interface
 
-Ein wichtiger Bestandteil des Projekts ist die kontrollierte Änderung eines bestehenden Events.
+An important part of the project is changing an existing event in a controlled way.
 
-Beispielsweise wird zunächst folgende Nachricht verwendet:
+At first, for example, this message is used:
 
 ```json
 {
@@ -480,7 +480,7 @@ Beispielsweise wird zunächst folgende Nachricht verwendet:
 }
 ```
 
-Später wird die Nachricht erweitert:
+Later the message is extended:
 
 ```json
 {
@@ -493,37 +493,37 @@ Später wird die Nachricht erweitert:
 }
 ```
 
-Die Änderung darf bestehende Consumer nicht unmittelbar brechen.
+The change must not break existing consumers straight away.
 
-Dazu wird das **Expand-and-Contract-Prinzip** eingesetzt:
+This is what the **expand-and-contract principle** is for:
 
 ```text
 Version 1
    │
    ▼
-Neue Felder hinzufügen
+Add new fields
    │
    ▼
-Consumer aktualisieren
+Update consumers
    │
    ▼
-Neue Version verwenden
+Use the new version
    │
    ▼
-Alte Felder entfernen
+Remove old fields
 ```
 
-Die Migration soll ohne simultanes Deployment aller beteiligten Services möglich sein.
+The migration must be possible without deploying all involved services at the same time.
 
 ---
 
-# 15. Observability
+## 15. Observability
 
-Da eine einzelne Routine mehrere Services durchläuft, muss eine Execution über Service-Grenzen hinweg nachvollziehbar sein.
+Since a single routine passes through several services, an execution must be traceable across service boundaries.
 
-Jede Anfrage und jedes Event besitzt deshalb eine gemeinsame Korrelations- bzw. Trace-ID.
+Every request and every event therefore carries a shared correlation or trace ID.
 
-Beispiel:
+Example:
 
 ```text
 Trace ID: 7f91...
@@ -537,194 +537,195 @@ API Gateway
     └── Notification Service
 ```
 
-Die Logs aller beteiligten Services können dadurch einer einzigen Routine-Ausführung zugeordnet werden.
+This lets the logs of all involved services be attributed to a single routine run.
 
-Das ermöglicht insbesondere die Analyse von:
+In particular, it enables the analysis of:
 
-* Fehlern
-* Verzögerungen
-* Retries
-* fehlgeschlagenen Actions
-* Service-Ausfällen
-
----
-
-# 16. Security
-
-Benutzer müssen authentifiziert werden.
-
-Routinen und ihre Ausführungen gehören jeweils zu einem Benutzer.
-
-Ein Benutzer darf nur auf seine eigenen Routinen und Ausführungen zugreifen.
-
-Die Authentifizierung wird über einen externen oder eigenständigen Identity Provider realisiert.
-
-Die konkrete Technologie wird während der Architekturplanung festgelegt.
+* errors
+* delays
+* retries
+* failed actions
+* service outages
 
 ---
 
-# 17. Geplanter Haupt-Workflow
+## 16. Security
 
-Der zentrale Demo-Workflow ist:
+Users must be authenticated.
+
+Routines and their executions each belong to a user.
+
+A user may only access their own routines and executions.
+
+Authentication is provided by an external or standalone identity provider.
+
+The concrete technology is decided during architecture planning.
+
+---
+
+## 17. Planned main workflow
+
+The central demo workflow is:
 
 ```text
-1. Benutzer erstellt Routine
+1. User creates a routine
         ↓
-2. Routine wird aktiviert
+2. Routine is activated
         ↓
-3. Trigger startet Routine
+3. Trigger starts the routine
         ↓
-4. Routine Service erstellt Execution
+4. Routine service creates an execution
         ↓
-5. Actions werden als Events veröffentlicht
+5. Actions are published as events
         ↓
-6. Worker verarbeiten die Actions
+6. Workers process the actions
         ↓
-7. Worker veröffentlichen Ergebnisse
+7. Workers publish results
         ↓
-8. Execution wird aktualisiert
+8. Execution is updated
         ↓
-9. Routine wird als abgeschlossen angezeigt
+9. Routine is shown as completed
 ```
 
-Dieser Workflow bildet den Systemdurchstich für die Live-Demonstration.
+This workflow is the end-to-end slice for the live demonstration.
 
 ---
 
-# 18. Geplanter Resilienz-Workflow
+## 18. Planned resilience workflow
 
-Zusätzlich wird ein Service-Ausfall demonstriert:
+In addition, a service outage is demonstrated:
 
 ```text
-1. Routine starten
+1. Start a routine
         ↓
-2. Worker Service stoppen
+2. Stop the worker service
         ↓
-3. Action wird weiterhin veröffentlicht
+3. The action is still published
         ↓
-4. Nachricht wartet im Broker
+4. The message waits in the broker
         ↓
-5. Routine bzw. andere Services bleiben verfügbar
+5. The routine service and other services stay available
         ↓
-6. Worker Service starten
+6. Start the worker service
         ↓
-7. Nachricht wird verarbeitet
+7. The message is processed
         ↓
-8. Execution wird abgeschlossen
+8. The execution completes
 ```
 
-Damit werden die Vorteile der asynchronen Entkopplung praktisch sichtbar.
+This makes the benefits of asynchronous decoupling visible in practice.
 
 ---
 
-# 19. Projektumfang
+## 19. Project scope
 
-Die erste Version konzentriert sich bewusst auf einen kleinen Funktionsumfang.
+The first version deliberately concentrates on a small feature set.
 
-### Enthalten
+### Included
 
-* Benutzer-Authentifizierung
-* Routinen erstellen, bearbeiten und aktivieren
-* manuelles Auslösen einer Routine
-* zeitbasierte Trigger
-* mehrere Action-Typen
-* asynchrone Action-Verarbeitung
-* Status einer Routine Execution
-* Message Broker
-* Retry-Verhalten
-* Idempotenz
-* horizontale Skalierung eines Workers
-* strukturierte Logs
-* Correlation-ID bzw. Distributed Tracing
-* versionierte Schnittstellen
-* Demonstration eines Breaking Changes
-* Docker-basierter Systemstart
+* user authentication
+* creating, editing and activating routines
+* triggering a routine manually
+* time-based triggers
+* several action types
+* asynchronous action processing
+* status of a routine execution
+* message broker
+* retry behaviour
+* idempotency
+* horizontal scaling of a worker
+* structured logs
+* correlation ID and distributed tracing
+* versioned interfaces
+* demonstration of a breaking change
+* Docker-based system start
 
-### Nicht Bestandteil der ersten Version
+### Not part of the first version
 
-* komplexer visueller Workflow-Editor
-* Mobile App
-* Marketplace für Integrationen
-* umfangreiche Benutzerverwaltung
-* komplexe Berechtigungsmodelle
-* künstliche Intelligenz als Kernfunktion
-* beliebig komplexe Workflow-Verzweigungen
-* produktionsreife SaaS-Infrastruktur
+* complex visual workflow editor
+* mobile app
+* marketplace for integrations
+* extensive user management
+* complex permission models
+* artificial intelligence as a core feature
+* arbitrarily complex workflow branching
+* production-grade SaaS infrastructure
 
-Der Schwerpunkt liegt auf der Qualität des verteilten Systems und nicht auf der Anzahl der Features.
-
----
-
-# 20. Erfolgskriterien
-
-Routine gilt als erfolgreich umgesetzt, wenn:
-
-1. mindestens drei autonome Services miteinander kommunizieren;
-2. synchrone und asynchrone Kommunikation verwendet werden;
-3. Services ihre Daten unabhängig verwalten;
-4. Events über einen Message Broker verarbeitet werden;
-5. doppelte Nachrichten sicher behandelt werden;
-6. mindestens ein Worker horizontal skaliert werden kann;
-7. ein ausgefallener Consumer keine bereits veröffentlichten Aufgaben verliert;
-8. eine Routine-Ausführung über mehrere Services hinweg nachvollziehbar ist;
-9. eine Schnittstelle ohne gleichzeitiges Deployment aller abhängigen Services weiterentwickelt werden kann;
-10. das Gesamtsystem mit einem einzigen definierten Startvorgang gestartet werden kann.
+The focus is on the quality of the distributed system, not on the number of features.
 
 ---
 
-# 21. Kernidee in einem Satz
+## 20. Success criteria
 
-**Routine ist eine verteilte Automatisierungsplattform, bei der Benutzer wiederkehrende Abläufe definieren und deren einzelne Aktionen unabhängig, asynchron, fehlertolerant und skalierbar von autonomen Services verarbeitet werden.**
+Routine counts as successfully implemented when:
+
+1. at least three autonomous services communicate with each other;
+2. both synchronous and asynchronous communication are used;
+3. services manage their data independently;
+4. events are processed through a message broker;
+5. duplicate messages are handled safely;
+6. at least one worker can be scaled horizontally;
+7. a failed consumer loses none of the work already published;
+8. a routine run can be traced across several services;
+9. an interface can evolve without deploying all dependent services at the same time;
+10. the whole system can be started with a single, defined start command.
 
 ---
 
-# 22. Umsetzung
+## 21. The core idea in one sentence
 
-Die Plattform ist vollständig umgesetzt. Details: [docs/architecture.md](docs/architecture.md) · Live-Demo & Nachweis der Erfolgskriterien: [docs/demo.md](docs/demo.md) · Verträge: [contracts/](contracts/README.md)
+**Routine is a distributed automation platform where users define recurring workflows whose individual actions are processed independently, asynchronously, fault-tolerantly and scalably by autonomous services.**
 
-## Schnellstart
+---
 
-Voraussetzung: Docker (Compose v2). Für die Demo-Skripte zusätzlich `curl` und `jq`.
+## 22. Implementation
+
+The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
+
+## Quick start
+
+Prerequisite: Docker (Compose v2). The demo scripts also need `curl` and `jq`.
 
 ```bash
-docker compose up -d --build --wait   # startet das gesamte System
-scripts/demo.sh main                  # Haupt-Workflow im Terminal
-scripts/demo.sh all                   # alle Szenarien als Abnahmetest
-docker compose down -v                # stoppen und Daten löschen
+docker compose up -d --build --wait   # starts the whole system
+scripts/demo.sh main                  # main workflow in the terminal
+scripts/demo.sh all                   # all scenarios as an acceptance test
+scripts/demo.sh hook "Webhook Inbox" '{"hello":"world"}'   # call a webhook routine by hand
+docker compose down -v                # stop and delete data
 ```
 
 | | URL |
 | --- | --- |
-| Web-UI & API (Gateway) | <http://localhost:8080> – Login `demo@routine.local` / `demo12345` |
-| RabbitMQ Management | <http://localhost:15672> – `routine` / `routine` |
-| Jaeger (Distributed Tracing) | <http://localhost:16686> |
-| Mock External APIs | <http://localhost:8090> |
+| Web UI & API (gateway) | <http://localhost:8080> – sign in with `demo@routine.local` / `demo12345` |
+| RabbitMQ management | <http://localhost:15672> – `routine` / `routine` |
+| Jaeger (distributed tracing) | <http://localhost:16686> |
+| Mock external APIs | <http://localhost:8090> |
 
-## Aufbau
+## Layout
 
 ```text
-compose.yaml                 Gesamtsystem (16 Container)
-contracts/                   OpenAPI, AsyncAPI, JSON Schemas (unabhängig von den Services)
-infra/rabbitmq/              Broker-Topologie als Code
-libs/service-kit/            technisches Chassis (Logging, HTTP, DB, Broker, Auth, Tracing) – keine Domain-Modelle
+compose.yaml                 whole system (16 containers)
+contracts/                   OpenAPI, AsyncAPI, JSON Schemas (independent of the services)
+infra/rabbitmq/              broker topology as code
+libs/service-kit/            technical chassis (logging, HTTP, DB, broker, auth, tracing) – no domain models
 services/
-  gateway/                   API Gateway (einziger Einstiegspunkt)
-  identity-service/          Benutzer, Login, JWT/JWKS
-  routine-service/           Routinen, Orchestrierung, Scheduler, Outbox
-  task-service/              Aufgaben (Action task.create)
-  notification-service/      Posteingang (notification.send, Execution-Events)
-  integration-worker/        skalierbarer Worker für externe Aufrufe
-  mock-external/             simulierte Drittanbieter
-web/                         Web-Client (React + Vite, nginx) – eigener Service
-scripts/demo.sh              Demo-Szenarien / Abnahmetest
+  gateway/                   API gateway (single entry point)
+  identity-service/          users, login, JWT/JWKS
+  routine-service/           routines, orchestration, scheduler, outbox
+  task-service/              tasks (action task.create)
+  notification-service/      inbox (notification.send, execution events)
+  integration-worker/        scalable worker for external calls
+  mock-external/             simulated third-party services
+web/                         web client (React + Vite, nginx) – its own service
+scripts/demo.sh              demo scenarios / acceptance test
 ```
 
-## Entwicklung
+## Development
 
 ```bash
-npm install          # Abhängigkeiten der Services (Node ≥ 24)
-npm --prefix web install   # Abhängigkeiten des Web-Clients
-npm --prefix web run dev   # UI mit Hot Reload auf :5173 (API via laufendem Gateway)
-npm run typecheck    # TypeScript
-npm test             # Unit- und Contract-Tests
+npm install                # service dependencies (Node ≥ 24)
+npm --prefix web install   # web client dependencies
+npm --prefix web run dev   # UI with hot reload on :5173 (API via the running gateway)
+npm run typecheck          # TypeScript
+npm test                   # unit and contract tests
 ```

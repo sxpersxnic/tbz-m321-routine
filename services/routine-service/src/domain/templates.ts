@@ -1,6 +1,6 @@
 /**
  * Minimal template language for action params, e.g.
- *   "Heute: {{actions.weather.summary}}"
+ *   "Today: {{actions.weather.summary}}"
  * References are resolved when an action is dispatched, using outputs of
  * actions from earlier steps.
  */
@@ -11,6 +11,8 @@ const SINGLE_PLACEHOLDER = /^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/;
 export interface TemplateScope {
   routine: { id: string; name: string };
   execution: { id: string; trigger: string; startedAt: string };
+  /** How the run was started; `body` is the JSON a webhook call sent (empty for other triggers). */
+  trigger: { type: string; body: Record<string, unknown> };
   actions: Record<string, unknown>;
   now: string;
 }

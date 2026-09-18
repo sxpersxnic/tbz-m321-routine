@@ -10,7 +10,7 @@ const logger = createLogger('mock-external');
 const latency = { min: envInt('LATENCY_MIN_MS', 200), max: envInt('LATENCY_MAX_MS', 800) };
 const app = createHttpServer({ service: 'mock-external', logger });
 
-const CONDITIONS = ['sonnig', 'leicht bewölkt', 'bewölkt', 'Regenschauer', 'Gewitter', 'Nebel'];
+const CONDITIONS = ['sunny', 'partly cloudy', 'cloudy', 'showers', 'thunderstorms', 'fog'];
 
 function hash(text: string): number {
   let value = 0;
@@ -23,7 +23,7 @@ const idempotencyKey = (request: FastifyRequest) => String(request.headers['idem
 
 app.get<{ Querystring: { city?: string } }>('/weather', async (request) => {
   await randomLatency();
-  const city = request.query.city ?? 'Zürich';
+  const city = request.query.city ?? 'Zurich';
   const seed = hash(`${city.toLowerCase()}-${new Date().toISOString().slice(0, 13)}`);
   return { city, temperatureC: 8 + (seed % 20), condition: CONDITIONS[seed % CONDITIONS.length], observedAt: new Date().toISOString() };
 });
