@@ -934,7 +934,6 @@ input.task-check.prio-high:not(:checked) { border-color: var(--err-fill); }
   position: relative; transition: background var(--soft) var(--ease), box-shadow var(--soft) var(--ease);
 }
 .notice-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.notice .glyph { width: 38px; height: 38px; border-radius: 10px; }
 .notice-main { display: block; width: 100%; min-width: 0; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; }
 button.notice-main { cursor: pointer; }
 .notice-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }

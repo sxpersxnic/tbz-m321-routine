@@ -97,7 +97,6 @@ export function Notifications({ onChange }: { onChange: () => void }) {
       <li key={notification.id} className={`notice ${read ? 'read' : ''} ${selected.has(notification.id) ? 'selected' : ''} prio-${notification.priority}`}>
         <input type="checkbox" className="notice-select" checked={selected.has(notification.id)}
           onChange={() => toggleSelected(notification.id)} aria-label={`Select "${notification.title}"`} />
-        <span className="glyph tint-pink" aria-hidden="true"><Icon name="bell" size={20} /></span>
         <button type="button" className="notice-main grow" onClick={() => setOpenId(notification.id)} aria-haspopup="dialog">
           <span className="notice-top">
             <span className="notice-title">

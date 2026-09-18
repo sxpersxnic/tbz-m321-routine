@@ -20,7 +20,7 @@
 
 - [x] Remove the blue dot which indicates unread notifications, since read/unread state is already indicated by the bold title and background color of the notification card. The blue dot is redundant and adds visual noise.
 
-- [ ] Since all notifications have the same icon, it makes no sense to show the icon in the notification card. Remove the icon from the notification card.
+- [x] Since all notifications have the same icon, it makes no sense to show the icon in the notification card. Remove the icon from the notification card.
 
 - [ ] Instead of permanently displaying the checkbox to select a notification card, the checkbox should only be displayed when the user hovers over the notification card. This will reduce visual noise and make the page cleaner. Make sure to reserve space for the checkbox so that the notification card doesn't move when the checkbox is displayed.
 
