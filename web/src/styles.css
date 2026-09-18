@@ -1134,3 +1134,12 @@ button.notice-main { cursor: pointer; }
 .filter-selects { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .inbox-count { color: var(--muted); font-size: 13px; margin: -6px 0 -10px; }
 @media (max-width: 600px) { .filter-selects { margin-left: 0; } }
+
+/* ---------------------------------------------------------------- inbox selection */
+.selection-bar {
+  position: sticky; top: 12px; z-index: 20; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px 8px 8px; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  animation: pop 0.18s var(--ease);
+}
+.notice-select { width: 18px; height: 18px; margin: 10px 0 0; flex: none; accent-color: var(--accent-fill); cursor: pointer; }
+.notice.selected { box-shadow: 0 0 0 2px var(--accent-fill); }

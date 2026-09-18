@@ -180,6 +180,19 @@ app.post<{ Params: { notificationId: string } }>(
   },
 );
 
+app.delete<{ Params: { notificationId: string } }>(
+  '/api/v1/notifications/:notificationId',
+  { schema: { params: { type: 'object', required: ['notificationId'], properties: { notificationId: { type: 'string', format: 'uuid' } } } } },
+  async (request, reply) => {
+    const user = requireUser(request);
+    // source_key stays unique only while the row exists – a redelivered message after a delete
+    // would bring the notification back, which is the lesser evil than losing a first delivery
+    const { rowCount } = await pool.query('DELETE FROM notifications WHERE id = $1 AND owner_id = $2', [request.params.notificationId, user.id]);
+    if (!rowCount) throw notFound('Notification');
+    return reply.status(204).send();
+  },
+);
+
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });
 logger.info({ readerMode }, 'notification-service ready');
 

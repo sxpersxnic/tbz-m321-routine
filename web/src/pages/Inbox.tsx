@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
-import { Empty, ErrorNote, Icon, IconButton, Modal, Skeleton } from '../components/ui.tsx';
+import { ConfirmDialog, Empty, ErrorNote, Icon, IconButton, Modal, Skeleton } from '../components/ui.tsx';
 import { dateTime, groupByDay, relative } from '../format.ts';
 import { useNow, usePolling } from '../hooks.ts';
 import type { Notification, Priority } from '../types.ts';
@@ -23,6 +23,8 @@ export function Notifications({ onChange }: { onChange: () => void }) {
   const [sort, setSort] = useState<Sort>('newest');
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const notifications = usePolling(() => api.notifications(), 3000);
   const all = notifications.data ?? [];
   const unread = all.filter((notification) => !notification.readAt);
@@ -49,6 +51,32 @@ export function Notifications({ onChange }: { onChange: () => void }) {
   const resetFilters = () => { setStatus('all'); setPriority('all'); setSearch(''); };
   const counts: Record<Status, number> = { all: all.length, unread: unread.length, read: all.length - unread.length };
 
+  // only what still exists counts as selected – a poll may have removed some
+  const chosen = all.filter((notification) => selected.has(notification.id));
+  const chosenUnread = chosen.filter((notification) => !notification.readAt);
+  const allVisibleChosen = visible.length > 0 && visible.every((notification) => selected.has(notification.id));
+  const toggleSelected = (id: string) => setSelected((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+
+  async function remove(ids: string[]) {
+    setConfirmDelete(false);
+    notifications.mutate((items) => items.filter((item) => !ids.includes(item.id)));
+    setSelected(new Set());
+    try {
+      await Promise.all(ids.map((id) => api.deleteNotification(id)));
+      toast(ids.length === 1 ? 'Notification deleted' : `${ids.length} notifications deleted`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      onChange();
+      notifications.reload();
+    }
+  }
+
   async function markRead(ids: string[]) {
     const now = new Date().toISOString();
     notifications.mutate((items) => items.map((item) => (ids.includes(item.id) ? { ...item, readAt: item.readAt ?? now } : item)));
@@ -66,8 +94,10 @@ export function Notifications({ onChange }: { onChange: () => void }) {
   const card = (notification: Notification) => {
     const read = Boolean(notification.readAt);
     return (
-      <li key={notification.id} className={`notice ${read ? 'read' : ''} prio-${notification.priority}`}>
+      <li key={notification.id} className={`notice ${read ? 'read' : ''} ${selected.has(notification.id) ? 'selected' : ''} prio-${notification.priority}`}>
         {!read && <span className="unread-dot" aria-hidden="true" />}
+        <input type="checkbox" className="notice-select" checked={selected.has(notification.id)}
+          onChange={() => toggleSelected(notification.id)} aria-label={`Select "${notification.title}"`} />
         <span className="glyph tint-pink" aria-hidden="true"><Icon name="bell" size={20} /></span>
         <button type="button" className="notice-main grow" onClick={() => setOpenId(notification.id)} aria-haspopup="dialog">
           <span className="notice-top">
@@ -101,6 +131,31 @@ export function Notifications({ onChange }: { onChange: () => void }) {
           Mark all read
         </button>
       </header>
+
+      {chosen.length > 0 && (
+        <div className="selection-bar" role="region" aria-label="Selection">
+          <IconButton icon="x" label="Clear selection" onClick={() => setSelected(new Set())} />
+          <strong className="grow" aria-live="polite">{chosen.length} selected</strong>
+          {!allVisibleChosen && (
+            <button type="button" className="btn plain small" onClick={() => setSelected(new Set([...selected, ...visible.map((notification) => notification.id)]))}>
+              Select all
+            </button>
+          )}
+          <button type="button" className="btn small tinted" disabled={chosenUnread.length === 0}
+            onClick={() => { void markRead(chosenUnread.map((notification) => notification.id)); setSelected(new Set()); }}>
+            <Icon name="check" size={14} /> Mark as read
+          </button>
+          <button type="button" className="btn small danger" onClick={() => setConfirmDelete(true)}>
+            <Icon name="trash" size={14} /> Delete
+          </button>
+        </div>
+      )}
+
+      <ConfirmDialog open={confirmDelete} danger confirmLabel="Delete"
+        title={chosen.length === 1 ? 'Delete this notification?' : `Delete ${chosen.length} notifications?`}
+        onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove(chosen.map((notification) => notification.id))}>
+        <p>This cannot be undone.</p>
+      </ConfirmDialog>
 
       {all.length > 0 && (
         <div className="inbox-controls">

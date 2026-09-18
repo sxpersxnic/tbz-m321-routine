@@ -16,4 +16,4 @@
 
 - [x] "Inbox" page needs search, sort and filter functionality additional to "Mark all read" button.
 
-- [ ] Single entries in "Inbox" page should be selectable, when atleast one entry is selected, a "Mark as read" and "Delete" buttons should be shown at the top of the page.
+- [x] Single entries in "Inbox" page should be selectable, when atleast one entry is selected, a "Mark as read" and "Delete" buttons should be shown at the top of the page.

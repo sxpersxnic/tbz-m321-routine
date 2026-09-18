@@ -208,6 +208,7 @@ export const api = {
     return (await get<{ items: Notification[] }>(`/api/v1/notifications?${query}`)).items;
   },
   markRead: (id: string) => send<Notification>('POST', `/api/v1/notifications/${id}/read`),
+  deleteNotification: (id: string) => send<null>('DELETE', `/api/v1/notifications/${id}`),
 
   system: () => get<SystemStatus>('/api/v1/system/status'),
 };

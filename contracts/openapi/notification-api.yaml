@@ -37,6 +37,16 @@ paths:
         '200': { description: marked, content: { application/json: { schema: { $ref: '#/components/schemas/Notification' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /api/v1/notifications/{notificationId}:
+    delete:
+      summary: Delete a notification
+      operationId: deleteNotification
+      parameters:
+        - { name: notificationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
