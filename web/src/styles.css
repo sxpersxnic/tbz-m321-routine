@@ -1145,3 +1145,6 @@ button.notice-main { cursor: pointer; }
 .notice:hover .notice-select, .notice:focus-within .notice-select, .notice-select:checked, .notice-list.selecting .notice-select { opacity: 1; }
 @media (hover: none) { .notice-select { opacity: 1; } }
 .notice.selected { box-shadow: 0 0 0 2px var(--accent-fill); }
+.list-look { display: flex; gap: 16px; align-items: center; }
+.list-look-preview { width: 52px; height: 52px; border-radius: 50%; flex: none; }
+.list-look .appearance-group, .form-stack .appearance-group.icons { justify-content: flex-start; }

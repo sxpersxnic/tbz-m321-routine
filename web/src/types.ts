@@ -111,6 +111,8 @@ export interface TaskList {
   name: string;
   description: string;
   color: string;
+  /** Chosen symbol; null = checklist. */
+  icon: string | null;
   /** "Todo" – where tasks without a list go; cannot be deleted. */
   isDefault: boolean;
   createdAt: string;
@@ -120,6 +122,7 @@ export interface TaskListInput {
   name: string;
   description: string;
   color: string;
+  icon: string | null;
 }
 
 export interface Task {

@@ -62,6 +62,7 @@ interface TaskListRow {
   name: string;
   description: string;
   color: string;
+  icon: string | null;
   is_default: boolean;
   created_at: Date;
 }
@@ -75,6 +76,7 @@ const taskListDto = (row: TaskListRow) => ({
   name: row.name,
   description: row.description,
   color: row.color,
+  icon: row.icon,
   isDefault: row.is_default,
   createdAt: row.created_at,
 });
@@ -273,9 +275,10 @@ const listProperties = {
   name: { type: 'string', minLength: 1, maxLength: 60, pattern: '\\S' },
   description: { type: 'string', maxLength: 500 },
   color: { type: 'string', enum: LIST_COLORS },
+  icon: { type: ['string', 'null'], pattern: '^[a-z][a-z0-9-]{0,39}$' },
 } as const;
 
-type ListBody = { name: string; description?: string; color?: string };
+type ListBody = { name: string; description?: string; color?: string; icon?: string | null };
 
 app.get('/api/v1/task-lists', async (request) => {
   const user = requireUser(request);
@@ -292,10 +295,10 @@ app.post<{ Body: ListBody }>(
   { schema: { body: { type: 'object', required: ['name'], additionalProperties: false, properties: listProperties } } },
   async (request, reply) => {
     const user = requireUser(request);
-    const { name, description = '', color = 'sky' } = request.body;
+    const { name, description = '', color = 'sky', icon = null } = request.body;
     const { rows } = await pool.query<TaskListRow>(
-      'INSERT INTO task_lists (id, owner_id, name, description, color) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [randomUUID(), user.id, name.trim(), description.trim(), color],
+      'INSERT INTO task_lists (id, owner_id, name, description, color, icon) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+      [randomUUID(), user.id, name.trim(), description.trim(), color, icon],
     );
     return reply.status(201).header('location', `/api/v1/task-lists/${rows[0].id}`).send(taskListDto(rows[0]));
   },
@@ -306,12 +309,14 @@ app.patch<{ Params: { listId: string }; Body: Partial<ListBody> }>(
   { schema: { params: listParams, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: listProperties } } },
   async (request) => {
     const user = requireUser(request);
-    const { name, description, color } = request.body;
+    const { name, description, color, icon } = request.body;
+    // icon: omitted = unchanged, null = back to the default symbol
     const { rows } = await pool.query<TaskListRow>(
       `UPDATE task_lists
-          SET name = COALESCE($3, name), description = COALESCE($4, description), color = COALESCE($5, color)
+          SET name = COALESCE($3, name), description = COALESCE($4, description), color = COALESCE($5, color),
+              icon = CASE WHEN $6 THEN $7 ELSE icon END
         WHERE id = $1 AND owner_id = $2 RETURNING *`,
-      [request.params.listId, user.id, name?.trim() ?? null, description?.trim() ?? null, color ?? null],
+      [request.params.listId, user.id, name?.trim() ?? null, description?.trim() ?? null, color ?? null, icon !== undefined, icon ?? null],
     );
     if (!rows[0]) throw notFound('Task list');
     return taskListDto(rows[0]);

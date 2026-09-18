@@ -135,6 +135,7 @@ components:
         name: { type: string, minLength: 1, maxLength: 60 }
         description: { type: string, maxLength: 500 }
         color: { enum: [sky, indigo, violet, pink, orange, green, teal, grey] }
+        icon: { type: [string, 'null'], pattern: '^[a-z][a-z0-9-]{0,39}$', description: 'symbol from the client''s icon set; null = default (checklist)' }
 
     TaskList:
       type: object
@@ -143,6 +144,7 @@ components:
         name: { type: string }
         description: { type: string }
         color: { type: string }
+        icon: { type: [string, 'null'] }
         isDefault: { type: boolean }
         createdAt: { type: string, format: date-time }
 

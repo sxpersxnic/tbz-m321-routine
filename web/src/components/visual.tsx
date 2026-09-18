@@ -44,9 +44,10 @@ export function RoutineGlyph({ routine, size = 40 }: { routine: Looks & Pick<Rou
   );
 }
 
-// ---------------------------------------------------------------- appearance picker
+// ---------------------------------------------------------------- appearance pickers
 
-export const ROUTINE_COLORS: Array<{ tint: Tint; label: string }> = [
+/** The palette routines and task lists choose from. */
+export const COLOR_CHOICES: Array<{ tint: Tint; label: string }> = [
   { tint: 'sky', label: 'Blue' },
   { tint: 'indigo', label: 'Indigo' },
   { tint: 'violet', label: 'Purple' },
@@ -57,7 +58,8 @@ export const ROUTINE_COLORS: Array<{ tint: Tint; label: string }> = [
   { tint: 'grey', label: 'Graphite' },
 ];
 
-export const ROUTINE_ICONS: Array<{ name: string; label: string }> = [
+/** The symbols routines and task lists choose from. */
+export const ICON_CHOICES: Array<{ name: string; label: string }> = [
   { name: 'bolt', label: 'Bolt' },
   { name: 'sparkles', label: 'Sparkles' },
   { name: 'star', label: 'Star' },
@@ -86,8 +88,60 @@ export interface Appearance {
 }
 
 /**
- * Colour swatches and a symbol grid, with a live preview. "Automatic" (null)
- * keeps following the first step, so a routine that never chose still looks right.
+ * Colour swatches. With `auto`, a first swatch stands for null ("Automatic"),
+ * drawn in the colour it currently resolves to.
+ */
+export function ColorPicker({ value, onChange, auto, label = 'Colour', labelledBy }: {
+  value: string | null;
+  onChange: (next: string | null) => void;
+  auto?: { tint: Tint; title: string };
+  label?: string;
+  labelledBy?: string;
+}) {
+  return (
+    <div className="appearance-group" role="group" aria-label={labelledBy ? undefined : label} aria-labelledby={labelledBy}>
+      {auto && (
+        <button type="button" className={`swatch swatch-auto tint-${auto.tint}`} aria-pressed={value === null}
+          title={auto.title} aria-label="Automatic colour" onClick={() => onChange(null)}>
+          <Icon name="sparkles" size={14} />
+        </button>
+      )}
+      {COLOR_CHOICES.map((color) => (
+        <button key={color.tint} type="button" className={`swatch tint-${color.tint}`} aria-pressed={value === color.tint}
+          title={color.label} aria-label={color.label} onClick={() => onChange(color.tint)} />
+      ))}
+    </div>
+  );
+}
+
+/** A grid of symbols; `auto` works like in ColorPicker. */
+export function IconPicker({ value, onChange, auto, labelledBy }: {
+  value: string | null;
+  onChange: (next: string | null) => void;
+  auto?: { glyph: string; title: string };
+  labelledBy?: string;
+}) {
+  return (
+    <div className="appearance-group icons" role="group" aria-label={labelledBy ? undefined : 'Icon'} aria-labelledby={labelledBy}>
+      {auto && (
+        <button type="button" className="icon-choice" aria-pressed={value === null}
+          title={auto.title} aria-label="Automatic icon" onClick={() => onChange(null)}>
+          <Icon name={auto.glyph} size={20} /><span className="icon-choice-auto" aria-hidden="true">A</span>
+        </button>
+      )}
+      {ICON_CHOICES.map((icon) => (
+        <button key={icon.name} type="button" className="icon-choice" aria-pressed={value === icon.name}
+          title={icon.label} aria-label={icon.label} onClick={() => onChange(icon.name)}>
+          <Icon name={icon.name} size={20} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A routine's colour and symbol with a live preview. "Automatic" (null) keeps
+ * following the first step, so a routine that never chose still looks right.
  */
 export function AppearancePicker({ value, actions, onChange }: {
   value: Appearance;
@@ -99,28 +153,10 @@ export function AppearancePicker({ value, actions, onChange }: {
   return (
     <div className="appearance">
       <span className={`glyph appearance-preview tint-${look.tint}`} aria-hidden="true"><Icon name={look.glyph} size={34} /></span>
-      <div className="appearance-group" role="group" aria-label="Colour">
-        <button type="button" className={`swatch swatch-auto tint-${auto.tint}`} aria-pressed={value.color === null}
-          title="Automatic – colour of the first step" aria-label="Automatic colour" onClick={() => onChange({ ...value, color: null })}>
-          <Icon name="sparkles" size={14} />
-        </button>
-        {ROUTINE_COLORS.map((color) => (
-          <button key={color.tint} type="button" className={`swatch tint-${color.tint}`} aria-pressed={value.color === color.tint}
-            title={color.label} aria-label={color.label} onClick={() => onChange({ ...value, color: color.tint })} />
-        ))}
-      </div>
-      <div className="appearance-group icons" role="group" aria-label="Icon">
-        <button type="button" className="icon-choice" aria-pressed={value.icon === null}
-          title="Automatic – icon of the first step" aria-label="Automatic icon" onClick={() => onChange({ ...value, icon: null })}>
-          <Icon name={auto.glyph} size={20} /><span className="icon-choice-auto" aria-hidden="true">A</span>
-        </button>
-        {ROUTINE_ICONS.map((icon) => (
-          <button key={icon.name} type="button" className="icon-choice" aria-pressed={value.icon === icon.name}
-            title={icon.label} aria-label={icon.label} onClick={() => onChange({ ...value, icon: icon.name })}>
-            <Icon name={icon.name} size={20} />
-          </button>
-        ))}
-      </div>
+      <ColorPicker value={value.color} onChange={(color) => onChange({ ...value, color })}
+        auto={{ tint: auto.tint, title: 'Automatic – colour of the first step' }} />
+      <IconPicker value={value.icon} onChange={(icon) => onChange({ ...value, icon })}
+        auto={{ glyph: auto.glyph, title: 'Automatic – icon of the first step' }} />
     </div>
   );
 }

@@ -2,12 +2,15 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
 import { ConfirmDialog, Empty, ErrorNote, Icon, Menu, Modal, Skeleton } from '../components/ui.tsx';
-import { ROUTINE_COLORS } from '../components/visual.tsx';
+import { ColorPicker, IconPicker } from '../components/visual.tsx';
 import { date } from '../format.ts';
 import { usePolling } from '../hooks.ts';
 import type { Priority, Task, TaskList, TaskListInput } from '../types.ts';
 
 const PRIORITY_LABEL: Record<Priority, string> = { low: 'Low', normal: 'Normal', high: 'High' };
+
+const DEFAULT_LIST_ICON = 'checklist';
+const listIcon = (list: Pick<TaskList, 'icon'>) => list.icon ?? DEFAULT_LIST_ICON;
 
 type SmartKey = 'today' | 'scheduled' | 'open' | 'done';
 
@@ -211,7 +214,7 @@ export function Tasks() {
               <li key={list.id}>
                 <button type="button" className={`list-row task-list-row ${currentList?.id === list.id ? 'selected' : ''}`}
                   aria-pressed={currentList?.id === list.id} onClick={() => setView({ list: list.id })}>
-                  <span className={`glyph tint-${list.color}`} aria-hidden="true"><Icon name="checklist" size={16} /></span>
+                  <span className={`glyph tint-${list.color}`} aria-hidden="true"><Icon name={listIcon(list)} size={16} /></span>
                   <span className="grow">
                     <span className="row-title">{list.name}</span>
                     {list.description && <span className="row-sub">{list.description}</span>}
@@ -366,14 +369,16 @@ function ListDialog({ list, onClose, onSaved }: {
   onSaved: (saved: TaskList) => void;
 }) {
   const toast = useToast();
-  const [input, setInput] = useState<TaskListInput>({ name: '', description: '', color: 'sky' });
+  const [input, setInput] = useState<TaskListInput>({ name: '', description: '', color: 'sky', icon: null });
   const [saving, setSaving] = useState(false);
   const open = list !== null;
   const existing = list !== null && list !== 'new' ? list : null;
 
   useEffect(() => {
     if (!open) return;
-    setInput(existing ? { name: existing.name, description: existing.description, color: existing.color } : { name: '', description: '', color: 'sky' });
+    setInput(existing
+      ? { name: existing.name, description: existing.description, color: existing.color, icon: existing.icon }
+      : { name: '', description: '', color: 'sky', icon: null });
     setSaving(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
@@ -405,14 +410,17 @@ function ListDialog({ list, onClose, onSaved }: {
           <input type="text" maxLength={500} value={input.description} placeholder="Optional"
             onChange={(event) => setInput({ ...input, description: event.target.value })} />
         </label>
-        <div className="field">
-          <span id="list-color-label">Colour</span>
-          <div className="appearance-group" role="group" aria-labelledby="list-color-label" style={{ justifyContent: 'flex-start' }}>
-            {ROUTINE_COLORS.map((color) => (
-              <button key={color.tint} type="button" className={`swatch tint-${color.tint}`} aria-pressed={input.color === color.tint}
-                title={color.label} aria-label={color.label} onClick={() => setInput({ ...input, color: color.tint })} />
-            ))}
+        <div className="list-look">
+          <span className={`glyph list-look-preview tint-${input.color}`} aria-hidden="true"><Icon name={listIcon(input)} size={26} /></span>
+          <div className="field grow">
+            <span id="list-color-label">Colour</span>
+            <ColorPicker labelledBy="list-color-label" value={input.color} onChange={(color) => setInput({ ...input, color: color ?? 'sky' })} />
           </div>
+        </div>
+        <div className="field">
+          <span id="list-icon-label">Icon</span>
+          <IconPicker labelledBy="list-icon-label" value={listIcon(input)}
+            onChange={(icon) => setInput({ ...input, icon: icon === DEFAULT_LIST_ICON ? null : icon })} />
         </div>
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>

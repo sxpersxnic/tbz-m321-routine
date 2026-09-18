@@ -24,7 +24,7 @@
 
 - [x] Instead of permanently displaying the checkbox to select a notification card, the checkbox should only be displayed when the user hovers over the notification card. This will reduce visual noise and make the page cleaner. Make sure to reserve space for the checkbox so that the notification card doesn't move when the checkbox is displayed.
 
-- [ ] Users should be able to customize icon and color of a task list.
+- [x] Users should be able to customize icon and color of a task list.
 
 - [ ] Theres a bug on routine cards: The card can't be clicked anywhere on the vertical space where the run button is. For example:
 
