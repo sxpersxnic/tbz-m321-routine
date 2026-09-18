@@ -28,6 +28,7 @@ interface Draft {
   description: string;
   icon: string | null;
   color: string | null;
+  active: boolean;
   triggerType: TriggerType;
   cron: string;
   timezone: string;
@@ -89,12 +90,14 @@ function toParams(action: DraftAction): Record<string, unknown> {
   return params;
 }
 
-function fromRoutine(routine: RoutineInput): Draft {
+/** Templates carry no `active` – a routine made from one starts active. */
+function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
   return {
     name: routine.name,
     description: routine.description ?? '',
     icon: routine.icon ?? null,
     color: routine.color ?? null,
+    active: routine.active ?? true,
     triggerType: routine.trigger.type,
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
@@ -238,7 +241,7 @@ const TIMEZONES: string[] = (() => {
   }
 })();
 
-const EMPTY: Draft = { name: '', description: '', icon: null, color: null, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [] };
+const EMPTY: Draft = { name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [] };
 
 // ---------------------------------------------------------------- component
 
@@ -262,7 +265,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   const [draft, setDraft] = useState<Draft>(initial);
   const [version, setVersion] = useState<number>();
   const [loaded, setLoaded] = useState(!editing);
-  const [activate, setActivate] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -435,13 +438,14 @@ export function RoutineEditor({ id }: { id?: string }) {
     setSaving(true);
     try {
       if (editing && id) {
-        const routine = await api.updateRoutine(id, { ...input, version });
+        let routine = await api.updateRoutine(id, { ...input, version });
+        if (routine.active !== draft.active) routine = await api.setActive(id, draft.active);
         setBaseline(JSON.stringify(draft));
         toast(`"${routine.name}" saved`);
         navigate(`/routines/${routine.id}`);
       } else {
         const routine = await api.createRoutine(input);
-        if (activate) await api.setActive(routine.id, true);
+        if (draft.active) await api.setActive(routine.id, true);
         setBaseline(JSON.stringify(draft));
         toast(`"${routine.name}" created`);
         navigate(`/routines/${routine.id}`);
@@ -455,6 +459,18 @@ export function RoutineEditor({ id }: { id?: string }) {
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (!id) return;
+    setConfirmDelete(false);
+    try {
+      await api.deleteRoutine(id);
+      toast(`"${draft.name}" deleted`);
+      navigate('/routines');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
     }
   }
 
@@ -545,6 +561,11 @@ export function RoutineEditor({ id }: { id?: string }) {
         if (dirty && !confirm('Discard changes?')) event.preventDefault();
       }}><Icon name="back" size={18} /> {editing ? 'Back' : 'Routines'}</a>
 
+      <ConfirmDialog open={confirmDelete} title={`Delete "${draft.name || 'this routine'}"?`} confirmLabel="Delete" danger
+        onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()}>
+        <p>The routine and its history will be removed permanently. To stop it for a while, switch it off instead.</p>
+      </ConfirmDialog>
+
       <ConfirmDialog
         open={pendingTemplate !== null}
         title="Use this template?"
@@ -567,7 +588,7 @@ export function RoutineEditor({ id }: { id?: string }) {
               <Icon name={look.glyph} size={30} />
             </button>
             <div className="grow">
-            <h1 className="eyebrow">{editing ? 'Edit routine' : 'New routine'}</h1>
+            <h1 className="eyebrow">{editing ? 'Settings' : 'New routine'}</h1>
             <input id={nameFieldId} className={`title-input ${invalid.has(nameFieldId) ? 'invalid' : ''}`} value={draft.name} maxLength={120}
               placeholder="Name" aria-label="Name" aria-invalid={invalid.has(nameFieldId) || undefined}
               onChange={(event) => update({ name: event.target.value })} />
@@ -901,13 +922,11 @@ export function RoutineEditor({ id }: { id?: string }) {
             </div>
           </div>
           <div className="card save-card">
-            {!editing && (
-              <label className="switch">
-                <input type="checkbox" checked={activate} onChange={(event) => setActivate(event.target.checked)} />
-                <span className="switch-track" />
-                <span className="switch-label">Active</span>
-              </label>
-            )}
+            <label className="switch">
+              <input type="checkbox" checked={draft.active} onChange={(event) => update({ active: event.target.checked })} />
+              <span className="switch-track" />
+              <span className="switch-label">Active</span>
+            </label>
             <button type="button" className="btn primary large block" disabled={saving} onClick={save}>
               {saving ? <><span className="spinner" /> Saving</> : editing ? 'Save' : 'Create'}
             </button>
@@ -918,6 +937,13 @@ export function RoutineEditor({ id }: { id?: string }) {
               </p>
             )}
           </div>
+          {editing && (
+            <div className="card danger-card">
+              <button type="button" className="btn danger block" onClick={() => setConfirmDelete(true)}>
+                <Icon name="trash" size={16} /> Delete routine
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

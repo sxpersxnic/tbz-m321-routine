@@ -62,17 +62,6 @@ function useSetActive(routine: Routine, onChange: () => void) {
   return { set, active: override ?? routine.active };
 }
 
-function ActiveToggle({ routine, onChange }: { routine: Routine; onChange: () => void }) {
-  const { set, active } = useSetActive(routine, onChange);
-  return (
-    <label className="switch">
-      <input type="checkbox" checked={active} onChange={() => void set(!active)} />
-      <span className="switch-track" />
-      <span className="switch-label">Active</span>
-    </label>
-  );
-}
-
 /** "Manual" / "Every weekday at 07:30" – when, as a label. */
 const whenText = (routine: Routine) => describeTrigger(routine.trigger);
 
@@ -203,7 +192,7 @@ export function RoutineDetail({ id }: { id: string }) {
   const toast = useToast();
   const run = useRunRoutine();
   const now = useNow(5000);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [activating, setActivating] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [pickingLook, setPickingLook] = useState(false);
   // webhook routines: a hand-written test event, for trying the routine without an external system
@@ -282,21 +271,22 @@ export function RoutineDetail({ id }: { id: string }) {
         name: `${r.name} (copy)`.slice(0, 120), description: r.description, trigger: r.trigger, actions: r.actions, icon: r.icon, color: r.color,
       });
       toast(`"${copy.name}" created`);
-      navigate(`/routines/${copy.id}/edit`);
+      navigate(`/routines/${copy.id}/settings`);
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), 'error');
       setDuplicating(false);
     }
   }
 
-  async function remove() {
-    setConfirmDelete(false);
+  async function activate() {
+    setActivating(true);
     try {
-      await api.deleteRoutine(r.id);
-      toast(`"${r.name}" deleted`);
-      navigate('/routines');
+      await api.setActive(r.id, true);
+      routine.reload();
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      setActivating(false);
     }
   }
 
@@ -314,35 +304,24 @@ export function RoutineDetail({ id }: { id: string }) {
           {r.description && <p>{r.description}</p>}
         </div>
         <div className="hero-actions">
-          <ActiveToggle routine={r} onChange={routine.reload} />
-          <button type="button" className="btn on-tint-soft icon-only" onClick={() => navigate(`/routines/${r.id}/edit`)} aria-label="Edit routine" title="Edit">
-            <Icon name="edit" size={16} />
-          </button>
-          <Menu label="More actions" buttonClassName="btn on-tint-soft icon-only" items={[
-            { label: 'Duplicate', icon: 'copy', onSelect: () => void duplicate(), disabled: duplicating },
-            { label: 'Delete', icon: 'trash', onSelect: () => setConfirmDelete(true), danger: true },
-          ]} />
-          {r.active && (
+          {r.active ? (
             <button type="button" className="btn on-tint large" disabled={run.running} onClick={() => (r.webhookPath ? openTest() : void run(r))}>
               {run.running ? <span className="spinner" /> : <Icon name="play" size={16} />} {runLabel(r)}
             </button>
+          ) : (
+            <button type="button" className="btn on-tint large" disabled={activating} onClick={() => void activate()}>
+              {activating ? <span className="spinner" /> : <Icon name="play" size={16} />} Activate
+            </button>
           )}
+          <Menu label="More actions" buttonClassName="btn on-tint-soft icon-only" items={[
+            { label: 'Settings', icon: 'sliders', onSelect: () => navigate(`/routines/${r.id}/settings`) },
+            { label: 'Duplicate', icon: 'copy', onSelect: () => void duplicate(), disabled: duplicating },
+          ]} />
         </div>
       </header>
 
       <AppearanceDialog open={pickingLook} value={{ icon: r.icon, color: r.color }} actions={r.actions}
         onClose={() => setPickingLook(false)} onSave={(next) => void saveAppearance(next)} />
-
-      <ConfirmDialog
-        open={confirmDelete}
-        title={`Delete "${r.name}"?`}
-        confirmLabel="Delete"
-        danger
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => void remove()}
-      >
-        <p>The routine and its history will be removed permanently. To stop it for a while, pause it instead.</p>
-      </ConfirmDialog>
 
       <ConfirmDialog
         open={testBody !== null}

@@ -43,8 +43,15 @@ const NAV = NAV_GROUPS.flatMap((group) => group.items);
 /** Browser tab title per section, so history and open tabs stay tellable apart. */
 function pageTitle(path: string): string {
   if (path === '/routines/new') return 'New routine';
+  if (path.endsWith('/settings')) return 'Routine settings';
   const item = NAV.slice(1).find((candidate) => path.startsWith(candidate.path));
   return item?.label ?? 'Overview';
+}
+
+/** Replaces the current history entry, so "back" skips the old address. */
+function Redirect({ to }: { to: string }) {
+  useEffect(() => window.location.replace(`#${to}`), [to]);
+  return null;
 }
 
 function Page({ path, refreshUnread }: { path: string; refreshUnread: () => void }) {
@@ -52,7 +59,9 @@ function Page({ path, refreshUnread }: { path: string; refreshUnread: () => void
   if (path === '/') return <Dashboard />;
   if (path === '/routines') return <Routines />;
   if (path === '/routines/new') return <RoutineEditor />;
-  if ((params = matchRoute('/routines/:id/edit', path))) return <RoutineEditor key={params.id} id={params.id} />;
+  if ((params = matchRoute('/routines/:id/settings', path))) return <RoutineEditor key={params.id} id={params.id} />;
+  // the old editor address – kept working for bookmarks and the docs
+  if ((params = matchRoute('/routines/:id/edit', path))) return <Redirect to={`/routines/${params.id}/settings`} />;
   if ((params = matchRoute('/routines/:id', path))) return <RoutineDetail key={params.id} id={params.id} />;
   if (path === '/executions') return <Executions />;
   if ((params = matchRoute('/executions/:id', path))) return <ExecutionDetail key={params.id} id={params.id} />;
