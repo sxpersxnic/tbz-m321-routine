@@ -26,7 +26,7 @@
 
 - [x] Users should be able to customize icon and color of a task list.
 
-- [ ] Theres a bug on routine cards: The card can't be clicked anywhere on the vertical space where the run button is. For example:
+- [x] Theres a bug on routine cards: The card can't be clicked anywhere on the vertical space where the run button is. For example:
 
   ```text
   Card:
