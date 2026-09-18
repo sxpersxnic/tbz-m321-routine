@@ -947,8 +947,6 @@ button.notice-main { cursor: pointer; }
 .notice-detail-body { white-space: pre-wrap; color: var(--text); overflow-wrap: anywhere; }
 .notice.read { background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 .notice.read .notice-body { color: var(--muted); }
-.unread-dot { position: absolute; left: -4px; top: 50%; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: var(--accent-fill); }
-.notice.prio-high .unread-dot { background: var(--err-fill); }
 
 /* ================================================================== system */
 .explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }

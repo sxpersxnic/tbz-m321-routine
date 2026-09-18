@@ -95,7 +95,6 @@ export function Notifications({ onChange }: { onChange: () => void }) {
     const read = Boolean(notification.readAt);
     return (
       <li key={notification.id} className={`notice ${read ? 'read' : ''} ${selected.has(notification.id) ? 'selected' : ''} prio-${notification.priority}`}>
-        {!read && <span className="unread-dot" aria-hidden="true" />}
         <input type="checkbox" className="notice-select" checked={selected.has(notification.id)}
           onChange={() => toggleSelected(notification.id)} aria-label={`Select "${notification.title}"`} />
         <span className="glyph tint-pink" aria-hidden="true"><Icon name="bell" size={20} /></span>
