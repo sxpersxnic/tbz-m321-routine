@@ -29,6 +29,7 @@ const routes: Array<{ prefix: string; upstream: string }> = [
   // public: the secret token in the path is the credential, checked by the routine service
   { prefix: '/api/v1/hooks', upstream: upstreams.routine },
   { prefix: '/api/v1/tasks', upstream: upstreams.task },
+  { prefix: '/api/v1/task-lists', upstream: upstreams.task },
   { prefix: '/api/v1/notifications', upstream: upstreams.notification },
 ];
 

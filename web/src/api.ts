@@ -9,6 +9,8 @@ import type {
   RoutineInput,
   SystemStatus,
   Task,
+  TaskList,
+  TaskListInput,
   User,
 } from './types.ts';
 
@@ -191,8 +193,13 @@ export const api = {
   executionStats: (hours = 24) => get<ExecutionStats>(`/api/v1/executions/stats?hours=${hours}`),
 
   tasks: async (status?: Task['status']) => (await get<{ items: Task[] }>(`/api/v1/tasks${status ? `?status=${status}` : ''}`)).items,
-  createTask: (input: { title: string; description?: string; priority?: string; dueDate?: string }) =>
+  createTask: (input: { title: string; description?: string; priority?: string; dueDate?: string; listId?: string }) =>
     send<Task>('POST', '/api/v1/tasks', input),
+  taskLists: async () => (await get<{ items: TaskList[] }>('/api/v1/task-lists')).items,
+  createTaskList: (input: TaskListInput) => send<TaskList>('POST', '/api/v1/task-lists', input),
+  updateTaskList: (id: string, input: Partial<TaskListInput>) => send<TaskList>('PATCH', `/api/v1/task-lists/${id}`, input),
+  /** Deletes the list's tasks too. */
+  deleteTaskList: (id: string) => send<null>('DELETE', `/api/v1/task-lists/${id}`),
   setTaskStatus: (id: string, status: Task['status']) => send<Task>('PATCH', `/api/v1/tasks/${id}`, { status }),
 
   /** Only what routine steps sent – run outcomes live on the Runs page, not in the inbox. */

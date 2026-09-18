@@ -106,8 +106,25 @@ export interface ExecutionDetail extends Execution {
   log: ExecutionLogEntry[];
 }
 
+export interface TaskList {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  /** "Todo" – where tasks without a list go; cannot be deleted. */
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface TaskListInput {
+  name: string;
+  description: string;
+  color: string;
+}
+
 export interface Task {
   id: string;
+  listId: string;
   title: string;
   description: string;
   priority: Priority;

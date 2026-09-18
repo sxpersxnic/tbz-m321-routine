@@ -712,7 +712,7 @@ services/
   gateway/                   API gateway (single entry point)
   identity-service/          users, login, JWT/JWKS
   routine-service/           routines, orchestration, scheduler, outbox
-  task-service/              tasks (action task.create)
+  task-service/              tasks and task lists (action task.create)
   notification-service/      inbox (notification.send, execution events)
   integration-worker/        scalable worker for external calls
   mock-external/             simulated third-party services

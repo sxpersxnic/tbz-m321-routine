@@ -31,7 +31,7 @@ export const ACTION_TYPES: readonly ActionTypeInfo[] = [
   },
   {
     type: 'task.create',
-    description: 'Create a task in the task system',
+    description: 'Create a task in the task system (optional listId, default list otherwise)',
     requiredParams: ['title'],
     example: { title: 'Write weekly review', dueInDays: 2, priority: 'high' },
   },

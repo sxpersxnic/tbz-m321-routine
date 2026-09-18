@@ -3,8 +3,11 @@ info:
   title: Task Service API
   version: 1.0.0
   description: |
-    The user's tasks. Tasks are created manually or by a routine's
+    The user's tasks and task lists. Tasks are created manually or by a routine's
     `task.create` action (asynchronously, see asyncapi/routine-messaging.yaml).
+    Every task belongs to a list; each user has one default list ("Todo") that
+    is created on first use and cannot be deleted. A `task.create` action may
+    name a `listId`; if that list no longer exists the task goes to the default list.
 servers:
   - url: http://localhost:8080
 security:
@@ -17,6 +20,7 @@ paths:
       operationId: listTasks
       parameters:
         - { name: status, in: query, schema: { enum: [OPEN, DONE] } }
+        - { name: listId, in: query, schema: { type: string, format: uuid } }
       responses:
         '200':
           description: tasks (newest first)
@@ -40,9 +44,11 @@ paths:
                 description: { type: string, maxLength: 2000 }
                 priority: { enum: [low, normal, high] }
                 dueDate: { type: string, format: date }
+                listId: { type: string, format: uuid, description: 'default list when omitted' }
       responses:
         '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
         '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 
   /api/v1/tasks/{taskId}:
     patch:
@@ -63,6 +69,53 @@ paths:
         '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /api/v1/task-lists:
+    get:
+      summary: Own task lists (default list first)
+      operationId: listTaskLists
+      responses:
+        '200':
+          description: lists
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/TaskList' } } } }
+    post:
+      summary: Create a task list
+      operationId: createTaskList
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/TaskListInput'
+                - { required: [name] }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/TaskList' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/task-lists/{listId}:
+    parameters:
+      - { name: listId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      summary: Rename or recolour a task list
+      operationId: updateTaskList
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { allOf: [{ $ref: '#/components/schemas/TaskListInput' }, { minProperties: 1 }] }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/TaskList' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      summary: Delete a task list including its tasks
+      operationId: deleteTaskList
+      responses:
+        '204': { description: deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the default list cannot be deleted, $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -75,10 +128,29 @@ components:
             type: object
             properties: { type: { type: string }, title: { type: string }, status: { type: integer }, detail: { type: string } }
   schemas:
+    TaskListInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        description: { type: string, maxLength: 500 }
+        color: { enum: [sky, indigo, violet, pink, orange, green, teal, grey] }
+
+    TaskList:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        color: { type: string }
+        isDefault: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
     Task:
       type: object
       properties:
         id: { type: string, format: uuid }
+        listId: { type: string, format: uuid }
         title: { type: string }
         description: { type: string }
         priority: { enum: [low, normal, high] }

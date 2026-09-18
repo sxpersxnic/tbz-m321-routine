@@ -1122,3 +1122,9 @@ button.notice-main { cursor: pointer; }
 .form-row > .field { flex: 1 1 auto; }
 .form-stack .segmented { flex-wrap: nowrap; width: max-content; max-width: 100%; }
 .form-stack .segmented button { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- task lists */
+.task-list-row .glyph { width: 30px; height: 30px; border-radius: 50%; flex: none; }
+.task-list-row.selected { background: var(--accent-soft); }
+.list-tag { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.list-tag i { width: 8px; height: 8px; border-radius: 50%; background: var(--tint-a); }

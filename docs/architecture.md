@@ -41,7 +41,7 @@ so the browser only ever sees one origin (no CORS), and the client shares no cod
 | **web** | Web client (React + Vite, served by nginx); talks to the API only through the gateway | – (static) | HTTP |
 | **identity-service** | Users, login, issuing RS256 tokens, JWKS | `users`, `signing_keys` | HTTP |
 | **routine-service** | Manages routines, orchestrates executions, schedule, status | `routines`, `executions`, `execution_actions`, `execution_log`, `outbox` | HTTP, publishes commands/events, consumes results |
-| **task-service** | Task system; executes `task.create` | `tasks` | HTTP, consumes actions |
+| **task-service** | Task system with lists; executes `task.create` | `tasks`, `task_lists` | HTTP, consumes actions |
 | **notification-service** | Inbox; executes `notification.send`, reacts to execution events | `notifications` | HTTP, consumes actions + events |
 | **integration-worker** | Stateless worker for external calls (`weather.get`, `http.request`, `summary.generate`), **horizontally scalable** | `action_executions` (idempotency) | broker only (+ health) |
 | **mock-external** | *Not part of the platform* – simulates third-party services (latency, 503, webhooks) | – (in-memory) | HTTP |

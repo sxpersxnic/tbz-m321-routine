@@ -21,6 +21,14 @@ describe('task-service messages', () => {
     assert.equal(command.priority, 'high');
   });
 
+  it('reads an optional target list', () => {
+    const listId = randomUUID();
+    assert.equal(parseCreateTask(request({ title: 'x', listId })).listId, listId);
+    assert.equal(parseCreateTask(request({ title: 'x' })).listId, null);
+    assert.equal(parseCreateTask(request({ title: 'x', listId: '' })).listId, null);
+    assert.throws(() => parseCreateTask(request({ title: 'x', listId: 'groceries' })), PermanentError);
+  });
+
   it('treats invalid params and foreign action types as permanent errors', () => {
     assert.throws(() => parseCreateTask(request({})), PermanentError);
     assert.throws(() => parseCreateTask(request({ title: 'x', priority: 'urgent' })), PermanentError);

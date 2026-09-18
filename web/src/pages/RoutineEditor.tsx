@@ -255,6 +255,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   const toast = useToast();
   const editing = Boolean(id);
   const actionTypes = usePolling(() => api.actionTypes(), 0);
+  const taskLists = usePolling(() => api.taskLists(), 0);
   // One shared starting value: fromRoutine() mints random uids, so calling it
   // twice would make the draft differ from its own baseline and read as dirty.
   const [initial] = useState<Draft>(EMPTY);
@@ -513,7 +514,14 @@ export function RoutineEditor({ id }: { id?: string }) {
     return (
       <label key={field.name} className={`field ${field.kind === 'textarea' || field.kind === 'json' || field.name === 'url' ? 'span-2' : ''}`}>
         <span>{field.label}</span>
-        {field.kind === 'select' ? (
+        {field.kind === 'tasklist' ? (
+          <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
+            <option value="">{taskLists.data?.find((list) => list.isDefault)?.name ?? 'Todo'} (default)</option>
+            {taskLists.data?.filter((list) => !list.isDefault).map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}
+            {/* a list deleted since: say so instead of silently showing "default" */}
+            {value && taskLists.data && !taskLists.data.some((list) => list.id === value) && <option value={value as string}>Deleted list – uses default</option>}
+          </select>
+        ) : field.kind === 'select' ? (
           <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
             <option value="">Default</option>
             {field.options?.map((option) => <option key={option} value={option}>{field.optionLabels?.[option] ?? option}</option>)}

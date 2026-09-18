@@ -15,7 +15,11 @@ export interface CreateTaskCommand {
   description: string;
   priority: Priority;
   dueInDays: number | null;
+  /** Target list; null = the owner's default list. */
+  listId: string | null;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface ActionRef {
   actionId: string;
@@ -46,9 +50,15 @@ export function parseCreateTask(envelope: Envelope): CreateTaskCommand {
     throw new PermanentError('param "dueInDays" must be a non-negative integer');
   }
 
+  const listId = params?.listId;
+  if (listId !== undefined && listId !== '' && (typeof listId !== 'string' || !UUID.test(listId))) {
+    throw new PermanentError('param "listId" must be a list id');
+  }
+
   return {
     ...ref,
     ownerId,
+    listId: typeof listId === 'string' && listId !== '' ? listId : null,
     title: title.trim().slice(0, 200),
     description: typeof params?.description === 'string' ? params.description : '',
     priority,

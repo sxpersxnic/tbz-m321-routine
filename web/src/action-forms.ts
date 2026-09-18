@@ -2,7 +2,8 @@
 // which types exist; this file decides how they look and how their params are
 // edited. Unknown types fall back to a raw JSON editor and a neutral look.
 
-export type FieldKind = 'text' | 'textarea' | 'number' | 'select' | 'json' | 'keyvalue';
+/** `tasklist` = a select filled with the user's task lists. */
+export type FieldKind = 'text' | 'textarea' | 'number' | 'select' | 'json' | 'keyvalue' | 'tasklist';
 
 export interface ParamField {
   name: string;
@@ -82,6 +83,7 @@ export const ACTION_FORMS: Record<string, ActionForm> = {
       { name: 'description', label: 'Notes', kind: 'textarea' },
       { name: 'priority', label: 'Priority', kind: 'select', ...PRIORITY },
       { name: 'dueInDays', label: 'Due in days', kind: 'number', hint: '0 = today' },
+      { name: 'listId', label: 'List', kind: 'tasklist' },
     ],
     outputs: { title: 'Task', dueDate: 'Due date' },
     defaults: { title: 'New task', priority: 'normal' },
