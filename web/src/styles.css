@@ -926,10 +926,6 @@ input.task-check.prio-high:not(:checked) { border-color: var(--err-fill); }
 .task-meta a { color: var(--accent); display: inline-flex; align-items: center; gap: 3px; }
 .task-meta a:hover { text-decoration: underline; }
 .prio-mark { color: var(--err); font-weight: 700; margin-right: 4px; }
-.quick-add { display: flex; align-items: center; gap: 12px; padding: 8px 16px; min-height: 52px; flex-wrap: wrap; }
-.quick-add .plus { width: 22px; height: 22px; border-radius: 50%; background: var(--accent-fill); color: #fff; display: grid; place-items: center; flex: none; }
-.quick-add input[type="text"] { flex: 1; min-width: 160px; border: 0; padding: 6px 0; background: transparent; box-shadow: none !important; }
-.quick-add select, .quick-add input[type="date"] { width: auto; padding: 5px 10px; font-size: 13px; background: var(--surface-2); border-color: transparent; }
 
 /* ================================================================== notifications */
 .notice {
@@ -1118,3 +1114,11 @@ button.notice-main { cursor: pointer; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
 .menu-item:disabled { opacity: 0.5; cursor: default; }
 .menu-item.danger { color: light-dark(#d70015, #ff6961); }
+
+/* ---------------------------------------------------------------- dialog forms */
+.form-stack { display: flex; flex-direction: column; gap: 14px; color: var(--text); }
+.form-stack .dialog-actions { margin-top: 8px; }
+.form-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.form-row > .field { flex: 1 1 auto; }
+.form-stack .segmented { flex-wrap: nowrap; width: max-content; max-width: 100%; }
+.form-stack .segmented button { white-space: nowrap; }

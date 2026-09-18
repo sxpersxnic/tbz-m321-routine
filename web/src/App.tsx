@@ -4,11 +4,12 @@ import { Icon, ThemeToggle } from './components/ui.tsx';
 import { matchRoute, useReachable, useRoute, usePolling, useSession } from './hooks.ts';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { ExecutionDetail, Executions } from './pages/Executions.tsx';
-import { Notifications, Tasks } from './pages/Inbox.tsx';
+import { Notifications } from './pages/Inbox.tsx';
 import { Login } from './pages/Login.tsx';
 import { RoutineDetail, Routines } from './pages/Routines.tsx';
 import { RoutineEditor } from './pages/RoutineEditor.tsx';
 import { System } from './pages/System.tsx';
+import { Tasks } from './pages/Tasks.tsx';
 
 /**
  * Grouped, because six flat entries hid the one relationship that explains the
