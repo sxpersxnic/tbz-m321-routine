@@ -90,6 +90,19 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/InvalidRoutine' }
+    patch:
+      summary: Change how a routine looks
+      description: Icon and colour only – the definition is not touched. `null` resets a field to the look of the first action.
+      operationId: updateRoutineAppearance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Appearance' }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
     delete:
       summary: Delete a routine including its executions
       operationId: deleteRoutine
@@ -341,6 +354,27 @@ components:
         description: { type: string, maxLength: 2000 }
         trigger: { $ref: '#/components/schemas/Trigger' }
         actions: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ActionInput' } }
+        icon: { $ref: '#/components/schemas/RoutineIcon' }
+        color: { $ref: '#/components/schemas/RoutineColor' }
+
+    RoutineIcon:
+      type: [string, 'null']
+      pattern: '^[a-z][a-z0-9-]{0,39}$'
+      description: 'Name of a symbol in the client''s icon set. Omitted on update = unchanged, null = symbol of the first action.'
+
+    RoutineColor:
+      description: 'Omitted on update = unchanged, null = colour of the first action.'
+      anyOf:
+        - enum: [sky, indigo, violet, pink, orange, green, teal, grey]
+        - type: 'null'
+
+    Appearance:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        icon: { $ref: '#/components/schemas/RoutineIcon' }
+        color: { $ref: '#/components/schemas/RoutineColor' }
 
     Routine:
       type: object
@@ -361,6 +395,8 @@ components:
         active: { type: boolean }
         nextRunAt: { type: [string, 'null'], format: date-time }
         webhookPath: { type: [string, 'null'], description: 'path of the webhook URL (webhook routines only), e.g. /api/v1/hooks/3kf…' }
+        icon: { type: [string, 'null'], description: 'chosen symbol; null = derived from the first action' }
+        color: { type: [string, 'null'], description: 'chosen colour; null = derived from the first action' }
         version: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

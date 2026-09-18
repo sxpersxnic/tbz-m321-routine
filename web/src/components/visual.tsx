@@ -1,8 +1,8 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { actionGlyph, actionLabel, actionSentence, actionTint, describeReference, referenceSource, type Tint } from '../action-forms.ts';
 import { between, relative } from '../format.ts';
 import type { Execution, Routine } from '../types.ts';
-import { Icon, statusLabel } from './ui.tsx';
+import { Icon, Modal, statusLabel } from './ui.tsx';
 
 /*
  * The visual vocabulary of the app. Apple's Shortcuts taught a generation of
@@ -21,17 +21,133 @@ export function ActionGlyph({ type, size = 32 }: { type: string; size?: number }
   );
 }
 
-/** A routine takes the colour and symbol of its first action, so the same routine looks the same everywhere. */
-export function routineTint(routine: Pick<Routine, 'actions' | 'active'>): Tint {
-  if (!routine.active) return 'grey';
-  return actionTint(routine.actions[0]?.type ?? '');
+type Looks = Pick<Routine, 'actions' | 'icon' | 'color'>;
+
+/**
+ * A routine's face: the icon and colour its owner chose, else those of its first
+ * action – so the same routine looks the same everywhere.
+ */
+export function routineLook(routine: Looks): { tint: Tint; glyph: string } {
+  const first = routine.actions[0]?.type ?? '';
+  return { tint: (routine.color as Tint | null) ?? actionTint(first), glyph: routine.icon ?? actionGlyph(first) };
 }
 
-export function RoutineGlyph({ routine, size = 40 }: { routine: Pick<Routine, 'actions' | 'active'>; size?: number }) {
+export function routineTint(routine: Looks & Pick<Routine, 'active'>): Tint {
+  return routine.active ? routineLook(routine).tint : 'grey';
+}
+
+export function RoutineGlyph({ routine, size = 40 }: { routine: Looks & Pick<Routine, 'active'>; size?: number }) {
   return (
     <span className={`glyph tint-${routineTint(routine)}`} style={{ width: size, height: size, borderRadius: size * 0.28 }} aria-hidden="true">
-      <Icon name={actionGlyph(routine.actions[0]?.type ?? '')} size={Math.round(size * 0.52)} />
+      <Icon name={routineLook(routine).glyph} size={Math.round(size * 0.52)} />
     </span>
+  );
+}
+
+// ---------------------------------------------------------------- appearance picker
+
+export const ROUTINE_COLORS: Array<{ tint: Tint; label: string }> = [
+  { tint: 'sky', label: 'Blue' },
+  { tint: 'indigo', label: 'Indigo' },
+  { tint: 'violet', label: 'Purple' },
+  { tint: 'pink', label: 'Pink' },
+  { tint: 'orange', label: 'Orange' },
+  { tint: 'green', label: 'Green' },
+  { tint: 'teal', label: 'Teal' },
+  { tint: 'grey', label: 'Graphite' },
+];
+
+export const ROUTINE_ICONS: Array<{ name: string; label: string }> = [
+  { name: 'bolt', label: 'Bolt' },
+  { name: 'sparkles', label: 'Sparkles' },
+  { name: 'star', label: 'Star' },
+  { name: 'heart', label: 'Heart' },
+  { name: 'bell', label: 'Bell' },
+  { name: 'checklist', label: 'Checklist' },
+  { name: 'calendar', label: 'Calendar' },
+  { name: 'clock', label: 'Clock' },
+  { name: 'cloud', label: 'Cloud' },
+  { name: 'sun', label: 'Sun' },
+  { name: 'moon', label: 'Moon' },
+  { name: 'globe', label: 'Globe' },
+  { name: 'mail', label: 'Mail' },
+  { name: 'inbox', label: 'Inbox' },
+  { name: 'doc', label: 'Document' },
+  { name: 'book', label: 'Book' },
+  { name: 'flag', label: 'Flag' },
+  { name: 'home', label: 'Home' },
+  { name: 'briefcase', label: 'Work' },
+  { name: 'coffee', label: 'Coffee' },
+];
+
+export interface Appearance {
+  icon: string | null;
+  color: string | null;
+}
+
+/**
+ * Colour swatches and a symbol grid, with a live preview. "Automatic" (null)
+ * keeps following the first step, so a routine that never chose still looks right.
+ */
+export function AppearancePicker({ value, actions, onChange }: {
+  value: Appearance;
+  actions: Routine['actions'];
+  onChange: (next: Appearance) => void;
+}) {
+  const auto = routineLook({ actions, icon: null, color: null });
+  const look = routineLook({ actions, ...value });
+  return (
+    <div className="appearance">
+      <span className={`glyph appearance-preview tint-${look.tint}`} aria-hidden="true"><Icon name={look.glyph} size={34} /></span>
+      <div className="appearance-group" role="group" aria-label="Colour">
+        <button type="button" className={`swatch swatch-auto tint-${auto.tint}`} aria-pressed={value.color === null}
+          title="Automatic – colour of the first step" aria-label="Automatic colour" onClick={() => onChange({ ...value, color: null })}>
+          <Icon name="sparkles" size={14} />
+        </button>
+        {ROUTINE_COLORS.map((color) => (
+          <button key={color.tint} type="button" className={`swatch tint-${color.tint}`} aria-pressed={value.color === color.tint}
+            title={color.label} aria-label={color.label} onClick={() => onChange({ ...value, color: color.tint })} />
+        ))}
+      </div>
+      <div className="appearance-group icons" role="group" aria-label="Icon">
+        <button type="button" className="icon-choice" aria-pressed={value.icon === null}
+          title="Automatic – icon of the first step" aria-label="Automatic icon" onClick={() => onChange({ ...value, icon: null })}>
+          <Icon name={auto.glyph} size={20} /><span className="icon-choice-auto" aria-hidden="true">A</span>
+        </button>
+        {ROUTINE_ICONS.map((icon) => (
+          <button key={icon.name} type="button" className="icon-choice" aria-pressed={value.icon === icon.name}
+            title={icon.label} aria-label={icon.label} onClick={() => onChange({ ...value, icon: icon.name })}>
+            <Icon name={icon.name} size={20} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The picker in a dialog: nothing changes until "Done". */
+export function AppearanceDialog({ open, value, actions, onClose, onSave }: {
+  open: boolean;
+  value: Appearance;
+  actions: Routine['actions'];
+  onClose: () => void;
+  onSave: (next: Appearance) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // every opening starts from the current look, not from an abandoned earlier pick
+  useEffect(() => {
+    if (open) setDraft(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  return (
+    <Modal open={open} title="Icon and colour" onClose={onClose} actions={
+      <>
+        <button type="button" className="btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn primary" onClick={() => onSave(draft)}>Done</button>
+      </>
+    }>
+      <AppearancePicker value={draft} actions={actions} onChange={setDraft} />
+    </Modal>
   );
 }
 

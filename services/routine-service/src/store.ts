@@ -1,6 +1,6 @@
 import type { Queryable } from '@routine/service-kit';
 import { randomBytes } from 'node:crypto';
-import type { ActionDefinition, RoutineDefinition, TriggerDefinition, TriggerType } from './domain/definition.ts';
+import type { ActionDefinition, Appearance, RoutineDefinition, TriggerDefinition, TriggerType } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 
 // ---------------------------------------------------------------- rows
@@ -15,6 +15,8 @@ export interface RoutineRow {
   active: boolean;
   next_run_at: Date | null;
   webhook_token: string | null;
+  icon: string | null;
+  color: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -87,9 +89,19 @@ export async function getRoutine(db: Queryable, ownerId: string, id: string, for
 
 export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
-    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-    [id, ownerId, definition.name, definition.description, JSON.stringify(definition.trigger), JSON.stringify(definition.actions), tokenFor(definition)],
+    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token, icon, color)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [
+      id,
+      ownerId,
+      definition.name,
+      definition.description,
+      JSON.stringify(definition.trigger),
+      JSON.stringify(definition.actions),
+      tokenFor(definition),
+      definition.icon ?? null,
+      definition.color ?? null,
+    ],
   );
   return rows[0];
 }
@@ -104,6 +116,8 @@ export async function updateRoutine(
     `UPDATE routines
         SET name = $2, description = $3, trigger = $4, actions = $5, next_run_at = $6,
             webhook_token = COALESCE(webhook_token, $7),
+            icon = CASE WHEN $8 THEN $9 ELSE icon END,
+            color = CASE WHEN $10 THEN $11 ELSE color END,
             version = version + 1, updated_at = now()
       WHERE id = $1 RETURNING *`,
     [
@@ -114,7 +128,24 @@ export async function updateRoutine(
       JSON.stringify(definition.actions),
       nextRunAt,
       tokenFor(definition),
+      definition.icon !== undefined,
+      definition.icon ?? null,
+      definition.color !== undefined,
+      definition.color ?? null,
     ],
+  );
+  return rows[0];
+}
+
+/** Icon and colour only – the definition, schedule and webhook stay untouched. */
+export async function updateAppearance(db: Queryable, id: string, appearance: Appearance): Promise<RoutineRow> {
+  const { rows } = await db.query<RoutineRow>(
+    `UPDATE routines
+        SET icon = CASE WHEN $2 THEN $3 ELSE icon END,
+            color = CASE WHEN $4 THEN $5 ELSE color END,
+            version = version + 1, updated_at = now()
+      WHERE id = $1 RETURNING *`,
+    [id, appearance.icon !== undefined, appearance.icon ?? null, appearance.color !== undefined, appearance.color ?? null],
   );
   return rows[0];
 }
@@ -394,6 +425,8 @@ export function routineDto(row: RoutineRow) {
     nextRunAt: row.next_run_at,
     // only the owner ever gets a routine DTO, and only a webhook routine has a usable URL
     webhookPath: row.trigger.type === 'webhook' && row.webhook_token ? webhookPath(row.webhook_token) : null,
+    icon: row.icon,
+    color: row.color,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

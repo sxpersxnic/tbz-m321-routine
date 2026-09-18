@@ -25,6 +25,9 @@ export interface Routine {
   nextRunAt: string | null;
   /** Path of the secret webhook URL – only for webhook routines. */
   webhookPath: string | null;
+  /** Chosen look; null = taken from the first action. */
+  icon: string | null;
+  color: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -35,6 +38,9 @@ export interface RoutineInput {
   description: string;
   trigger: Trigger;
   actions: ActionDefinition[];
+  /** Omitted = unchanged, null = taken from the first action. */
+  icon?: string | null;
+  color?: string | null;
   version?: number;
 }
 

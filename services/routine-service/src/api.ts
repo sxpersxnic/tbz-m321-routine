@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { conflict, HttpError, notFound, requireUser, withContext, withTransaction, type Pool } from '@routine/service-kit';
 import { ACTION_TYPES } from './domain/action-catalog.ts';
-import { DefinitionError, validateRoutine, type RoutineDefinition, type RoutineInput } from './domain/definition.ts';
+import { DefinitionError, ROUTINE_COLORS, validateRoutine, type Appearance, type RoutineDefinition, type RoutineInput } from './domain/definition.ts';
 import { nextRun } from './domain/schedule.ts';
 import type { ExecutionEngine } from './engine.ts';
 import {
@@ -20,6 +20,7 @@ import {
   rotateWebhookToken,
   routineDto,
   setRoutineActive,
+  updateAppearance,
   updateRoutine,
 } from './store.ts';
 
@@ -49,6 +50,18 @@ const triggerSchema = {
   then: { required: ['type', 'cron'] },
 } as const;
 
+const appearanceProperties = {
+  icon: { type: ['string', 'null'], pattern: '^[a-z][a-z0-9-]{0,39}$' },
+  color: { anyOf: [{ type: 'string', enum: ROUTINE_COLORS }, { type: 'null' }] },
+} as const;
+
+const appearanceBodySchema = {
+  type: 'object',
+  additionalProperties: false,
+  minProperties: 1,
+  properties: appearanceProperties,
+} as const;
+
 const routineBodySchema = {
   type: 'object',
   required: ['name', 'trigger', 'actions'],
@@ -58,6 +71,7 @@ const routineBodySchema = {
     description: { type: 'string', maxLength: 2000 },
     trigger: triggerSchema,
     actions: { type: 'array', minItems: 1, maxItems: 20, items: actionSchema },
+    ...appearanceProperties,
     version: { type: 'integer', minimum: 1, description: 'Optimistic locking: expected current version' },
   },
 } as const;
@@ -159,6 +173,20 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
           throw conflict(`Routine was modified concurrently (expected version ${request.body.version}, current ${routine.version})`);
         }
         return updateRoutine(client, routine, definition, firstRun(definition, routine.active));
+      });
+      return routineDto(updated);
+    },
+  );
+
+  app.patch<{ Params: { routineId: string }; Body: Appearance }>(
+    '/api/v1/routines/:routineId',
+    { schema: { params: routineParams, body: appearanceBodySchema } },
+    async (request) => {
+      const user = requireUser(request);
+      const updated = await withTransaction(pool, async (client) => {
+        const routine = await getRoutine(client, user.id, request.params.routineId, true);
+        if (!routine) throw notFound('Routine');
+        return updateAppearance(client, routine.id, request.body);
       });
       return routineDto(updated);
     },

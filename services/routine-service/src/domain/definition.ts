@@ -12,14 +12,24 @@ export interface ActionDefinition {
   params: Record<string, unknown>;
 }
 
-export interface RoutineInput {
+/** Colours the client knows; icons are free-form names from the client's icon set. */
+export const ROUTINE_COLORS = ['sky', 'indigo', 'violet', 'pink', 'orange', 'green', 'teal', 'grey'] as const;
+export type RoutineColor = (typeof ROUTINE_COLORS)[number];
+
+/** `undefined` = leave as it is, `null` = back to the look of the first action. */
+export interface Appearance {
+  icon?: string | null;
+  color?: RoutineColor | null;
+}
+
+export interface RoutineInput extends Appearance {
   name: string;
   description?: string;
   trigger: { type: 'manual' } | { type: 'schedule'; cron: string; timezone?: string } | { type: 'webhook' };
   actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown> }>;
 }
 
-export interface RoutineDefinition {
+export interface RoutineDefinition extends Appearance {
   name: string;
   description: string;
   trigger: TriggerDefinition;
@@ -100,5 +110,5 @@ export function validateRoutine(input: RoutineInput): RoutineDefinition {
   }
 
   if (issues.length > 0) throw new DefinitionError(issues);
-  return { name, description: input.description?.trim() ?? '', trigger, actions };
+  return { name, description: input.description?.trim() ?? '', trigger, actions, icon: input.icon, color: input.color };
 }

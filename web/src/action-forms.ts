@@ -17,7 +17,7 @@ export interface ParamField {
 }
 
 /** The colour family of an action. Colour is a second cue only – the label always says it too. */
-export type Tint = 'sky' | 'violet' | 'orange' | 'green' | 'pink' | 'grey';
+export type Tint = 'sky' | 'indigo' | 'violet' | 'pink' | 'orange' | 'green' | 'teal' | 'grey';
 
 export interface ActionForm {
   label: string;

@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { actionGlyph, actionTint } from '../action-forms.ts';
 import { api } from '../api.ts';
 import { TemplateGallery } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton } from '../components/ui.tsx';
-import { ActionFlow, RunHistory, StatusIcon } from '../components/visual.tsx';
+import { ActionFlow, AppearanceDialog, routineLook, RunHistory, StatusIcon, type Appearance } from '../components/visual.tsx';
 import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, useNow, usePolling } from '../hooks.ts';
 import type { Routine } from '../types.ts';
@@ -78,7 +77,7 @@ function ActiveToggle({ routine, onChange }: { routine: Routine; onChange: () =>
 const whenText = (routine: Routine) => describeTrigger(routine.trigger);
 
 /**
- * A routine as a Shortcuts-style tile: colour and symbol from its first action,
+ * A routine as a Shortcuts-style tile in its own colour and symbol,
  * the whole tile opens it, and the round button runs it. A paused routine turns
  * plain white and offers "Activate" instead – a disabled play button would not
  * say what to do about it.
@@ -87,12 +86,12 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
   const Heading = level === 2 ? 'h2' : 'h3';
   const run = useRunRoutine();
   const { set, active } = useSetActive(routine, onChanged);
-  const first = routine.actions[0]?.type ?? '';
+  const look = routineLook(routine);
   return (
-    <article className={`tile tint-${actionTint(first)} ${active ? '' : 'paused'}`}>
+    <article className={`tile tint-${look.tint} ${active ? '' : 'paused'}`}>
       <a className="tile-link" href={`#/routines/${routine.id}`}>
         <span className="tile-top">
-          <span className="tile-icon" aria-hidden="true"><Icon name={actionGlyph(first)} size={21} /></span>
+          <span className="tile-icon" aria-hidden="true"><Icon name={look.glyph} size={21} /></span>
           {!active && <span className="tile-state">Paused</span>}
         </span>
         <Heading className="tile-name">{routine.name}</Heading>
@@ -206,6 +205,7 @@ export function RoutineDetail({ id }: { id: string }) {
   const now = useNow(5000);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [pickingLook, setPickingLook] = useState(false);
   // webhook routines: a hand-written test event, for trying the routine without an external system
   const [testBody, setTestBody] = useState<string | null>(null);
   const [testError, setTestError] = useState<string>();
@@ -235,7 +235,19 @@ export function RoutineDetail({ id }: { id: string }) {
   const last = runs[0];
   const finished = runs.filter((execution) => execution.status === 'COMPLETED' || execution.status === 'FAILED');
   const ok = finished.filter((execution) => execution.status === 'COMPLETED').length;
-  const first = r.actions[0]?.type ?? '';
+  const look = routineLook(r);
+
+  async function saveAppearance(next: Appearance) {
+    setPickingLook(false);
+    routine.mutate(() => ({ ...r, ...next }));
+    try {
+      await api.setAppearance(r.id, next);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      routine.reload();
+    }
+  }
 
   function openTest() {
     setTestError(undefined);
@@ -266,7 +278,9 @@ export function RoutineDetail({ id }: { id: string }) {
   async function duplicate() {
     setDuplicating(true);
     try {
-      const copy = await api.createRoutine({ name: `${r.name} (copy)`.slice(0, 120), description: r.description, trigger: r.trigger, actions: r.actions });
+      const copy = await api.createRoutine({
+        name: `${r.name} (copy)`.slice(0, 120), description: r.description, trigger: r.trigger, actions: r.actions, icon: r.icon, color: r.color,
+      });
       toast(`"${copy.name}" created`);
       navigate(`/routines/${copy.id}/edit`);
     } catch (error) {
@@ -290,8 +304,10 @@ export function RoutineDetail({ id }: { id: string }) {
     <div className="page">
       <a className="back" href="#/routines"><Icon name="back" size={18} /> Routines</a>
 
-      <header className={`detail-hero tint-${actionTint(first)} ${r.active ? 'on-tint' : 'paused'}`}>
-        <span className="hero-icon" aria-hidden="true"><Icon name={actionGlyph(first)} size={36} /></span>
+      <header className={`detail-hero tint-${look.tint} ${r.active ? 'on-tint' : 'paused'}`}>
+        <button type="button" className="hero-icon" onClick={() => setPickingLook(true)} aria-label="Change icon and colour" title="Change icon and colour">
+          <Icon name={look.glyph} size={36} />
+        </button>
         <div className="grow">
           <h1>{r.name}</h1>
           {r.description && <p>{r.description}</p>}
@@ -314,6 +330,9 @@ export function RoutineDetail({ id }: { id: string }) {
           )}
         </div>
       </header>
+
+      <AppearanceDialog open={pickingLook} value={{ icon: r.icon, color: r.color }} actions={r.actions}
+        onClose={() => setPickingLook(false)} onSave={(next) => void saveAppearance(next)} />
 
       <ConfirmDialog
         open={confirmDelete}

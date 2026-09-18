@@ -161,6 +161,8 @@ export const api = {
   routine: (id: string) => get<Routine>(`/api/v1/routines/${id}`),
   createRoutine: (input: RoutineInput) => send<Routine>('POST', '/api/v1/routines', input),
   updateRoutine: (id: string, input: RoutineInput) => send<Routine>('PUT', `/api/v1/routines/${id}`, input),
+  setAppearance: (id: string, appearance: { icon?: string | null; color?: string | null }) =>
+    send<Routine>('PATCH', `/api/v1/routines/${id}`, appearance),
   deleteRoutine: (id: string) => send<null>('DELETE', `/api/v1/routines/${id}`),
   setActive: (id: string, active: boolean) => send<Routine>('POST', `/api/v1/routines/${id}/${active ? 'activate' : 'deactivate'}`),
   async trigger(id: string): Promise<Execution> {

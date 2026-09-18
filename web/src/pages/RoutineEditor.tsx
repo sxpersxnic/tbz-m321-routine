@@ -3,7 +3,7 @@ import { ACTION_FORMS, GLOBAL_REFERENCES, WEBHOOK_REFERENCES, actionLabel, type 
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
-import { ActionFlow, ActionGlyph, ActionSentence } from '../components/visual.tsx';
+import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
 import { CRON_PRESETS, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, usePolling, useUnsavedGuard } from '../hooks.ts';
@@ -26,6 +26,8 @@ interface DraftAction {
 interface Draft {
   name: string;
   description: string;
+  icon: string | null;
+  color: string | null;
   triggerType: TriggerType;
   cron: string;
   timezone: string;
@@ -91,6 +93,8 @@ function fromRoutine(routine: RoutineInput): Draft {
   return {
     name: routine.name,
     description: routine.description ?? '',
+    icon: routine.icon ?? null,
+    color: routine.color ?? null,
     triggerType: routine.trigger.type,
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
@@ -116,6 +120,8 @@ function toInput(draft: Draft): RoutineInput {
     description: draft.description.trim(),
     trigger: toTrigger(draft),
     actions,
+    icon: draft.icon,
+    color: draft.color,
   };
 }
 
@@ -232,7 +238,7 @@ const TIMEZONES: string[] = (() => {
   }
 })();
 
-const EMPTY: Draft = { name: '', description: '', triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [] };
+const EMPTY: Draft = { name: '', description: '', icon: null, color: null, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [] };
 
 // ---------------------------------------------------------------- component
 
@@ -262,6 +268,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   const [loadError, setLoadError] = useState<Error>();
   const [baseline, setBaseline] = useState(() => JSON.stringify(initial));
   const [pendingTemplate, setPendingTemplate] = useState<string | null>(null);
+  const [pickingLook, setPickingLook] = useState(false);
   // Which action cards are unfolded. A saved routine opens as an overview; a new
   // action opens so it can be filled in.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -286,6 +293,9 @@ export function RoutineEditor({ id }: { id?: string }) {
   const simple = parseSchedule(draft.cron);
   const frequency: Frequency = customCron || !simple ? 'custom' : simple.frequency;
   // Which fields to flag inline – rebuilt from the issues raised by the last save attempt.
+  // the look only needs each step's type – params may be half-typed JSON at this point
+  const lookActions = useMemo(() => draft.actions.map((action) => ({ key: action.key, type: action.type, step: action.step, params: {} })), [draft.actions]);
+  const look = routineLook({ actions: lookActions, icon: draft.icon, color: draft.color });
   const invalid = useMemo(() => new Map(issues.filter((issue) => issue.target).map((issue) => [issue.target, issue.message])), [issues]);
 
   async function loadExisting() {
@@ -543,7 +553,12 @@ export function RoutineEditor({ id }: { id?: string }) {
 
       <div className="editor">
         <div className="editor-main">
-          <header>
+          <header className="editor-head">
+            <button type="button" className={`glyph editor-look tint-${look.tint}`} onClick={() => setPickingLook(true)}
+              aria-label="Change icon and colour" title="Change icon and colour">
+              <Icon name={look.glyph} size={30} />
+            </button>
+            <div className="grow">
             <h1 className="eyebrow">{editing ? 'Edit routine' : 'New routine'}</h1>
             <input id={nameFieldId} className={`title-input ${invalid.has(nameFieldId) ? 'invalid' : ''}`} value={draft.name} maxLength={120}
               placeholder="Name" aria-label="Name" aria-invalid={invalid.has(nameFieldId) || undefined}
@@ -551,7 +566,11 @@ export function RoutineEditor({ id }: { id?: string }) {
             {invalid.has(nameFieldId) && <small className="field-error">{invalid.get(nameFieldId)}</small>}
             <input className="desc-input" value={draft.description} maxLength={2000} placeholder="Description (optional)"
               aria-label="Description" onChange={(event) => update({ description: event.target.value })} />
+            </div>
           </header>
+
+          <AppearanceDialog open={pickingLook} value={{ icon: draft.icon, color: draft.color }} actions={lookActions}
+            onClose={() => setPickingLook(false)} onSave={(next) => { update(next); setPickingLook(false); }} />
 
           {issues.length > 0 && (
             <div className="error-note" role="alert">

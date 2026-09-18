@@ -70,6 +70,15 @@ describe('routine definition', () => {
     assert.throws(() => validateRoutine({ ...weeklyReview, name: ' \t ' }), /name must not be blank/);
   });
 
+  it('passes the chosen look through and leaves an omitted one undecided', () => {
+    const styled = validateRoutine({ ...weeklyReview, icon: 'star', color: 'teal' });
+    assert.equal(styled.icon, 'star');
+    assert.equal(styled.color, 'teal');
+    const reset = validateRoutine({ ...weeklyReview, icon: null });
+    assert.equal(reset.icon, null);
+    assert.equal(reset.color, undefined);
+  });
+
   it('rejects schedules that fire too often', () => {
     assert.match(validateSchedule('* * * * * *', 'Europe/Zurich')[0], /more often/);
     assert.deepEqual(validateSchedule('*/30 * * * * *', 'Europe/Zurich'), []);

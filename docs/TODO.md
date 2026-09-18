@@ -6,7 +6,7 @@
 
 - [x] Currently a routines card shows all steps of the routine as icon. This is not scalable for routines with many steps. Don't show steps in the routines card.
 
-- [ ] Currently a routine cards color and icon are based on the first step of the routine. Instead, users should be able to customize the color and icon of the routine card. Icon and colors can be set on creation of the routine, on edit of the routine, and when clicking the icon in the routine details page.
+- [x] Currently a routine cards color and icon are based on the first step of the routine. Instead, users should be able to customize the color and icon of the routine card. Icon and colors can be set on creation of the routine, on edit of the routine, and when clicking the icon in the routine details page.
 
 - [ ] In routine details page, the hero section shows icon, title, description, active toggle button, edit button (icon and label), copy button (icon only, secondary), delete button (icon only, secondary), execute button (icon and label, primary). This is too much information in a small space and is not scalable. The hero section should only show icon, title, description, active toggle button, edit button (icon only), and execute button (icon and label, primary). The copy and delete buttons should be moved to the "..." menu.
 
