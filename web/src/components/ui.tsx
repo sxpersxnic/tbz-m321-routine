@@ -316,16 +316,17 @@ export function CopyButton({ value, label, what = 'Value' }: { value: string; la
 
 /**
  * Native <dialog> so focus trapping, Escape and the backdrop come from the
- * platform – unlike window.confirm it can spell out what is about to be lost.
+ * platform. `actions` sits bottom-right; a click on the backdrop closes it too.
  */
-export function ConfirmDialog({ open, title, children, confirmLabel, danger, onConfirm, onCancel }: {
+export function Modal({ open, title, children, actions, onClose, headerAction, wide }: {
   open: boolean;
-  title: string;
+  title: ReactNode;
   children: ReactNode;
-  confirmLabel: string;
-  danger?: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
+  actions?: ReactNode;
+  onClose: () => void;
+  /** An icon button next to the title, e.g. "Mark as read". */
+  headerAction?: ReactNode;
+  wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -335,14 +336,39 @@ export function ConfirmDialog({ open, title, children, confirmLabel, danger, onC
     if (!open && dialog.open) dialog.close();
   }, [open]);
   return (
-    <dialog className="dialog" ref={ref} onCancel={(event) => { event.preventDefault(); onCancel(); }}>
-      <h2>{title}</h2>
+    <dialog className={`dialog ${wide ? 'wide' : ''}`} ref={ref}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      // the dialog box itself is the target only when the click landed on the backdrop
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="dialog-head">
+        <h2>{title}</h2>
+        {headerAction}
+      </div>
       <div className="dialog-body">{children}</div>
-      <div className="dialog-actions">
+      {actions && <div className="dialog-actions">{actions}</div>}
+    </dialog>
+  );
+}
+
+/** Unlike window.confirm it can spell out what is about to be lost. */
+export function ConfirmDialog({ open, title, children, confirmLabel, danger, onConfirm, onCancel }: {
+  open: boolean;
+  title: string;
+  children: ReactNode;
+  confirmLabel: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal open={open} title={title} onClose={onCancel} actions={
+      <>
         <button type="button" className="btn" onClick={onCancel}>Cancel</button>
         <button type="button" className={`btn ${danger ? 'danger-solid' : 'primary'}`} onClick={onConfirm}>{confirmLabel}</button>
-      </div>
-    </dialog>
+      </>
+    }>
+      {children}
+    </Modal>
   );
 }
 

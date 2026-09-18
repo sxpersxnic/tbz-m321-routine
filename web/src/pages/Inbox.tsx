@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
-import { Empty, ErrorNote, Icon, Skeleton } from '../components/ui.tsx';
-import { date, groupByDay, relative } from '../format.ts';
+import { Empty, ErrorNote, Icon, IconButton, Modal, Skeleton } from '../components/ui.tsx';
+import { date, dateTime, groupByDay, relative } from '../format.ts';
 import { useNow, usePolling } from '../hooks.ts';
 import type { Notification, Priority, Task } from '../types.ts';
 
@@ -192,6 +192,7 @@ export function Notifications({ onChange }: { onChange: () => void }) {
   const toast = useToast();
   const now = useNow(10_000);
   const [onlyUnread, setOnlyUnread] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   const notifications = usePolling(() => api.notifications(), 3000);
   const all = notifications.data ?? [];
   const unread = all.filter((notification) => !notification.readAt);
@@ -210,32 +211,32 @@ export function Notifications({ onChange }: { onChange: () => void }) {
     }
   }
 
+  // Opening a notification only shows it – reading is marked on purpose, with the tick button.
   const card = (notification: Notification) => {
     const read = Boolean(notification.readAt);
-    const body = (
-      <>
-        <span className="notice-top">
-          <span className="notice-title">
-            {!read && <span className="sr-only">Unread: </span>}
-            {notification.title}
-          </span>
-          <span className="notice-time">{relative(notification.createdAt, now)}</span>
-        </span>
-        {notification.body && <span className="notice-body">{notification.body}</span>}
-      </>
-    );
     return (
       <li key={notification.id} className={`notice ${read ? 'read' : ''} prio-${notification.priority}`}>
         {!read && <span className="unread-dot" aria-hidden="true" />}
         <span className="glyph tint-pink" aria-hidden="true"><Icon name="bell" size={20} /></span>
-        <div className="grow">
-          {read
-            ? <div className="notice-main">{body}</div>
-            : <button type="button" className="notice-main" onClick={() => void markRead([notification.id])} title="Mark as read">{body}</button>}
-        </div>
+        <button type="button" className="notice-main grow" onClick={() => setOpenId(notification.id)} aria-haspopup="dialog">
+          <span className="notice-top">
+            <span className="notice-title">
+              {!read && <span className="sr-only">Unread: </span>}
+              {notification.title}
+            </span>
+            <span className="notice-time">{relative(notification.createdAt, now)}</span>
+          </span>
+          {notification.body && <span className="notice-body">{notification.body}</span>}
+        </button>
+        {!read && (
+          <span className="notice-side">
+            <IconButton icon="check" label={`Mark "${notification.title}" as read`} onClick={() => void markRead([notification.id])} />
+          </span>
+        )}
       </li>
     );
   };
+  const opened = all.find((notification) => notification.id === openId);
 
   return (
     <div className="page narrow-page">
@@ -278,6 +279,23 @@ export function Notifications({ onChange }: { onChange: () => void }) {
           </section>
         ))
       )}
+
+      <Modal open={Boolean(opened)} title={opened?.title ?? ''} wide onClose={() => setOpenId(null)}
+        headerAction={opened && !opened.readAt
+          ? <IconButton icon="check" label="Mark as read" onClick={() => void markRead([opened.id])} />
+          : undefined}
+        actions={<button type="button" className="btn" onClick={() => setOpenId(null)}>Close</button>}>
+        {opened && (
+          <>
+            <p className="notice-detail-meta">
+              <span>{dateTime(opened.createdAt)}</span>
+              {opened.priority !== 'normal' && <span>{PRIORITY_LABEL[opened.priority]} priority</span>}
+              <span>{opened.readAt ? `Read ${relative(opened.readAt, now)}` : 'Unread'}</span>
+            </p>
+            {opened.body ? <p className="notice-detail-body">{opened.body}</p> : <p>No message.</p>}
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

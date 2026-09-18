@@ -395,8 +395,12 @@ a.list-row:active, button.list-row:active { background: var(--surface-3); }
 }
 .dialog[open] { animation: pop 0.22s var(--ease); }
 .dialog::backdrop { background: rgb(0 0 0 / 0.35); backdrop-filter: blur(4px); }
+.dialog.wide { max-width: 560px; }
 .dialog h2 { font-size: 19px; }
+.dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dialog-head h2 { min-width: 0; overflow-wrap: anywhere; }
 .dialog-body { margin: 10px 0 22px; color: var(--muted); }
+.dialog-body:last-child { margin-bottom: 0; }
 .dialog-body p + p { margin-top: 8px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .btn.danger-solid { background: #d70015; color: #fff; }
@@ -933,7 +937,10 @@ button.notice-main { cursor: pointer; }
 .notice-time { font-size: 13px; color: var(--muted); white-space: nowrap; }
 .notice-title { display: block; font-weight: 600; min-width: 0; }
 .notice.read .notice-title { font-weight: 500; }
-.notice-body { display: block; white-space: pre-wrap; margin-top: 2px; color: var(--text); }
+.notice-body { display: block; white-space: pre-wrap; margin-top: 2px; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.notice-side { display: flex; align-items: flex-start; }
+.notice-detail-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; color: var(--muted); margin-bottom: 12px; }
+.notice-detail-body { white-space: pre-wrap; color: var(--text); overflow-wrap: anywhere; }
 .notice.read { background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 .notice.read .notice-body { color: var(--muted); }
 .unread-dot { position: absolute; left: -4px; top: 50%; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: var(--accent-fill); }
