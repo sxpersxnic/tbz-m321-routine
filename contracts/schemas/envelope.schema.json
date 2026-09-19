@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/envelope.schema.json",
+  "title": "Message envelope",
+  "description": "Transport metadata shared by every message on the broker. The payload lives in `data` and is defined per message type.",
+  "type": "object",
+  "required": [
+    "messageId",
+    "type",
+    "version",
+    "occurredAt",
+    "source",
+    "correlationId",
+    "data"
+  ],
+  "properties": {
+    "messageId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique per message. Duplicates of the same message carry the same id."
+    },
+    "type": {
+      "type": "string",
+      "description": "Message type, e.g. ActionRequested."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version of `data`."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "string",
+      "description": "Logical name of the producing service."
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shared by all messages that belong to one routine execution."
+    },
+    "causationId": {
+      "type": "string",
+      "description": "messageId of the message that caused this one."
+    },
+    "data": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@routine/identity-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Identity provider: users, password login, RS256 access tokens, JWKS.",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*",
+    "fastify": "^5.12.4",
+    "jose": "^6.2.12"
+  }
+}

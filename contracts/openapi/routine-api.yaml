@@ -1,0 +1,477 @@
+openapi: 3.1.0
+info:
+  title: Routine Service API
+  version: 1.0.0
+  description: |
+    Synchronous interface of the routine service: manage routines, trigger
+    executions and query their status. The actual execution happens
+    asynchronously through the message broker (see asyncapi/routine-messaging.yaml).
+
+    All endpoints require an access token from the identity service. A user
+    only ever sees their own routines and executions (anyone else's → 404).
+servers:
+  - url: http://localhost:8080
+    description: via the API gateway
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/action-types:
+    get:
+      summary: Available action types
+      operationId: listActionTypes
+      responses:
+        '200':
+          description: catalogue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ActionType' } }
+
+  /api/v1/routines:
+    get:
+      summary: List own routines
+      operationId: listRoutines
+      responses:
+        '200':
+          description: routines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Routine' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      summary: Create a routine (inactive)
+      operationId: createRoutine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutineInput' }
+      responses:
+        '201':
+          description: created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Routine' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+
+  /api/v1/routines/{routineId}:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    get:
+      summary: Get a routine
+      operationId: getRoutine
+      responses:
+        '200': { description: routine, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      summary: Update a routine
+      description: Passing `version` in the body enables optimistic locking – if the routine changed in the meantime, the response is 409.
+      operationId: updateRoutine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/RoutineInput'
+                - type: object
+                  properties:
+                    version: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+    patch:
+      summary: Change how a routine looks
+      description: Icon and colour only – the definition is not touched. `null` resets a field to the look of the first action.
+      operationId: updateRoutineAppearance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Appearance' }
+      responses:
+        '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      summary: Delete a routine including its executions
+      operationId: deleteRoutine
+      responses:
+        '204': { description: deleted }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/activate:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Activate a routine (schedule becomes active, manual triggering allowed)
+      operationId: activateRoutine
+      responses:
+        '200': { description: activated, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/deactivate:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Deactivate a routine
+      operationId: deactivateRoutine
+      responses:
+        '200': { description: deactivated, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/executions:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Trigger a routine manually
+      description: |
+        Creates an execution in status PENDING and responds immediately (202).
+        Processing happens asynchronously. With an `Idempotency-Key`, a
+        repeated call (e.g. a client retry) does not start a second
+        execution – the existing one is returned with 200. The key is scoped
+        per routine; longer keys are rejected with 400.
+      operationId: triggerRoutine
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '202':
+          description: execution accepted
+          headers:
+            Location: { schema: { type: string } }
+            X-Correlation-Id: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Execution' } } }
+        '200':
+          description: already triggered with this Idempotency-Key
+          content: { application/json: { schema: { $ref: '#/components/schemas/Execution' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409':
+          description: routine is not active
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    get:
+      summary: Executions of a routine
+      operationId: listRoutineExecutions
+      parameters: [{ $ref: '#/components/parameters/Status' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200':
+          description: executions (newest first)
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Execution' } } } }
+
+  /api/v1/routines/{routineId}/webhook/rotate:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    post:
+      summary: Replace the webhook URL (the old one stops working immediately)
+      operationId: rotateWebhook
+      responses:
+        '200': { description: routine with the new webhookPath, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/hooks/{token}:
+    parameters:
+      - { name: token, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_-]{20,100}$' } }
+    post:
+      summary: Start a webhook routine from an external system
+      description: |
+        Public endpoint – the secret token in the path is the only credential, so no
+        bearer token is required. The JSON body (max. 64 KiB) is available to the
+        routine's actions as `{{trigger.body.<path>}}`. An unknown token and a routine
+        that is not webhook-triggered both answer 404. Senders that retry should pass
+        an `Idempotency-Key`; a repeated call then returns the existing execution.
+      operationId: callWebhook
+      security: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object } } }
+      responses:
+        '202':
+          description: execution accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { executionId: { type: string, format: uuid }, status: { $ref: '#/components/schemas/ExecutionStatus' } }
+        '200': { description: already triggered with this Idempotency-Key }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: routine is not active, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '413': { description: body larger than 64 KiB }
+
+  /api/v1/executions:
+    get:
+      summary: All own executions
+      operationId: listExecutions
+      parameters: [{ $ref: '#/components/parameters/Status' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200':
+          description: executions (newest first)
+          content:
+            application/json:
+              schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Execution' } } } }
+
+  /api/v1/executions/stats:
+    get:
+      summary: Statistics of own executions
+      description: |
+        Aggregated on the server so the numbers do not depend on the page size
+        of a list. `byStatus` counts executions created since `since`,
+        `inFlight` counts all still running ones regardless of age.
+      operationId: getExecutionStats
+      parameters:
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 720, default: 24 } }
+      responses:
+        '200':
+          description: statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [since, byStatus, inFlight]
+                properties:
+                  since: { type: string, format: date-time }
+                  byStatus: { $ref: '#/components/schemas/StatusCounts' }
+                  inFlight: { $ref: '#/components/schemas/StatusCounts' }
+
+  /api/v1/executions/{executionId}:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Status of an execution including actions and log
+      operationId: getExecution
+      responses:
+        '200': { description: execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  parameters:
+    RoutineId: { name: routineId, in: path, required: true, schema: { type: string, format: uuid } }
+    Status:
+      name: status
+      in: query
+      schema: { $ref: '#/components/schemas/ExecutionStatus' }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+
+  responses:
+    Unauthorized:
+      description: missing or invalid token
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Problem:
+      description: error
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    InvalidRoutine:
+      description: semantically invalid routine (unknown type, missing parameters, invalid cron …)
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        errors: { description: individual validation errors }
+
+    StatusCounts:
+      type: object
+      description: count per status; statuses without executions are omitted
+      additionalProperties: false
+      properties:
+        PENDING: { type: integer }
+        RUNNING: { type: integer }
+        WAITING: { type: integer }
+        COMPLETED: { type: integer }
+        FAILED: { type: integer }
+
+    ActionType:
+      type: object
+      properties:
+        type: { type: string, examples: [weather.get] }
+        description: { type: string }
+        runsIn: { enum: [engine, worker], description: 'engine = scripting action evaluated by the routine service itself; worker = sent through the broker' }
+        requiredParams: { type: array, items: { type: string } }
+        example: { type: object }
+
+    Trigger:
+      oneOf:
+        - type: object
+          required: [type]
+          properties: { type: { const: manual } }
+        - type: object
+          required: [type, cron]
+          properties:
+            type: { const: schedule }
+            cron: { type: string, description: 'Cron with 5 or 6 fields (seconds), minimum interval 10 s', examples: ['30 7 * * 1-5'] }
+            timezone: { type: string, default: Europe/Zurich }
+        - type: object
+          required: [type]
+          description: started by POST /api/v1/hooks/{token}; the URL is returned as `webhookPath`
+          properties: { type: { const: webhook } }
+
+    ActionInput:
+      type: object
+      required: [key, type]
+      additionalProperties: false
+      properties:
+        key: { type: string, pattern: '^[a-zA-Z][a-zA-Z0-9_-]{0,39}$' }
+        type: { type: string, examples: [task.create] }
+        step:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: Actions with the same step run in parallel. Default = step of the previous action + 1.
+        params:
+          type: object
+          description: 'Strings may contain placeholders: {{actions.<key>.<path>}}, {{routine.name}}, {{execution.id}}, {{trigger.type}}, {{trigger.body.<path>}} (webhook routines only), {{vars.<name>}} (set by an earlier variable.set), {{item}} / {{index}} (repeating steps only), {{now}}'
+        runIf:
+          type: object
+          description: Run only if the `condition.if` step `action` (an earlier step) produced `is`; otherwise the action is SKIPPED.
+          required: [action, is]
+          additionalProperties: false
+          properties:
+            action: { type: string }
+            is: { type: boolean }
+        forEach:
+          type: string
+          maxLength: 200
+          description: 'One {{…}} reference to a list. The action runs once per item (in parallel, at most 50), each run reads {{item}} and {{index}}. Later steps read {{actions.<key>.items}} and {{actions.<key>.count}}.'
+
+    RoutineInput:
+      type: object
+      required: [name, trigger, actions]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 2000 }
+        trigger: { $ref: '#/components/schemas/Trigger' }
+        actions: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ActionInput' } }
+        icon: { $ref: '#/components/schemas/RoutineIcon' }
+        color: { $ref: '#/components/schemas/RoutineColor' }
+
+    RoutineIcon:
+      type: [string, 'null']
+      pattern: '^[a-z][a-z0-9-]{0,39}$'
+      description: 'Name of a symbol in the client''s icon set. Omitted on update = unchanged, null = symbol of the first action.'
+
+    RoutineColor:
+      description: 'Omitted on update = unchanged, null = colour of the first action.'
+      anyOf:
+        - enum: [sky, indigo, violet, pink, orange, green, teal, grey]
+        - type: 'null'
+
+    Appearance:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        icon: { $ref: '#/components/schemas/RoutineIcon' }
+        color: { $ref: '#/components/schemas/RoutineColor' }
+
+    Routine:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        trigger: { $ref: '#/components/schemas/Trigger' }
+        actions:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              type: { type: string }
+              step: { type: integer }
+              params: { type: object }
+        active: { type: boolean }
+        nextRunAt: { type: [string, 'null'], format: date-time }
+        webhookPath: { type: [string, 'null'], description: 'path of the webhook URL (webhook routines only), e.g. /api/v1/hooks/3kf…' }
+        icon: { type: [string, 'null'], description: 'chosen symbol; null = derived from the first action' }
+        color: { type: [string, 'null'], description: 'chosen colour; null = derived from the first action' }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ExecutionStatus:
+      type: string
+      enum: [PENDING, RUNNING, WAITING, COMPLETED, FAILED]
+      description: |
+        PENDING → RUNNING → COMPLETED; RUNNING → WAITING (retry scheduled or no
+        worker responding) → RUNNING; any time → FAILED on a permanent error.
+
+    Execution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        routineId: { type: string, format: uuid }
+        routineName: { type: string }
+        status: { $ref: '#/components/schemas/ExecutionStatus' }
+        trigger: { enum: [manual, schedule, webhook, routine], description: 'routine = called by a routine.run step of another routine' }
+        calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
+        scheduledFor: { type: [string, 'null'], format: date-time }
+        correlationId: { type: string, description: shared ID in all logs and messages of this execution }
+        traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }
+        currentStep: { type: integer }
+        error: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+
+    ExecutionDetail:
+      allOf:
+        - $ref: '#/components/schemas/Execution'
+        - type: object
+          properties:
+            triggerPayload: { type: [object, 'null'], description: JSON body of the webhook call that started the execution }
+            actions:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid, description: actionId – idempotency key in the workers }
+                  key: { type: string }
+                  type: { type: string }
+                  step: { type: integer }
+                  status: { enum: [PENDING, DISPATCHED, RETRYING, COMPLETED, FAILED, SKIPPED] }
+                  attempts: { type: integer }
+                  params: { type: object, description: resolved parameters (after dispatch) }
+                  output: { type: [object, 'null'] }
+                  error: { type: [string, 'null'] }
+                  processedBy: { type: [string, 'null'], description: 'service instance, e.g. integration-worker@3f2a…, or routine-engine for scripting actions' }
+                  runIf: { type: object, description: 'as defined in the routine' }
+                  forEach: { type: string, description: 'as defined in the routine; the action is then expanded into child actions' }
+                  parentId: { type: string, format: uuid, description: 'set on the actions a forEach step was expanded into' }
+                  loopIndex: { type: integer, description: 'position of the item this child action works on' }
+                  dispatchedAt: { type: [string, 'null'], format: date-time }
+                  finishedAt: { type: [string, 'null'], format: date-time }
+            log:
+              type: array
+              items:
+                type: object
+                properties:
+                  at: { type: string, format: date-time }
+                  kind: { type: string, examples: [ACTION_RETRY] }
+                  actionKey: { type: [string, 'null'] }
+                  message: { type: string }

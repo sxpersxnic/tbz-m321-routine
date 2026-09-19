@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/action-failed.v1.schema.json",
+  "title": "ActionFailed v1",
+  "description": "An action failed permanently (invalid input or retries exhausted). Routing key: action.failed",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ActionFailed"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "actionId",
+        "executionId",
+        "actionType",
+        "error",
+        "attempts",
+        "processedBy"
+      ],
+      "properties": {
+        "actionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actionType": {
+          "type": "string"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "processedBy": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

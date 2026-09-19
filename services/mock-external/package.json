@@ -1,0 +1,11 @@
+{
+  "name": "@routine/mock-external",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stand-in for third-party APIs (weather, webhooks, flaky endpoint) so demos run offline.",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*",
+    "fastify": "^5.12.4"
+  }
+}

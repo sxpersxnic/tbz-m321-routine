@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/action-retry-scheduled.v1.schema.json",
+  "title": "ActionRetryScheduled v1",
+  "description": "An attempt failed transiently and a retry was scheduled. Routing key: action.retry-scheduled",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ActionRetryScheduled"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "actionId",
+        "executionId",
+        "actionType",
+        "attempt",
+        "nextAttemptInMs",
+        "error",
+        "processedBy"
+      ],
+      "properties": {
+        "actionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actionType": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The attempt that failed."
+        },
+        "nextAttemptInMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "processedBy": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
