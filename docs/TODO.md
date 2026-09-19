@@ -44,4 +44,4 @@
 
 - [x] The updated hero section now contains the "Active" toggle button, edit button, execute button and "..." menu. It is still too much, thats why we introduce a settings page for the routine. On the settings page, users should be able to edit the routine title, description, icon, color, active state and delete the routine. The settings page is accessible from the "..." menu in the hero section of the routine details page. So the hero section only contains the execute button and "..." menu as actions. So there is no edit page anymore, the edit button in the hero section is removed and the edit action is moved to the settings page. The settings page should also have a "Back" button to go back to the routine details page. The "..." menu has the options to go to the settings page and copy the routine.
 
-- [ ] Add more possible actions to routines like sending emails, scripting blocks for conditions and loops, variables, functions etc. similar to apple shortcuts.
+- [x] Add more possible actions to routines like sending emails, scripting blocks for conditions and loops, variables, functions etc. similar to apple shortcuts.

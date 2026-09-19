@@ -159,7 +159,7 @@ const text = (output: Record<string, unknown> | null, key: string) => {
 function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
   const base = { type: action.type };
   // scripting steps and the head of a loop only steer the run – what they lead to is the result
-  const steering = ACTION_FORMS[action.type]?.scripting || (action.forEach && !action.parentId);
+  const steering = (ACTION_FORMS[action.type]?.scripting && action.type !== 'routine.run') || (action.forEach && !action.parentId);
   if (action.status === 'FAILED') {
     return { ...base, text: `${actionShort(action.type)} failed`, detail: action.error ?? undefined, bad: true };
   }
@@ -179,6 +179,16 @@ function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
       return { ...base, text: 'Weather', detail: text(action.output, 'summary') };
     case 'summary.generate':
       return { ...base, text: 'Summary', detail: text(action.output, 'title') };
+    case 'routine.run': {
+      const called = text(action.output, 'executionId');
+      const result = action.output?.result;
+      return {
+        ...base,
+        text: `${text(action.params as Record<string, unknown>, 'routineName') ?? 'Routine'} ran`,
+        detail: result === null || result === undefined ? undefined : `Result: ${typeof result === 'string' ? result : JSON.stringify(result)}`,
+        ...(called ? { href: `#/executions/${called}`, linkLabel: 'Run' } : {}),
+      };
+    }
     case 'email.send':
       return { ...base, text: 'E-mail sent', detail: text(action.output, 'to') };
     case 'http.request': {

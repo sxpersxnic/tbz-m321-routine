@@ -1,5 +1,5 @@
 import { previewCron } from './cron.ts';
-import type { Trigger } from './types.ts';
+import type { ExecutionTrigger, Trigger } from './types.ts';
 
 const locale = 'en-GB';
 
@@ -60,7 +60,7 @@ export function describeTrigger(trigger: Trigger): string {
 }
 
 export const TRIGGER_ICONS: Record<Trigger['type'], string> = { manual: 'play', schedule: 'clock', webhook: 'link' };
-export const TRIGGER_WORDS: Record<Trigger['type'], string> = { manual: 'Manual', schedule: 'Scheduled', webhook: 'Webhook' };
+export const TRIGGER_WORDS: Record<ExecutionTrigger, string> = { manual: 'Manual', schedule: 'Scheduled', webhook: 'Webhook', routine: 'Called by a routine' };
 
 /** The full URL an external system calls – the API is always served from the same origin as the UI. */
 export const webhookUrl = (path: string) => `${window.location.origin}${path}`;

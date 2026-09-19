@@ -5,6 +5,8 @@ import { referencedActionKeys, templatePaths } from './templates.ts';
 
 export type TriggerDefinition = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
 export type TriggerType = TriggerDefinition['type'];
+/** How an execution started: a routine's own trigger, or a `routine.run` step of another routine. */
+export type ExecutionTrigger = TriggerType | 'routine';
 
 /** Run a step only if an earlier `condition.if` step produced `is`. */
 export interface RunIf {
@@ -56,7 +58,7 @@ export class DefinitionError extends Error {
   }
 }
 
-const TEMPLATE_ROOTS = new Set(['actions', 'routine', 'execution', 'trigger', 'now', 'vars', 'item', 'index']);
+const TEMPLATE_ROOTS = new Set(['actions', 'routine', 'execution', 'trigger', 'now', 'vars', 'item', 'index', 'input']);
 const LOOP_ROOTS = new Set(['item', 'index']);
 const SINGLE_REFERENCE = /^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/;
 const EARLIER_STEPS_ONLY = 'can only reference actions of earlier steps';

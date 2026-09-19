@@ -198,7 +198,9 @@ export function ExecutionDetail({ id }: { id: string }) {
         <div className="grow">
           <span className="eyebrow">{e.routineName}</span>
           <h1 aria-live="polite">{HEADLINE[e.status]}</h1>
-          <p>{started} · {dateTime(e.createdAt)} · <span className="tabular">{between(e.startedAt ?? e.createdAt, e.finishedAt, now)}</span></p>
+          <p>
+            {e.calledBy ? <a href={`#/executions/${e.calledBy}`}>{started}</a> : started} · {dateTime(e.createdAt)} · <span className="tabular">{between(e.startedAt ?? e.createdAt, e.finishedAt, now)}</span>
+          </p>
         </div>
         {!running && routine?.active && (
           <button type="button" className="btn tinted" disabled={rerunning} onClick={() => void runAgain()}>

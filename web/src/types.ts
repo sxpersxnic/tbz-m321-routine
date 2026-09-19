@@ -7,6 +7,8 @@ export type Priority = 'low' | 'normal' | 'high';
 
 export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
 export type TriggerType = Trigger['type'];
+/** How a run started: its routine's trigger, or a "Run routine" step of another routine. */
+export type ExecutionTrigger = TriggerType | 'routine';
 
 export interface RunIf {
   /** Key of an earlier `condition.if` step. */
@@ -67,7 +69,9 @@ export interface Execution {
   routineId: string;
   routineName: string;
   status: ExecutionStatus;
-  trigger: TriggerType;
+  trigger: ExecutionTrigger;
+  /** The run whose "Run routine" step started this one. */
+  calledBy?: string | null;
   scheduledFor: string | null;
   correlationId: string;
   traceId: string | null;

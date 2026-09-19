@@ -60,6 +60,9 @@ function toValues(type: string, params: Record<string, unknown>): Record<string,
       values[field.name] = raw === undefined ? '' : JSON.stringify(raw, null, 2);
     } else if (field.kind === 'value') {
       values[field.name] = raw === undefined || raw === null ? '' : typeof raw === 'string' ? raw : JSON.stringify(raw);
+    } else if (field.kind === 'routine') {
+      values[field.name] = typeof raw === 'string' ? raw : '';
+      values.routineName = typeof params.routineName === 'string' ? params.routineName : '';
     } else {
       values[field.name] = raw === undefined || raw === null ? '' : String(raw);
     }
@@ -105,6 +108,10 @@ function toParams(action: DraftAction): Record<string, unknown> {
       params[field.name] = Number(text);
     } else if (field.kind === 'value') {
       params[field.name] = parseValue(text);
+    } else if (field.kind === 'routine') {
+      // the name only makes the sentence readable; the id is what runs
+      params[field.name] = text;
+      if (action.values.routineName) params.routineName = action.values.routineName;
     } else {
       params[field.name] = text;
     }
@@ -307,6 +314,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   const editing = Boolean(id);
   const actionTypes = usePolling(() => api.actionTypes(), 0);
   const taskLists = usePolling(() => api.taskLists(), 0);
+  const routineList = usePolling(() => api.routines(), 0);
   // One shared starting value: fromRoutine() mints random uids, so calling it
   // twice would make the draft differ from its own baseline and read as dirty.
   const [initial] = useState<Draft>(EMPTY);
@@ -594,7 +602,18 @@ export function RoutineEditor({ id }: { id?: string }) {
     return (
       <label key={field.name} className={`field ${field.kind === 'textarea' || field.kind === 'json' || field.name === 'url' ? 'span-2' : ''}`}>
         <span>{field.label}</span>
-        {field.kind === 'tasklist' ? (
+        {field.kind === 'routine' ? (
+          <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => {
+            const chosen = routineList.data?.find((candidate) => candidate.id === event.target.value);
+            setValue(action.uid, 'routineName', chosen?.name ?? '');
+            apply(event.target.value);
+          }}>
+            <option value="">Choose a routine…</option>
+            {/* calling itself would only run into the depth limit */}
+            {routineList.data?.filter((candidate) => candidate.id !== id).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+            {value && routineList.data && !routineList.data.some((candidate) => candidate.id === value) && <option value={value as string}>Deleted routine</option>}
+          </select>
+        ) : field.kind === 'tasklist' ? (
           <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
             <option value="">{taskLists.data?.find((list) => list.isDefault)?.name ?? 'Todo'} (default)</option>
             {taskLists.data?.filter((list) => !list.isDefault).map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}
@@ -929,7 +948,8 @@ export function RoutineEditor({ id }: { id?: string }) {
                                     <Icon name="variable" size={14} /> {name}
                                   </button>
                                 ))}
-                                {Object.entries({ ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}), ...GLOBAL_REFERENCES }).map(([reference, name]) => (
+                                {/* a manual routine is what another routine calls as a function – offer what it is called with */}
+                                {Object.entries({ ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}), ...(draft.triggerType === 'manual' ? INPUT_REFERENCE : {}), ...GLOBAL_REFERENCES }).map(([reference, name]) => (
                                   <button key={reference} type="button" className="ref-chip" title={reference}
                                     onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
                                     {name}
@@ -1045,6 +1065,7 @@ export function RoutineEditor({ id }: { id?: string }) {
 }
 
 const LOOP_REFERENCES: Record<string, string> = { '{{item}}': 'Item', '{{index}}': 'Index' };
+const INPUT_REFERENCE: Record<string, string> = { '{{input}}': 'Input' };
 
 /**
  * The control flow of one step: "Only if" an earlier If step holds, and

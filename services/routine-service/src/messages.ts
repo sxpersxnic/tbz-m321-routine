@@ -3,12 +3,14 @@
  * in contracts/schemas. Nothing outside this file knows the wire format.
  */
 import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
+import type { ExecutionTrigger } from './domain/definition.ts';
 
 export const SOURCE = 'routine-service';
 
 export const EXCHANGES = {
   actions: 'routine.actions',
   events: 'routine.events',
+  results: 'routine.action-results',
 } as const;
 
 export interface OutgoingMessage {
@@ -23,7 +25,7 @@ export function routineTriggered(input: {
   executionId: string;
   routineId: string;
   ownerId: string;
-  trigger: 'manual' | 'schedule' | 'webhook';
+  trigger: ExecutionTrigger;
   scheduledFor: Date | null;
   correlationId: string;
 }): OutgoingMessage {
@@ -44,6 +46,43 @@ export function routineTriggered(input: {
       },
     }),
   };
+}
+
+/**
+ * The result of a `routine.run` step, once the routine it called has finished. The engine
+ * answers like any worker would – through the results exchange – so the calling step is
+ * completed by the same, idempotent path as every other action.
+ */
+export function subRoutineResult(input: {
+  actionId: string;
+  executionId: string;
+  correlationId: string;
+  outcome: { ok: true; output: Record<string, unknown> } | { ok: false; error: string };
+}): OutgoingMessage {
+  const ref = { actionId: input.actionId, executionId: input.executionId, actionType: 'routine.run', processedBy: 'routine-engine' };
+  return input.outcome.ok
+    ? {
+        exchange: EXCHANGES.results,
+        routingKey: 'action.completed',
+        envelope: createEnvelope({
+          type: 'ActionCompleted',
+          version: 1,
+          source: SOURCE,
+          correlationId: input.correlationId,
+          data: { ...ref, output: input.outcome.output, completedAt: new Date().toISOString(), duplicate: false },
+        }),
+      }
+    : {
+        exchange: EXCHANGES.results,
+        routingKey: 'action.failed',
+        envelope: createEnvelope({
+          type: 'ActionFailed',
+          version: 1,
+          source: SOURCE,
+          correlationId: input.correlationId,
+          data: { ...ref, error: { code: 'SubRoutineFailed', message: input.outcome.error }, attempts: 1 },
+        }),
+      };
 }
 
 export function actionRequested(input: {

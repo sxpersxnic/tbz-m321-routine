@@ -1,6 +1,6 @@
 import type { Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { ActionDefinition, Appearance, RoutineDefinition, RunIf, TriggerDefinition, TriggerType } from './domain/definition.ts';
+import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineDefinition, RunIf, TriggerDefinition } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 
 // ---------------------------------------------------------------- rows
@@ -27,13 +27,16 @@ export interface ExecutionRow {
   routine_id: string;
   owner_id: string;
   routine_name: string;
-  trigger_type: TriggerType;
+  trigger_type: ExecutionTrigger;
   scheduled_for: Date | null;
   trigger_payload: Record<string, unknown> | null;
   status: ExecutionStatus;
   current_step: number;
   correlation_id: string;
   trace_id: string | null;
+  parent_action_id: string | null;
+  parent_execution_id: string | null;
+  call_depth: number;
   error: string | null;
   created_at: Date;
   started_at: Date | null;
@@ -211,17 +214,20 @@ export async function insertExecution(
   execution: {
     id: string;
     routine: RoutineRow;
-    trigger: TriggerType;
+    trigger: ExecutionTrigger;
     scheduledFor: Date | null;
     idempotencyKey: string | null;
     payload: Record<string, unknown> | null;
     correlationId: string;
     traceId: string | null;
+    /** Set when a `routine.run` step started this execution. */
+    parent?: { actionId: string; executionId: string; depth: number };
   },
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
-    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)
+    `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload,
+                             parent_action_id, parent_execution_id, call_depth)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -235,6 +241,9 @@ export async function insertExecution(
       execution.correlationId,
       execution.traceId,
       execution.payload === null ? null : JSON.stringify(execution.payload),
+      execution.parent?.actionId ?? null,
+      execution.parent?.executionId ?? null,
+      execution.parent?.depth ?? 0,
     ],
   );
   return rows[0] ?? null;
@@ -488,6 +497,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    calledBy: row.parent_execution_id,
     ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({

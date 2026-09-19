@@ -428,7 +428,8 @@ components:
         routineId: { type: string, format: uuid }
         routineName: { type: string }
         status: { $ref: '#/components/schemas/ExecutionStatus' }
-        trigger: { enum: [manual, schedule, webhook] }
+        trigger: { enum: [manual, schedule, webhook, routine], description: 'routine = called by a routine.run step of another routine' }
+        calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: shared ID in all logs and messages of this execution }
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }

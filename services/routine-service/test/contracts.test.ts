@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { createEnvelope } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionRequested, executionCompleted, executionFailed, parseActionResult, routineTriggered } from '../src/messages.ts';
+import { actionRequested, executionCompleted, executionFailed, parseActionResult, routineTriggered, subRoutineResult } from '../src/messages.ts';
 
 const ids = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), correlationId: randomUUID() };
 
@@ -13,6 +13,22 @@ describe('routine-service produces valid messages', () => {
     const message = routineTriggered({ ...ids, trigger: 'schedule', scheduledFor: new Date() });
     assert.deepEqual(contractErrors('routine-triggered.v1.schema.json', message.envelope), []);
     assert.equal(message.routingKey, 'routine.triggered');
+  });
+
+  it('RoutineTriggered v1 for a routine called by another routine', () => {
+    const message = routineTriggered({ ...ids, trigger: 'routine', scheduledFor: null });
+    assert.deepEqual(contractErrors('routine-triggered.v1.schema.json', message.envelope), []);
+  });
+
+  it('answers a routine.run step like a worker would', () => {
+    const ref = { actionId: randomUUID(), executionId: randomUUID(), correlationId: randomUUID() };
+    const done = subRoutineResult({ ...ref, outcome: { ok: true, output: { result: 42 } } });
+    assert.equal(done.routingKey, 'action.completed');
+    assert.deepEqual(contractErrors('action-completed.v1.schema.json', done.envelope), []);
+    assert.equal(parseActionResult(done.envelope as never).kind, 'completed');
+    const failed = subRoutineResult({ ...ref, outcome: { ok: false, error: 'boom' } });
+    assert.equal(failed.routingKey, 'action.failed');
+    assert.deepEqual(contractErrors('action-failed.v1.schema.json', failed.envelope), []);
   });
 
   it('RoutineTriggered v1 for a webhook call', () => {

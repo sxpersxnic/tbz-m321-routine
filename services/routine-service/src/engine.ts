@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
-import type { TriggerType } from './domain/definition.ts';
+import type { ExecutionTrigger } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import {
   actionRequested,
   executionCompleted,
   executionFailed,
   routineTriggered,
+  subRoutineResult,
   type ActionResult,
   type CompletionEventFormat,
 } from './messages.ts';
@@ -16,6 +17,7 @@ import { enqueue } from './outbox.ts';
 import {
   appendLog,
   findExecutionByIdempotencyKey,
+  getRoutine,
   insertExecution,
   insertExecutionActions,
   insertLoopActions,
@@ -40,19 +42,41 @@ export interface EngineOptions {
 }
 
 export interface TriggerRequest {
-  type: TriggerType;
+  type: ExecutionTrigger;
   scheduledFor?: Date;
   idempotencyKey?: string;
-  /** Body of a webhook call. */
+  /** Body of a webhook call, or `{ input }` of a routine.run call. */
   payload?: Record<string, unknown>;
+  /** The routine.run step that called this routine. */
+  parent?: { actionId: string; executionId: string; depth: number };
+}
+
+/** Values of the `variable.set` steps that ran, in run order – a later assignment wins. */
+function variablesOf(actions: ExecutionActionRow[]): Record<string, unknown> {
+  const vars: Record<string, unknown> = {};
+  const done = actions.filter((action) => action.status === 'COMPLETED' && action.type === 'variable.set');
+  for (const action of done.sort((a, b) => a.step - b.step || (a.finished_at?.getTime() ?? 0) - (b.finished_at?.getTime() ?? 0))) {
+    if (typeof action.output?.name === 'string') vars[action.output.name] = action.output.value;
+  }
+  return vars;
+}
+
+/** What a routine returns to the step that called it: its variables, and "result" as the return value. */
+function subRoutineOutput(actions: ExecutionActionRow[]): Record<string, unknown> {
+  const vars = variablesOf(actions);
+  return { result: vars.result ?? null, vars };
 }
 
 /** `processed_by` of what the engine did itself (scripting actions, loop expansion). */
 const ENGINE = 'routine-engine';
 const MAX_LOOP_ITEMS = 50;
+/** routine.run nesting: A → B → C … at most this deep, so a routine calling itself stops. */
+const MAX_CALL_DEPTH = 5;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const TRIGGER_LOG: Record<TriggerType, (trigger: TriggerRequest) => string> = {
+const TRIGGER_LOG: Record<ExecutionTrigger, (trigger: TriggerRequest) => string> = {
   manual: () => 'Started manually',
+  routine: () => 'Called by another routine',
   schedule: (trigger) => `Started by schedule (${trigger.scheduledFor?.toISOString()})`,
   webhook: () => 'Started by webhook',
 };
@@ -95,6 +119,7 @@ export class ExecutionEngine {
       payload: trigger.payload ?? null,
       correlationId,
       traceId: currentTraceId(),
+      parent: trigger.parent,
     });
     if (!execution) {
       // Lost an insert race: a concurrent request with the same key won (the caller's routine
@@ -276,6 +301,29 @@ export class ExecutionEngine {
               continue;
             }
 
+            // A function call: start the other routine and wait – its end completes this step (see #reportToCaller).
+            if (action.type === 'routine.run') {
+              const targetId = typeof params.routineId === 'string' && UUID.test(params.routineId) ? params.routineId : null;
+              const target = targetId ? await getRoutine(client, execution.owner_id, targetId) : null;
+              if (!target) {
+                await fail(action, 'the routine to run does not exist (any more)');
+                continue;
+              }
+              if (execution.call_depth >= MAX_CALL_DEPTH) {
+                await fail(action, `routines can call each other at most ${MAX_CALL_DEPTH} levels deep`);
+                continue;
+              }
+              await markActionDispatched(client, action.id, params);
+              const started = await this.createExecution(client, target, {
+                type: 'routine',
+                payload: { input: params.input ?? null },
+                parent: { actionId: action.id, executionId: execution.id, depth: execution.call_depth + 1 },
+              });
+              await appendLog(client, execution.id, 'ACTION_DISPATCHED', `Calls routine "${target.name}" (${started?.execution.id ?? '?'})`, action.key);
+              Object.assign(action, { status: 'DISPATCHED', dispatched_at: new Date() });
+              continue;
+            }
+
             // Scripting actions are computed right here, inside this transaction – no broker round trip.
             if (CONTROL_ACTION_TYPES.has(action.type)) {
               await markActionDispatched(client, action.id, params);
@@ -340,6 +388,7 @@ export class ExecutionEngine {
               this.#options.completionEventFormat,
             ),
           );
+          await this.#reportToCaller(client, execution, { ok: true, output: { executionId: execution.id, ...subRoutineOutput(actions) } });
           this.#logger.info({ executionId: execution.id, durationMs, eventFormat: this.#options.completionEventFormat }, 'execution completed');
           return;
         }
@@ -362,6 +411,9 @@ export class ExecutionEngine {
               correlationId: execution.correlation_id,
             }),
           );
+          // a failure that came up from a deeper call already names its routine – pass it on as it is
+          const error = failed?.type === 'routine.run' && failed.error ? failed.error : `Routine "${execution.routine_name}": ${failed?.error ?? 'unknown error'}`;
+          await this.#reportToCaller(client, execution, { ok: false, error });
           this.#logger.warn({ executionId: execution.id, reason }, 'execution failed');
           return;
         }
@@ -387,6 +439,19 @@ export class ExecutionEngine {
     }
   }
 
+  /** A routine called by a routine.run step answers that step, through the outbox like any worker result. */
+  async #reportToCaller(
+    client: PoolClient,
+    execution: ExecutionRow,
+    outcome: { ok: true; output: Record<string, unknown> } | { ok: false; error: string },
+  ): Promise<void> {
+    if (!execution.parent_action_id || !execution.parent_execution_id) return;
+    await enqueue(
+      client,
+      subRoutineResult({ actionId: execution.parent_action_id, executionId: execution.parent_execution_id, correlationId: execution.correlation_id, outcome }),
+    );
+  }
+
   /** What `{{…}}` can see when `action` is dispatched. */
   #templateScope(execution: ExecutionRow, actions: ExecutionActionRow[], action: ExecutionActionRow): TemplateScope {
     const done = actions.filter((candidate) => candidate.status === 'COMPLETED');
@@ -401,11 +466,7 @@ export class ExecutionEngine {
         outputs[candidate.key] = candidate.output ?? {};
       }
     }
-    // variables in run order: the later assignment wins
-    const vars: Record<string, unknown> = {};
-    for (const candidate of [...done].sort((a, b) => a.step - b.step || (a.finished_at?.getTime() ?? 0) - (b.finished_at?.getTime() ?? 0))) {
-      if (candidate.type === 'variable.set' && typeof candidate.output?.name === 'string') vars[candidate.output.name] = candidate.output.value;
-    }
+    const vars = variablesOf(actions);
     return {
       routine: { id: execution.routine_id, name: execution.routine_name },
       execution: {
@@ -417,6 +478,7 @@ export class ExecutionEngine {
       actions: outputs,
       vars,
       ...(action.loop_index !== null && action.loop_index !== undefined ? { item: action.loop_item, index: action.loop_index } : {}),
+      ...(execution.trigger_type === 'routine' ? { input: (execution.trigger_payload as { input?: unknown } | null)?.input ?? null } : {}),
       now: new Date().toISOString(),
     };
   }

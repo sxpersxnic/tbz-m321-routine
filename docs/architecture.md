@@ -116,6 +116,11 @@ Modelled on the *Scripting* actions of Apple's Shortcuts, without changing the s
   (`key[0]`, `key[1]`, … in the same step, at most 50). The children are ordinary actions for the state machine,
   so they run in parallel on the competing workers and a failing item fails the run. Each child reads
   `{{item}}` / `{{index}}`; later steps read `{{actions.<key>.items}}` and `.count`.
+- **Functions** – `routine.run` starts another routine of the same owner as a child execution (trigger `routine`,
+  input readable there as `{{input}}`) and leaves the calling step `DISPATCHED`. When the child finishes, the engine
+  publishes an `ActionCompleted` / `ActionFailed` for the calling step through the outbox to `routine.action-results`
+  – the same path and the same idempotent handling as any worker result. The child's variable `result` is the return
+  value. `call_depth` limits nesting to 5 levels, so a routine calling itself fails instead of running forever.
 
 ## 5. Reliability
 

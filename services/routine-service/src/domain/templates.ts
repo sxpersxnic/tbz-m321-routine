@@ -19,6 +19,8 @@ export interface TemplateScope {
   /** Only inside a "repeat for each" step: the current item and its position (0-based). */
   item?: unknown;
   index?: number;
+  /** Only in an execution started by `routine.run`: the value the calling step passed. */
+  input?: unknown;
   now: string;
 }
 

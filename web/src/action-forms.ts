@@ -5,8 +5,9 @@
 /**
  * `tasklist` = a select filled with the user's task lists.
  * `value` = free text that becomes a number, list or object when it reads as JSON (`42`, `["a","b"]`).
+ * `routine` = a select of the user's routines; stores `routineId` and, for display, `routineName`.
  */
-export type FieldKind = 'text' | 'textarea' | 'number' | 'select' | 'json' | 'keyvalue' | 'tasklist' | 'value';
+export type FieldKind = 'text' | 'textarea' | 'number' | 'select' | 'json' | 'keyvalue' | 'tasklist' | 'value' | 'routine';
 
 export interface ParamField {
   name: string;
@@ -159,6 +160,19 @@ export const ACTION_FORMS: Record<string, ActionForm> = {
     outputs: { result: 'Result' },
     defaults: { left: '', operator: 'equals', right: '' },
   },
+  'routine.run': {
+    label: 'Run routine',
+    blurb: 'Runs another routine like a function and waits for it.',
+    glyph: 'routines',
+    tint: 'grey',
+    scripting: true,
+    fields: [
+      { name: 'routineId', label: 'Routine', kind: 'routine', required: true },
+      { name: 'input', label: 'Input', kind: 'value', hint: 'The routine reads it as {{input}}; it returns its variable "result"' },
+    ],
+    outputs: { result: 'Result' },
+    defaults: {},
+  },
   'math.calculate': {
     label: 'Calculate',
     blurb: 'Adds, subtracts, multiplies, … two numbers.',
@@ -203,6 +217,7 @@ const SHORT: Record<string, string> = {
   'variable.set': 'Variable',
   'condition.if': 'If',
   'math.calculate': 'Calculation',
+  'routine.run': 'Routine',
 };
 
 export const actionShort = (type: string): string => SHORT[type] ?? actionLabel(type);
@@ -273,6 +288,8 @@ export function actionSentence(type: string, params: Record<string, unknown>): S
       const unary = operator === 'isEmpty' || operator === 'isNotEmpty';
       return ['If ', tok(valueWords(params.left)), ` ${CONDITION.optionLabels?.[operator] ?? operator}`, ...(unary ? [] : [' ', tok(valueWords(params.right))])];
     }
+    case 'routine.run':
+      return ['Run routine ', tok(str(params.routineName) || 'not chosen'), ...(params.input !== undefined && params.input !== '' ? [' with ', tok(valueWords(params.input))] : [])];
     case 'math.calculate': {
       const operator = str(params.operator);
       return ['Calculate ', tok(valueWords(params.a)), ` ${MATH.optionLabels?.[operator] ?? operator} `, tok(valueWords(params.b))];
@@ -313,6 +330,7 @@ export function describeReference(reference: string, types: Record<string, strin
   if (WEBHOOK_REFERENCES[reference]) return WEBHOOK_REFERENCES[reference];
   if (reference === '{{trigger.type}}') return 'Trigger';
   if (reference === '{{item}}') return 'Item';
+  if (reference === '{{input}}') return 'Input';
   if (reference === '{{index}}') return 'Index';
   const item = /^\{\{item\.([^}]+)\}\}$/.exec(reference);
   if (item) return `Item › ${item[1].split('.').join(' › ')}`;

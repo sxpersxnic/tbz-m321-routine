@@ -1159,3 +1159,5 @@ button.notice-main { cursor: pointer; }
 .flow-controls .field > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
 .palette-group + .palette-group { margin-top: 14px; }
 .palette-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px; }
+.run-hero p a { color: var(--accent); }
+.run-hero p a:hover { text-decoration: underline; }

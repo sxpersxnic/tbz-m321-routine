@@ -70,6 +70,13 @@ export const ACTION_TYPES: readonly ActionTypeInfo[] = [
     example: { left: '{{actions.weather.temperatureC}}', operator: 'greaterThan', right: 20 },
   },
   {
+    type: 'routine.run',
+    description: 'Run another routine like a function and wait for it; it reads {{input}}, its variable "result" is returned',
+    runsIn: 'engine',
+    requiredParams: ['routineId'],
+    example: { routineId: '00000000-0000-4000-8000-000000000000', input: '{{actions.weather.city}}' },
+  },
+  {
     type: 'math.calculate',
     description: 'Calculate with two numbers (+ - * / % min max round)',
     runsIn: 'engine',
