@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ACTION_FORMS, GLOBAL_REFERENCES, WEBHOOK_REFERENCES, actionLabel, type ParamField } from '../action-forms.ts';
+import { ACTION_FORMS, GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, type ParamField } from '../action-forms.ts';
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
@@ -21,6 +21,10 @@ interface DraftAction {
   type: string;
   step: number;
   values: Record<string, FieldValue>;
+  /** By uid, not key: renaming the condition's ID must not break the link. */
+  runIf: { uid: string; is: boolean } | null;
+  /** `{{…}}` reference to a list, '' = runs once. */
+  forEach: string;
 }
 
 interface Draft {
@@ -54,11 +58,27 @@ function toValues(type: string, params: Record<string, unknown>): Record<string,
       values[field.name] = Object.entries((raw as Record<string, unknown>) ?? {}).map(([key, value]) => ({ key, value: String(value) }));
     } else if (field.kind === 'json') {
       values[field.name] = raw === undefined ? '' : JSON.stringify(raw, null, 2);
+    } else if (field.kind === 'value') {
+      values[field.name] = raw === undefined || raw === null ? '' : typeof raw === 'string' ? raw : JSON.stringify(raw);
     } else {
       values[field.name] = raw === undefined || raw === null ? '' : String(raw);
     }
   }
   return values;
+}
+
+/**
+ * A "value" field: `42`, `true`, `["a","b"]` or `{"a":1}` become that JSON value –
+ * anything else, and anything with a {{reference}}, stays text.
+ */
+function parseValue(text: string): unknown {
+  const trimmed = text.trim();
+  if (trimmed.includes('{{') || !/^([[{]|-?\d|true$|false$)/.test(trimmed)) return text;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return text;
+  }
 }
 
 /** Converts form values back into API params; throws with a readable message on invalid JSON. */
@@ -83,6 +103,8 @@ function toParams(action: DraftAction): Record<string, unknown> {
       }
     } else if (field.kind === 'number') {
       params[field.name] = Number(text);
+    } else if (field.kind === 'value') {
+      params[field.name] = parseValue(text);
     } else {
       params[field.name] = text;
     }
@@ -92,6 +114,7 @@ function toParams(action: DraftAction): Record<string, unknown> {
 
 /** Templates carry no `active` – a routine made from one starts active. */
 function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
+  const uids = new Map(routine.actions.map((action) => [action.key, uid()]));
   return {
     name: routine.name,
     description: routine.description ?? '',
@@ -101,7 +124,15 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
     triggerType: routine.trigger.type,
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
-    actions: routine.actions.map((action) => ({ uid: uid(), key: action.key, type: action.type, step: action.step, values: toValues(action.type, action.params) })),
+    actions: routine.actions.map((action) => ({
+      uid: uids.get(action.key) ?? uid(),
+      key: action.key,
+      type: action.type,
+      step: action.step,
+      values: toValues(action.type, action.params),
+      runIf: action.runIf && uids.has(action.runIf.action) ? { uid: uids.get(action.runIf.action) as string, is: action.runIf.is } : null,
+      forEach: action.forEach ?? '',
+    })),
   };
 }
 
@@ -117,7 +148,18 @@ const TRIGGER_CHOICES: Array<{ type: TriggerType; label: string; icon: string }>
 ];
 
 function toInput(draft: Draft): RoutineInput {
-  const actions: ActionDefinition[] = draft.actions.map((action) => ({ key: action.key.trim(), type: action.type, step: action.step, params: toParams(action) }));
+  const keyOf = new Map(draft.actions.map((action) => [action.uid, action.key.trim()]));
+  const actions: ActionDefinition[] = draft.actions.map((action) => {
+    const condition = action.runIf && keyOf.get(action.runIf.uid);
+    return {
+      key: action.key.trim(),
+      type: action.type,
+      step: action.step,
+      params: toParams(action),
+      ...(action.runIf && condition ? { runIf: { action: condition, is: action.runIf.is } } : {}),
+      ...(action.forEach.trim() ? { forEach: action.forEach.trim() } : {}),
+    };
+  });
   return {
     name: draft.name.trim(),
     description: draft.description.trim(),
@@ -202,6 +244,12 @@ function clientIssues(draft: Draft): Issue[] {
   const issues: Issue[] = [];
   if (!draft.name.trim()) issues.push({ message: 'Give the routine a name', target: nameFieldId });
   if (draft.actions.length === 0) issues.push({ message: 'Add at least one step' });
+  for (const action of draft.actions) {
+    const condition = action.runIf && draft.actions.find((candidate) => candidate.uid === action.runIf?.uid);
+    if (action.runIf && (!condition || condition.step >= action.step)) {
+      issues.push({ message: `${actionLabel(action.type)}: its "Only if" condition must come in an earlier step`, target: fieldId(action.uid, 'runIf') });
+    }
+  }
   const keys = new Set<string>();
   for (const action of draft.actions) {
     const keyTarget = fieldId(action.uid, 'key');
@@ -358,7 +406,7 @@ export function RoutineEditor({ id }: { id?: string }) {
     // the API allows steps 1–50; beyond that a new action joins the last step (runs in parallel)
     const step = Math.min(MAX_STEP, Math.max(0, ...draft.actions.map((action) => action.step)) + 1);
     const form = ACTION_FORMS[type];
-    const action = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}) };
+    const action: DraftAction = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}), runIf: null, forEach: '' };
     setDraft((current) => ({ ...current, actions: [...current.actions, action] }));
     toggleExpanded(action.uid, true);
     // a freshly added card is below the fold on a long routine
@@ -366,7 +414,13 @@ export function RoutineEditor({ id }: { id?: string }) {
   }
 
   function removeAction(actionUid: string) {
-    setDraft((current) => ({ ...current, actions: fromLanes(toLanes(current.actions.filter((action) => action.uid !== actionUid))) }));
+    // steps that ran "only if" the removed one now simply always run
+    setDraft((current) => ({
+      ...current,
+      actions: fromLanes(toLanes(current.actions
+        .filter((action) => action.uid !== actionUid)
+        .map((action) => (action.runIf?.uid === actionUid ? { ...action, runIf: null } : action)))),
+    }));
   }
 
   const reorder = (actionUid: string, direction: -1 | 1) =>
@@ -495,6 +549,16 @@ export function RoutineEditor({ id }: { id?: string }) {
   const blank = !editing && draft.actions.length === 0 && !draft.name;
   const catalog = actionTypes.data ?? Object.keys(ACTION_FORMS).map((type) => ({ type, description: '', requiredParams: [], example: {} }));
 
+  /** Literal names of variables set in steps before `action` – what {{vars.…}} can read there. */
+  const variablesBefore = (action: DraftAction) => [
+    ...new Set(
+      draft.actions
+        .filter((candidate) => candidate.type === 'variable.set' && candidate.step < action.step)
+        .map((candidate) => String(candidate.values.name ?? '').trim())
+        .filter((name) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)),
+    ),
+  ];
+
   const renderField = (action: DraftAction, field: ParamField) => {
     const value = action.values[field.name];
     const apply = (next: string) => setValue(action.uid, field.name, next);
@@ -547,7 +611,7 @@ export function RoutineEditor({ id }: { id?: string }) {
             onChange={(event) => apply(event.target.value)} {...trackFocus(apply)} />
         ) : (
           <input {...common} className={problem ? 'invalid' : ''} type={field.kind === 'number' ? 'number' : 'text'} min={field.kind === 'number' ? 0 : undefined}
-            onChange={(event) => apply(event.target.value)} {...(field.kind === 'text' ? trackFocus(apply) : {})} />
+            onChange={(event) => apply(event.target.value)} {...(field.kind === 'text' || field.kind === 'value' ? trackFocus(apply) : {})} />
         )}
         {problem && <small className="field-error">{problem}</small>}
         {field.hint && <small className="muted">{field.hint}</small>}
@@ -839,17 +903,32 @@ export function RoutineEditor({ id }: { id?: string }) {
 
                               <div className="references" role="group" aria-label="Insert value">
                                 <span className="references-label">Insert</span>
-                                {earlier.flatMap((candidate) =>
-                                    Object.entries(ACTION_FORMS[candidate.type]?.outputs ?? {}).map(([output, name]) => {
-                                      const reference = `{{actions.${candidate.key}.${output}}}`;
-                                      return (
-                                        <button key={reference} type="button" className="ref-chip" title={reference}
-                                          onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
-                                          <ActionGlyph type={candidate.type} size={16} /> {name}
-                                        </button>
-                                      );
-                                    }),
-                                )}
+                                {action.forEach && Object.entries(LOOP_REFERENCES).map(([reference, name]) => (
+                                  <button key={reference} type="button" className="ref-chip" title={reference}
+                                    onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
+                                    <Icon name="repeat" size={14} /> {name}
+                                  </button>
+                                ))}
+                                {(() => {
+                                  // a repeating step offers what all its runs produced, not one run's fields
+                                  const chips = earlier.flatMap((candidate) =>
+                                    Object.entries(candidate.forEach ? LOOP_OUTPUTS : ACTION_FORMS[candidate.type]?.outputs ?? {})
+                                      .map(([output, name]) => ({ candidate, name, reference: `{{actions.${candidate.key}.${output}}}` })));
+                                  // three If steps all offer "Result" – the step ID tells them apart
+                                  const repeated = (name: string) => chips.filter((chip) => chip.name === name).length > 1;
+                                  return chips.map(({ candidate, name, reference }) => (
+                                    <button key={reference} type="button" className="ref-chip" title={reference}
+                                      onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
+                                      <ActionGlyph type={candidate.type} size={16} /> {name}{repeated(name) ? ` (${candidate.key})` : ''}
+                                    </button>
+                                  ));
+                                })()}
+                                {variablesBefore(action).map((name) => (
+                                  <button key={name} type="button" className="ref-chip" title={`{{vars.${name}}}`}
+                                    onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(`{{vars.${name}}}`)}>
+                                    <Icon name="variable" size={14} /> {name}
+                                  </button>
+                                ))}
                                 {Object.entries({ ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}), ...GLOBAL_REFERENCES }).map(([reference, name]) => (
                                   <button key={reference} type="button" className="ref-chip" title={reference}
                                     onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
@@ -857,6 +936,9 @@ export function RoutineEditor({ id }: { id?: string }) {
                                   </button>
                                 ))}
                               </div>
+
+                              <FlowControls action={action} earlier={earlier} variables={variablesBefore(action)} invalid={invalid.get(fieldId(action.uid, 'runIf'))}
+                                onChange={(patch) => updateAction(action.uid, patch)} />
 
                               {/* Shown whenever there is something to be parallel *with*, so the
                                   control survives its own toggle: merging into step 1 would
@@ -889,8 +971,14 @@ export function RoutineEditor({ id }: { id?: string }) {
               <h3 style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
                 {draft.actions.length >= MAX_ACTIONS ? `At most ${MAX_ACTIONS} steps` : 'Add a step'}
               </h3>
+              {[
+                { label: 'Actions', types: catalog.filter((type) => !ACTION_FORMS[type.type]?.scripting) },
+                { label: 'Scripting', types: catalog.filter((type) => ACTION_FORMS[type.type]?.scripting) },
+              ].filter((group) => group.types.length > 0).map((group) => (
+              <div key={group.label} className="palette-group">
+              <h4 className="palette-label">{group.label}</h4>
               <div className="palette">
-                {catalog.map((type) => (
+                {group.types.map((type) => (
                   <button key={type.type} type="button" className="palette-item" onClick={() => addAction(type.type)}
                     title={ACTION_FORMS[type.type]?.blurb ?? type.description} disabled={draft.actions.length >= MAX_ACTIONS}>
                     <ActionGlyph type={type.type} size={30} />
@@ -899,6 +987,8 @@ export function RoutineEditor({ id }: { id?: string }) {
                   </button>
                 ))}
               </div>
+              </div>
+              ))}
             </div>
           </section>
         </div>
@@ -909,7 +999,11 @@ export function RoutineEditor({ id }: { id?: string }) {
           <div className="card">
             <div className="card-head"><h2>Preview</h2></div>
             {draft.actions.length === 0 ? <p className="muted small">No steps yet</p> : (
-              <ActionFlow compact actions={draft.actions.map((action) => ({ key: action.key, type: action.type, step: action.step, params: safeParams(action) }))}
+              <ActionFlow compact actions={draft.actions.map((action) => ({
+                key: action.key, type: action.type, step: action.step, params: safeParams(action),
+                ...(action.runIf ? { runIf: { action: draft.actions.find((candidate) => candidate.uid === action.runIf?.uid)?.key ?? '', is: action.runIf.is } } : {}),
+                ...(action.forEach ? { forEach: action.forEach } : {}),
+              }))}
                 trigger={{
                   icon: TRIGGER_ICONS[draft.triggerType],
                   title: draft.triggerType === 'schedule' ? (schedule?.ok && schedule.text) || 'Schedule' : draft.triggerType === 'webhook' ? 'Webhook call' : 'Manual',
@@ -946,6 +1040,63 @@ export function RoutineEditor({ id }: { id?: string }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const LOOP_REFERENCES: Record<string, string> = { '{{item}}': 'Item', '{{index}}': 'Index' };
+
+/**
+ * The control flow of one step: "Only if" an earlier If step holds, and
+ * "Repeat for each" item of a list. Shown only when there is something to pick.
+ */
+function FlowControls({ action, earlier, variables, invalid, onChange }: {
+  action: DraftAction;
+  earlier: DraftAction[];
+  variables: string[];
+  invalid?: string;
+  onChange: (patch: Partial<DraftAction>) => void;
+}) {
+  const conditions = earlier.filter((candidate) => candidate.type === 'condition.if');
+  // lists a step can repeat over: variables, and the results of earlier repeating steps
+  const lists = [
+    ...variables.map((name) => ({ value: `{{vars.${name}}}`, label: `Variable "${name}"` })),
+    ...earlier.filter((candidate) => candidate.forEach).map((candidate) => ({ value: `{{actions.${candidate.key}.items}}`, label: `Results of "${actionLabel(candidate.type)}" (${candidate.key})` })),
+  ];
+  const custom = action.forEach && !lists.some((list) => list.value === action.forEach);
+  if (conditions.length === 0 && lists.length === 0 && !action.forEach && !action.runIf) return null;
+  const types = Object.fromEntries(earlier.map((candidate) => [candidate.key, candidate.type]));
+  const words = (candidate: DraftAction, is: boolean) => conditionWords({ type: candidate.type, params: safeParams(candidate) }, is, types);
+  const runIfValue = action.runIf ? `${action.runIf.uid}:${action.runIf.is}` : '';
+  return (
+    <div className="flow-controls">
+      {(conditions.length > 0 || action.runIf) && (
+        <label className="field">
+          <span><Icon name="branch" size={13} /> Only if</span>
+          <select id={fieldId(action.uid, 'runIf')} value={runIfValue} className={invalid ? 'invalid' : ''} aria-invalid={invalid ? true : undefined}
+            onChange={(event) => {
+              const [conditionUid, is] = event.target.value.split(':');
+              onChange({ runIf: conditionUid ? { uid: conditionUid, is: is === 'true' } : null });
+            }}>
+            <option value="">Always</option>
+            {conditions.flatMap((candidate) => [true, false].map((is) => (
+              <option key={`${candidate.uid}:${is}`} value={`${candidate.uid}:${is}`}>{words(candidate, is)}</option>
+            )))}
+            {action.runIf && !conditions.some((candidate) => candidate.uid === action.runIf?.uid) && <option value={runIfValue}>A later or removed condition</option>}
+          </select>
+          {invalid && <small className="field-error">{invalid}</small>}
+        </label>
+      )}
+      {(lists.length > 0 || action.forEach) && (
+        <label className="field">
+          <span><Icon name="repeat" size={13} /> Repeat for each</span>
+          <select value={action.forEach} onChange={(event) => onChange({ forEach: event.target.value })}>
+            <option value="">Run once</option>
+            {lists.map((list) => <option key={list.value} value={list.value}>{list.label}</option>)}
+            {custom && <option value={action.forEach}>{action.forEach}</option>}
+          </select>
+        </label>
+      )}
     </div>
   );
 }

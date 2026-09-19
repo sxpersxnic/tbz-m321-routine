@@ -21,6 +21,11 @@ before(async () => {
       response.end();
       return;
     }
+    if (url.pathname === '/mail/messages') {
+      response.writeHead(202, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ messageId: 'msg-1', acceptedAt: '2026-09-19T08:00:00.000Z' }));
+      return;
+    }
     if (url.pathname === '/huge') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(`[${'1,'.repeat(1024 * 1024)}1]`);
@@ -38,6 +43,17 @@ after(() => server.close());
 const environment = (): ActionEnvironment => ({ actionId: randomUUID(), externalApiUrl: baseUrl, allowedHosts: ['127.0.0.1'], timeoutMs: 2_000 });
 
 describe('integration-worker actions', () => {
+  it('sends an e-mail to one or more recipients', async () => {
+    const output = await executeAction('email.send', { to: 'ada@example.com; bob@example.com', subject: 'Hi', body: 'Hello' }, environment());
+    assert.deepEqual(output, { messageId: 'msg-1', to: 'ada@example.com, bob@example.com', subject: 'Hi', sentAt: '2026-09-19T08:00:00.000Z' });
+  });
+
+  it('rejects unusable e-mails permanently', async () => {
+    await assert.rejects(executeAction('email.send', { to: 'not-an-address', subject: 'Hi' }, environment()), PermanentError);
+    await assert.rejects(executeAction('email.send', { to: 'ada@example.com' }, environment()), PermanentError);
+    await assert.rejects(executeAction('email.send', { subject: 'Hi' }, environment()), PermanentError);
+  });
+
   it('weather.get returns a summary and sends the actionId as idempotency key', async () => {
     const env = environment();
     const output = await executeAction('weather.get', { city: 'Bern' }, env);

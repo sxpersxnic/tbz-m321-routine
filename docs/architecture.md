@@ -15,7 +15,7 @@ flowchart LR
 
     RS -- "RoutineTriggered · ActionRequested\nExecutionCompleted/Failed" --> MB{{RabbitMQ}}
     MB -- "action.task.#" --> TS
-    MB -- "action.http/weather/summary.#" --> IW1[Integration Worker 1..n]
+    MB -- "action.http/weather/summary/email.#" --> IW1[Integration Worker 1..n]
     MB -- "action.notification.# · execution.#" --> NS
     TS & IW1 & NS -- "ActionCompleted/Failed/RetryScheduled" --> MB
     MB --> RS
@@ -43,7 +43,7 @@ so the browser only ever sees one origin (no CORS), and the client shares no cod
 | **routine-service** | Manages routines, orchestrates executions, schedule, status | `routines`, `executions`, `execution_actions`, `execution_log`, `outbox` | HTTP, publishes commands/events, consumes results |
 | **task-service** | Task system with lists; executes `task.create` | `tasks`, `task_lists` | HTTP, consumes actions |
 | **notification-service** | Inbox; executes `notification.send`, reacts to execution events | `notifications` | HTTP, consumes actions + events |
-| **integration-worker** | Stateless worker for external calls (`weather.get`, `http.request`, `summary.generate`), **horizontally scalable** | `action_executions` (idempotency) | broker only (+ health) |
+| **integration-worker** | Stateless worker for external calls (`weather.get`, `http.request`, `summary.generate`, `email.send`), **horizontally scalable** | `action_executions` (idempotency) | broker only (+ health) |
 | **mock-external** | *Not part of the platform* – simulates third-party services (latency, 503, webhooks) | – (in-memory) | HTTP |
 
 **Why this split?** Each service corresponds to one business capability (bounded context). The routine service
@@ -100,6 +100,22 @@ sequenceDiagram
 States: `PENDING → RUNNING → COMPLETED`, `RUNNING ⇄ WAITING` (retry scheduled, or no worker answers within
 `WAITING_AFTER_MS`), `→ FAILED` on a permanent error. The transitions are implemented as a pure function in
 `services/routine-service/src/domain/progress.ts` and unit-tested.
+
+### Scripting: variables, conditions, loops
+
+Modelled on the *Scripting* actions of Apple's Shortcuts, without changing the state machine above:
+
+- **Scripting actions** (`variable.set`, `condition.if`, `math.calculate`) only compute a value from their
+  resolved params. The engine evaluates them itself (`domain/control.ts`, pure and unit-tested) inside the
+  same locked transaction – no broker round trip, no side effect, `processedBy = routine-engine`.
+  `{{vars.<name>}}` reads the value of an earlier `variable.set`.
+- **Conditions** – any action can carry `runIf: { action: <condition.if key>, is: true|false }`. When its step is
+  due and the condition did not produce that result (or was itself skipped – nesting works), the action becomes
+  `SKIPPED` instead of being dispatched.
+- **Loops** – `forEach: "{{…list…}}"` expands the action at dispatch time into one child row per item
+  (`key[0]`, `key[1]`, … in the same step, at most 50). The children are ordinary actions for the state machine,
+  so they run in parallel on the competing workers and a failing item fails the run. Each child reads
+  `{{item}}` / `{{index}}`; later steps read `{{actions.<key>.items}}` and `.count`.
 
 ## 5. Reliability
 

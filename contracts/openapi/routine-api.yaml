@@ -310,6 +310,7 @@ components:
       properties:
         type: { type: string, examples: [weather.get] }
         description: { type: string }
+        runsIn: { enum: [engine, worker], description: 'engine = scripting action evaluated by the routine service itself; worker = sent through the broker' }
         requiredParams: { type: array, items: { type: string } }
         example: { type: object }
 
@@ -343,7 +344,19 @@ components:
           description: Actions with the same step run in parallel. Default = step of the previous action + 1.
         params:
           type: object
-          description: 'Strings may contain placeholders: {{actions.<key>.<path>}}, {{routine.name}}, {{execution.id}}, {{trigger.type}}, {{trigger.body.<path>}} (webhook routines only), {{now}}'
+          description: 'Strings may contain placeholders: {{actions.<key>.<path>}}, {{routine.name}}, {{execution.id}}, {{trigger.type}}, {{trigger.body.<path>}} (webhook routines only), {{vars.<name>}} (set by an earlier variable.set), {{item}} / {{index}} (repeating steps only), {{now}}'
+        runIf:
+          type: object
+          description: Run only if the `condition.if` step `action` (an earlier step) produced `is`; otherwise the action is SKIPPED.
+          required: [action, is]
+          additionalProperties: false
+          properties:
+            action: { type: string }
+            is: { type: boolean }
+        forEach:
+          type: string
+          maxLength: 200
+          description: 'One {{…}} reference to a list. The action runs once per item (in parallel, at most 50), each run reads {{item}} and {{index}}. Later steps read {{actions.<key>.items}} and {{actions.<key>.count}}.'
 
     RoutineInput:
       type: object
@@ -445,7 +458,11 @@ components:
                   params: { type: object, description: resolved parameters (after dispatch) }
                   output: { type: [object, 'null'] }
                   error: { type: [string, 'null'] }
-                  processedBy: { type: [string, 'null'], description: 'service instance, e.g. integration-worker@3f2a…' }
+                  processedBy: { type: [string, 'null'], description: 'service instance, e.g. integration-worker@3f2a…, or routine-engine for scripting actions' }
+                  runIf: { type: object, description: 'as defined in the routine' }
+                  forEach: { type: string, description: 'as defined in the routine; the action is then expanded into child actions' }
+                  parentId: { type: string, format: uuid, description: 'set on the actions a forEach step was expanded into' }
+                  loopIndex: { type: integer, description: 'position of the item this child action works on' }
                   dispatchedAt: { type: [string, 'null'], format: date-time }
                   finishedAt: { type: [string, 'null'], format: date-time }
             log:

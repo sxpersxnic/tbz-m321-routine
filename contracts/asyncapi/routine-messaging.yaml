@@ -37,7 +37,7 @@ channels:
     description: |
       Topic exchange. Routing key `action.<actionType>`, e.g. `action.task.create`.
       The routine service does not know which service executes an action – the
-      bindings decide (action.task.# → task-service, action.http.#/weather.#/summary.# →
+      bindings decide (action.task.# → task-service, action.http.#/weather.#/summary.#/email.# →
       integration-worker, action.notification.# → notification-service).
       Undeliverable commands end up in `routine.unrouted-actions` via the alternate exchange.
     bindings:

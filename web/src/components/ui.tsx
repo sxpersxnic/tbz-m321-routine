@@ -92,6 +92,15 @@ const ICONS: Record<string, ReactNode> = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  variable: <path d="M8 4C6 4 5 5 5 7v2c0 1.5-.8 3-2 3 1.2 0 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5.8 3 2 3-1.2 0-2 1.5-2 3v2c0 2-1 3-3 3M9.5 9.5l5 5M14.5 9.5l-5 5" />,
+  branch: <path d="M6 3v18M6 8c0 4 4 6 8 6h4M15 11l3 3-3 3" />,
+  calc: (
+    <>
+      <rect x="5" y="3" width="14" height="18" rx="2.5" />
+      <path d="M8.5 7.5h7M9 12h.5M14.5 12h.5M9 16h.5M14.5 16h.5" />
+    </>
+  ),
+  repeat: <path d="M17 3l3 3-3 3M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3M20 13v2a3 3 0 0 1-3 3H4" />,
   sliders: (
     <>
       <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />

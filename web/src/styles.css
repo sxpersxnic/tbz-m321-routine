@@ -1146,3 +1146,16 @@ button.notice-main { cursor: pointer; }
 .list-look { display: flex; gap: 16px; align-items: center; }
 .list-look-preview { width: 52px; height: 52px; border-radius: 50%; flex: none; }
 .list-look .appearance-group, .form-stack .appearance-group.icons { justify-content: flex-start; }
+
+/* ---------------------------------------------------------------- control flow tags */
+.flow-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.flow-tag {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0;
+  font-size: 12px; font-weight: 500; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 2px 7px;
+}
+.flow-tag strong { color: var(--text); }
+.flow-tag .ref-pill { font-size: 12px; }
+.flow-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.flow-controls .field > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
+.palette-group + .palette-group { margin-top: 14px; }
+.palette-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px; }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
+import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
 import type { TriggerType } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
@@ -17,12 +18,14 @@ import {
   findExecutionByIdempotencyKey,
   insertExecution,
   insertExecutionActions,
+  insertLoopActions,
   listExecutionActions,
   lockExecution,
   markActionCompleted,
   markActionDispatched,
   markActionFailed,
   markActionRetrying,
+  markActionSkipped,
   markStaleExecutionsWaiting,
   skipPendingActions,
   updateExecutionStatus,
@@ -43,6 +46,10 @@ export interface TriggerRequest {
   /** Body of a webhook call. */
   payload?: Record<string, unknown>;
 }
+
+/** `processed_by` of what the engine did itself (scripting actions, loop expansion). */
+const ENGINE = 'routine-engine';
+const MAX_LOOP_ITEMS = 50;
 
 const TRIGGER_LOG: Record<TriggerType, (trigger: TriggerRequest) => string> = {
   manual: () => 'Started manually',
@@ -213,24 +220,85 @@ export class ExecutionEngine {
       switch (decision.kind) {
         case 'dispatch': {
           const batch = actions.filter((action) => decision.keys.includes(action.key));
-          const scope = this.#templateScope(execution, actions);
-          const resolved = new Map<string, Record<string, unknown>>();
-          let templateFailed = false;
-          for (const action of batch) {
-            try {
-              resolved.set(action.id, resolveTemplates(action.params, scope) as Record<string, unknown>);
-            } catch (error) {
-              if (!(error instanceof TemplateError)) throw error;
-              await markActionFailed(client, action.id, error.message, null);
-              await appendLog(client, execution.id, 'ACTION_FAILED', error.message, action.key);
-              Object.assign(action, { status: 'FAILED', error: error.message });
-              templateFailed = true;
-            }
-          }
-          if (templateFailed) continue; // re-evaluate → fail
+          const toSend: Array<{ action: ExecutionActionRow; params: Record<string, unknown> }> = [];
+          const fail = async (action: ExecutionActionRow, message: string) => {
+            await markActionFailed(client, action.id, message, null);
+            await appendLog(client, execution.id, 'ACTION_FAILED', message, action.key);
+            Object.assign(action, { status: 'FAILED', error: message });
+          };
 
           for (const action of batch) {
-            const params = resolved.get(action.id) ?? {};
+            // "Only if": a step whose condition did not hold (or did not run) is skipped
+            if (action.run_if) {
+              const condition = actions.find((candidate) => candidate.key === action.run_if?.action);
+              if (!condition || !conditionMet(condition, action.run_if.is)) {
+                await markActionSkipped(client, action.id);
+                await appendLog(client, execution.id, 'ACTION_SKIPPED', `Skipped – "${action.run_if.action}" was not ${action.run_if.is}`, action.key);
+                action.status = 'SKIPPED';
+                continue;
+              }
+            }
+            const scope = this.#templateScope(execution, actions, action);
+
+            // "Repeat for each": expand into one row per item; the rows run in parallel within this step
+            if (action.for_each && !action.parent_id) {
+              let list: unknown;
+              try {
+                list = resolveTemplates(action.for_each, scope);
+              } catch (error) {
+                if (!(error instanceof TemplateError)) throw error;
+                await fail(action, error.message);
+                continue;
+              }
+              if (!Array.isArray(list)) {
+                await fail(action, `"repeat for each" needs a list, ${action.for_each} is ${list === null ? 'null' : typeof list}`);
+                continue;
+              }
+              if (list.length > MAX_LOOP_ITEMS) {
+                await fail(action, `"repeat for each" is limited to ${MAX_LOOP_ITEMS} items, the list has ${list.length}`);
+                continue;
+              }
+              actions.push(...(await insertLoopActions(client, action, list)));
+              // no resolved params of its own: the children carry the real ones, the parent keeps its template
+              const output = { count: list.length };
+              await markActionCompleted(client, action.id, output, ENGINE);
+              await appendLog(client, execution.id, 'LOOP_EXPANDED', `Repeats for ${list.length} item(s)`, action.key);
+              Object.assign(action, { status: 'COMPLETED', output, processed_by: ENGINE });
+              continue;
+            }
+
+            let params: Record<string, unknown>;
+            try {
+              params = resolveTemplates(action.params, scope) as Record<string, unknown>;
+            } catch (error) {
+              if (!(error instanceof TemplateError)) throw error;
+              await fail(action, error.message);
+              continue;
+            }
+
+            // Scripting actions are computed right here, inside this transaction – no broker round trip.
+            if (CONTROL_ACTION_TYPES.has(action.type)) {
+              await markActionDispatched(client, action.id, params);
+              let output: Record<string, unknown>;
+              try {
+                output = evaluateControlAction(action.type, params);
+              } catch (error) {
+                if (!(error instanceof ControlError)) throw error;
+                await fail(action, error.message);
+                continue;
+              }
+              await markActionCompleted(client, action.id, output, ENGINE);
+              await appendLog(client, execution.id, 'ACTION_COMPLETED', `${action.type} evaluated by the routine engine`, action.key);
+              Object.assign(action, { status: 'COMPLETED', output, processed_by: ENGINE });
+              continue;
+            }
+            toSend.push({ action, params });
+          }
+
+          // a failure in this step ends the run – nothing more goes to the workers
+          if (batch.some((action) => action.status === 'FAILED')) continue;
+
+          for (const { action, params } of toSend) {
             await markActionDispatched(client, action.id, params);
             await enqueue(
               client,
@@ -249,7 +317,8 @@ export class ExecutionEngine {
             Object.assign(action, { status: 'DISPATCHED', dispatched_at: new Date() });
           }
           await updateExecutionStatus(client, execution.id, 'RUNNING', { currentStep: decision.step });
-          this.#logger.info({ executionId: execution.id, step: decision.step, actions: decision.keys }, 'step dispatched');
+          if (toSend.length === 0) continue; // handled entirely here (skipped, scripting, expanded loop) → on to what is next
+          this.#logger.info({ executionId: execution.id, step: decision.step, actions: toSend.map(({ action }) => action.key) }, 'step dispatched');
           return;
         }
 
@@ -318,7 +387,25 @@ export class ExecutionEngine {
     }
   }
 
-  #templateScope(execution: ExecutionRow, actions: ExecutionActionRow[]): TemplateScope {
+  /** What `{{…}}` can see when `action` is dispatched. */
+  #templateScope(execution: ExecutionRow, actions: ExecutionActionRow[], action: ExecutionActionRow): TemplateScope {
+    const done = actions.filter((candidate) => candidate.status === 'COMPLETED');
+    const outputs: Record<string, unknown> = {};
+    for (const candidate of done) {
+      if (candidate.parent_id) continue;
+      if (candidate.for_each) {
+        // a loop step exposes what each repetition produced, in item order
+        const children = actions.filter((child) => child.parent_id === candidate.id).sort((a, b) => (a.loop_index ?? 0) - (b.loop_index ?? 0));
+        outputs[candidate.key] = { ...(candidate.output ?? {}), items: children.map((child) => child.output ?? null) };
+      } else {
+        outputs[candidate.key] = candidate.output ?? {};
+      }
+    }
+    // variables in run order: the later assignment wins
+    const vars: Record<string, unknown> = {};
+    for (const candidate of [...done].sort((a, b) => a.step - b.step || (a.finished_at?.getTime() ?? 0) - (b.finished_at?.getTime() ?? 0))) {
+      if (candidate.type === 'variable.set' && typeof candidate.output?.name === 'string') vars[candidate.output.name] = candidate.output.value;
+    }
     return {
       routine: { id: execution.routine_id, name: execution.routine_name },
       execution: {
@@ -327,9 +414,9 @@ export class ExecutionEngine {
         startedAt: (execution.started_at ?? new Date()).toISOString(),
       },
       trigger: { type: execution.trigger_type, body: execution.trigger_payload ?? {} },
-      actions: Object.fromEntries(
-        actions.filter((action) => action.status === 'COMPLETED').map((action) => [action.key, action.output ?? {}]),
-      ),
+      actions: outputs,
+      vars,
+      ...(action.loop_index !== null && action.loop_index !== undefined ? { item: action.loop_item, index: action.loop_index } : {}),
       now: new Date().toISOString(),
     };
   }

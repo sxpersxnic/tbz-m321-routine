@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { actionShort, actionTint } from '../action-forms.ts';
+import { ACTION_FORMS, actionShort, actionTint } from '../action-forms.ts';
 import { api } from '../api.ts';
 import { describeTrigger, TRIGGER_ICONS } from '../format.ts';
 import { navigate } from '../hooks.ts';
@@ -156,15 +156,19 @@ const text = (output: Record<string, unknown> | null, key: string) => {
  * What an action actually produced, in the words of someone who does not know
  * the action types. This is the only thing that answers "so what did I get?".
  */
-function outcomeOf(action: ExecutionAction): Outcome | null {
+function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
   const base = { type: action.type };
+  // scripting steps and the head of a loop only steer the run – what they lead to is the result
+  const steering = ACTION_FORMS[action.type]?.scripting || (action.forEach && !action.parentId);
   if (action.status === 'FAILED') {
     return { ...base, text: `${actionShort(action.type)} failed`, detail: action.error ?? undefined, bad: true };
   }
   if (action.status === 'SKIPPED') {
+    // in a successful run a skip is an If that did not hold – nothing went wrong
+    if (runStatus === 'COMPLETED' || steering) return null;
     return { ...base, text: `${actionShort(action.type)} skipped`, detail: 'An earlier step failed', bad: true };
   }
-  if (action.status !== 'COMPLETED') return null;
+  if (action.status !== 'COMPLETED' || steering) return null;
 
   switch (action.type) {
     case 'task.create':
@@ -175,6 +179,8 @@ function outcomeOf(action: ExecutionAction): Outcome | null {
       return { ...base, text: 'Weather', detail: text(action.output, 'summary') };
     case 'summary.generate':
       return { ...base, text: 'Summary', detail: text(action.output, 'title') };
+    case 'email.send':
+      return { ...base, text: 'E-mail sent', detail: text(action.output, 'to') };
     case 'http.request': {
       const status = text(action.output, 'status');
       const attempts = action.attempts > 1 ? ` · attempt ${action.attempts}` : '';
@@ -188,7 +194,7 @@ function outcomeOf(action: ExecutionAction): Outcome | null {
 /** Shown once a run has finished – the payoff a first-time user came for. */
 export function RunOutcome({ actions, status }: { actions: ExecutionAction[]; status: string }) {
   if (status !== 'COMPLETED' && status !== 'FAILED') return null;
-  const outcomes = actions.map(outcomeOf).filter((outcome): outcome is Outcome => outcome !== null);
+  const outcomes = actions.map((action) => outcomeOf(action, status)).filter((outcome): outcome is Outcome => outcome !== null);
   if (outcomes.length === 0) return null;
   // twelve weather reports are one card with a count, not twelve cards
   const shown = outcomes.length > 6 ? outcomes.slice(0, 5) : outcomes;

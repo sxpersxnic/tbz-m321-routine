@@ -160,6 +160,28 @@ function generateSummary(params: Record<string, unknown>): Output {
   return { title, text, lineCount: lines.length };
 }
 
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Sends through the (mock) mail provider; the actionId as idempotency key makes a redelivery send nothing twice. */
+async function sendEmail(params: Record<string, unknown>, environment: ActionEnvironment): Promise<Output> {
+  const to = (Array.isArray(params.to) ? params.to : String(params.to ?? '').split(/[,;]/))
+    .map((address) => String(address).trim())
+    .filter(Boolean);
+  if (to.length === 0) throw new PermanentError('param "to" is required');
+  const invalid = to.find((address) => !EMAIL.test(address));
+  if (invalid) throw new PermanentError(`"${invalid}" is not an e-mail address`);
+  if (to.length > 20) throw new PermanentError('at most 20 recipients');
+  const subject = params.subject;
+  if (typeof subject !== 'string' || subject.trim() === '') throw new PermanentError('param "subject" is required');
+  const body = params.body === undefined ? '' : typeof params.body === 'string' ? params.body : JSON.stringify(params.body);
+
+  const url = new URL('/mail/messages', environment.externalApiUrl);
+  const response = await call(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to, subject, body }) }, environment);
+  assertSuccess(response, 'mail provider');
+  const accepted = (await response.json()) as { messageId: string; acceptedAt: string };
+  return { messageId: accepted.messageId, to: to.join(', '), subject, sentAt: accepted.acceptedAt };
+}
+
 export async function executeAction(type: string, params: Record<string, unknown>, environment: ActionEnvironment): Promise<Output> {
   switch (type) {
     case 'weather.get':
@@ -168,6 +190,8 @@ export async function executeAction(type: string, params: Record<string, unknown
       return httpRequest(params, environment);
     case 'summary.generate':
       return generateSummary(params);
+    case 'email.send':
+      return sendEmail(params, environment);
     default:
       throw new PermanentError(`integration-worker cannot handle action type ${type}`);
   }

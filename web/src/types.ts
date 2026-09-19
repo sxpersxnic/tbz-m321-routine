@@ -8,11 +8,21 @@ export type Priority = 'low' | 'normal' | 'high';
 export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
 export type TriggerType = Trigger['type'];
 
+export interface RunIf {
+  /** Key of an earlier `condition.if` step. */
+  action: string;
+  is: boolean;
+}
+
 export interface ActionDefinition {
   key: string;
   type: string;
   step: number;
   params: Record<string, unknown>;
+  /** Run only if that condition produced `is` – else the step is skipped. */
+  runIf?: RunIf;
+  /** One `{{…}}` reference to a list: the step runs once per item ({{item}}, {{index}}). */
+  forEach?: string;
 }
 
 export interface Routine {
@@ -47,6 +57,7 @@ export interface RoutineInput {
 export interface ActionType {
   type: string;
   description: string;
+  runsIn?: 'engine' | 'worker';
   requiredParams: string[];
   example: Record<string, unknown>;
 }
@@ -90,6 +101,11 @@ export interface ExecutionAction {
   processedBy: string | null;
   dispatchedAt: string | null;
   finishedAt: string | null;
+  runIf?: RunIf;
+  forEach?: string;
+  /** Set on the actions a "repeat for each" step was expanded into. */
+  parentId?: string;
+  loopIndex?: number;
 }
 
 export interface ExecutionLogEntry {

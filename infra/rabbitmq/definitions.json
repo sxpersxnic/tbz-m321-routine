@@ -78,6 +78,7 @@
     { "source": "routine.actions", "vhost": "/", "destination": "integration-worker.actions", "destination_type": "queue", "routing_key": "action.http.#", "arguments": {} },
     { "source": "routine.actions", "vhost": "/", "destination": "integration-worker.actions", "destination_type": "queue", "routing_key": "action.weather.#", "arguments": {} },
     { "source": "routine.actions", "vhost": "/", "destination": "integration-worker.actions", "destination_type": "queue", "routing_key": "action.summary.#", "arguments": {} },
+    { "source": "routine.actions", "vhost": "/", "destination": "integration-worker.actions", "destination_type": "queue", "routing_key": "action.email.#", "arguments": {} },
     { "source": "routine.actions", "vhost": "/", "destination": "notification-service.actions", "destination_type": "queue", "routing_key": "action.notification.#", "arguments": {} },
     { "source": "routine.events", "vhost": "/", "destination": "notification-service.execution-events", "destination_type": "queue", "routing_key": "execution.#", "arguments": {} },
     { "source": "routine.actions.unrouted", "vhost": "/", "destination": "routine.unrouted-actions", "destination_type": "queue", "routing_key": "", "arguments": {} }

@@ -1,6 +1,6 @@
 import type { Queryable } from '@routine/service-kit';
-import { randomBytes } from 'node:crypto';
-import type { ActionDefinition, Appearance, RoutineDefinition, TriggerDefinition, TriggerType } from './domain/definition.ts';
+import { randomBytes, randomUUID } from 'node:crypto';
+import type { ActionDefinition, Appearance, RoutineDefinition, RunIf, TriggerDefinition, TriggerType } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 
 // ---------------------------------------------------------------- rows
@@ -55,6 +55,12 @@ export interface ExecutionActionRow {
   processed_by: string | null;
   dispatched_at: Date | null;
   finished_at: Date | null;
+  run_if: RunIf | null;
+  for_each: string | null;
+  /** Set on the rows a "repeat for each" step was expanded into. */
+  parent_id: string | null;
+  loop_item: unknown;
+  loop_index: number | null;
 }
 
 export interface ExecutionLogRow {
@@ -241,11 +247,45 @@ export async function insertExecutionActions(
 ): Promise<void> {
   for (const [position, action] of actions.entries()) {
     await db.query(
-      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
-      [action.id, executionId, action.key, action.type, action.step, position, JSON.stringify(action.params)],
+      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status, run_if, for_each)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9)`,
+      [
+        action.id,
+        executionId,
+        action.key,
+        action.type,
+        action.step,
+        position,
+        JSON.stringify(action.params),
+        action.runIf ? JSON.stringify(action.runIf) : null,
+        action.forEach ?? null,
+      ],
     );
   }
+}
+
+/**
+ * The rows a "repeat for each" step expands into: same type, params and step as
+ * the parent – so they run in parallel – each with its own item. Keys are
+ * `<parent>[<index>]`, positions sort them right after the parent.
+ */
+export async function insertLoopActions(db: Queryable, parent: ExecutionActionRow, items: unknown[]): Promise<ExecutionActionRow[]> {
+  const rows: ExecutionActionRow[] = [];
+  for (const [index, item] of items.entries()) {
+    const { rows: inserted } = await db.query<ExecutionActionRow>(
+      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status, parent_id, loop_item, loop_index)
+       SELECT $1, execution_id, $2, type, step, (position + 1) * 1000 + $3, params, 'PENDING', id, $4, $3
+         FROM execution_actions WHERE id = $5
+       RETURNING *`,
+      [randomUUID(), `${parent.key}[${index}]`, index, JSON.stringify(item ?? null), parent.id],
+    );
+    rows.push(inserted[0]);
+  }
+  return rows;
+}
+
+export async function markActionSkipped(db: Queryable, id: string): Promise<void> {
+  await db.query(`UPDATE execution_actions SET status = 'SKIPPED', finished_at = now(), updated_at = now() WHERE id = $1`, [id]);
 }
 
 export async function findExecutionByIdempotencyKey(db: Queryable, routineId: string, key: string): Promise<ExecutionRow | null> {
@@ -463,6 +503,9 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
         processedBy: action.processed_by,
         dispatchedAt: action.dispatched_at,
         finishedAt: action.finished_at,
+        ...(action.run_if && { runIf: action.run_if }),
+        ...(action.for_each && { forEach: action.for_each }),
+        ...(action.parent_id && { parentId: action.parent_id, loopIndex: action.loop_index }),
       })),
     }),
     ...(log && {

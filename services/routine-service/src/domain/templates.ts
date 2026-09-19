@@ -14,6 +14,11 @@ export interface TemplateScope {
   /** How the run was started; `body` is the JSON a webhook call sent (empty for other triggers). */
   trigger: { type: string; body: Record<string, unknown> };
   actions: Record<string, unknown>;
+  /** Values of `variable.set` steps that already ran. */
+  vars: Record<string, unknown>;
+  /** Only inside a "repeat for each" step: the current item and its position (0-based). */
+  item?: unknown;
+  index?: number;
   now: string;
 }
 

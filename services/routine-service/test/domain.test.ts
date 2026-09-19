@@ -98,6 +98,7 @@ describe('templates', () => {
     execution: { id: 'e1', trigger: 'webhook', startedAt: '2026-09-11T08:00:00.000Z' },
     trigger: { type: 'webhook', body: { release: { version: '2.4.0' }, tags: ['prod'] } },
     actions: { weather: { temperatureC: 21, summary: 'Sunny, 21 °C', details: { wind: 5 } } },
+    vars: {},
     now: '2026-09-11T08:00:01.000Z',
   };
 

@@ -50,6 +50,29 @@ app.post<{ Params: { name: string } }>('/webhooks/:name', async (request, reply)
 
 app.get<{ Params: { name: string } }>('/webhooks/:name', async (request) => ({ items: webhooks.get(request.params.name) ?? [] }));
 
+// ---- mail: a fake e-mail provider. Idempotent per Idempotency-Key, like a real one (e.g. Postmark, SES).
+interface Mail { messageId: string; to: string[]; subject: string; body: string; acceptedAt: string }
+const mails: Mail[] = [];
+const mailByKey = new Map<string, Mail>();
+
+app.post<{ Body: { to?: unknown; subject?: unknown; body?: unknown } }>('/mail/messages', async (request, reply) => {
+  await randomLatency();
+  const key = idempotencyKey(request);
+  const previous = mailByKey.get(key);
+  if (previous) return reply.header('idempotent-replay', 'true').send(previous);
+  const { to, subject, body } = request.body ?? {};
+  if (!Array.isArray(to) || to.length === 0 || typeof subject !== 'string') {
+    return reply.status(422).send({ error: 'to (non-empty array) and subject are required' });
+  }
+  const mail: Mail = { messageId: `msg-${nextId++}`, to: to.map(String), subject, body: String(body ?? ''), acceptedAt: new Date().toISOString() };
+  mails.push(mail);
+  mailByKey.set(key, mail);
+  request.log.info({ messageId: mail.messageId, to: mail.to }, 'mail accepted');
+  return reply.status(202).send(mail);
+});
+
+app.get('/mail/messages', async () => ({ items: mails.slice(-100).reverse() }));
+
 // ---- flaky: fails the first N attempts per Idempotency-Key with 503, then succeeds
 const attempts = new Map<string, number>();
 

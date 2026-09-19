@@ -34,6 +34,13 @@ const actionSchema = {
     type: { type: 'string', minLength: 1 },
     step: { type: 'integer', minimum: 1, maximum: 50 },
     params: { type: 'object' },
+    runIf: {
+      type: 'object',
+      required: ['action', 'is'],
+      additionalProperties: false,
+      properties: { action: { type: 'string', minLength: 1 }, is: { type: 'boolean' } },
+    },
+    forEach: { type: 'string', minLength: 1, maxLength: 200 },
   },
 } as const;
 

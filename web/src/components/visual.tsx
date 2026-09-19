@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
-import { actionGlyph, actionLabel, actionSentence, actionTint, describeReference, referenceSource, type Tint } from '../action-forms.ts';
+import { actionGlyph, actionLabel, actionSentence, actionTint, conditionWords, describeReference, referenceSource, type Tint } from '../action-forms.ts';
 import { between, relative } from '../format.ts';
 import type { Execution, Routine } from '../types.ts';
 import { Icon, Modal, statusLabel } from './ui.tsx';
@@ -359,6 +359,30 @@ export interface FlowAction {
   type: string;
   step: number;
   params: Record<string, unknown>;
+  runIf?: { action: string; is: boolean };
+  forEach?: string;
+  /** A run's child of a "repeat for each" step. */
+  loopIndex?: number;
+}
+
+/** "Only if … is true", "For each …", "Item 2" – the control flow of one step, as small tags. */
+function FlowTags({ action, actions, types }: { action: FlowAction; actions: FlowAction[]; types: Record<string, string> }) {
+  const condition = action.runIf && actions.find((candidate) => candidate.key === action.runIf?.action);
+  if (!action.runIf && !action.forEach && action.loopIndex === undefined) return null;
+  return (
+    <span className="flow-tags">
+      {action.runIf && (
+        <span className="flow-tag" title={`Runs only if step "${action.runIf.action}" is ${action.runIf.is}`}>
+          <Icon name="branch" size={12} />
+          <span className="ellipsis">{condition ? conditionWords(condition, action.runIf.is, types) : `${action.runIf.is ? 'If' : 'Otherwise –'} ${action.runIf.action}`}</span>
+        </span>
+      )}
+      {action.forEach && (
+        <span className="flow-tag"><Icon name="repeat" size={12} /> For each <RichText text={action.forEach} types={types} /></span>
+      )}
+      {action.loopIndex !== undefined && <span className="flow-tag"><Icon name="repeat" size={12} /> Item {action.loopIndex + 1}</span>}
+    </span>
+  );
 }
 
 /**
@@ -408,7 +432,10 @@ export function ActionFlow<T extends FlowAction>({ actions, trigger, aside, comp
                     onClick={onSelect ? () => onSelect(action.key) : undefined}>
                     <ActionGlyph type={action.type} size={compact ? 28 : 32} />
                     {/* the sentence already names the action – a type label above it said it twice */}
-                    <span className="grow story-title"><ActionSentence type={action.type} params={action.params} types={types} /></span>
+                    <span className="grow story-title">
+                      <FlowTags action={action} actions={actions} types={types} />
+                      <ActionSentence type={action.type} params={action.params} types={types} />
+                    </span>
                     {aside?.(action)}
                   </Tag>
                 );
