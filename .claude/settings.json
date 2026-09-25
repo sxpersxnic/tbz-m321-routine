@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"localhost:16686/api/traces?service=gateway&limit=20&lookback=1h\")",
+      "Bash(chmod +x scripts/*.sh)",
+      "Bash(bash -n scripts/demo.sh)",
+      "Bash(bash -n scripts/replay-dlq.sh)",
+      "Bash(scripts/demo.sh main *)",
+      "Bash(scripts/demo.sh retry *)",
+      "Bash(scripts/demo.sh idempotency *)",
+      "Bash(scripts/demo.sh resilience *)",
+      "Bash(curl -s -u routine:routine localhost:15672/api/queues/%2F/integration-worker.actions)",
+      "Bash(curl -s -u routine:routine \"localhost:15672/api/queues/%2F?columns=name,consumers\")",
+      "Bash(scripts/demo.sh scale *)",
+      "Bash(scripts/demo.sh schedule *)"
+    ]
+  }
+}

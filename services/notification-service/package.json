@@ -1,0 +1,11 @@
+{
+  "name": "@routine/notification-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Delivers notifications (notification.send actions and execution events) to the user's inbox.",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*",
+    "fastify": "^5.12.4"
+  }
+}

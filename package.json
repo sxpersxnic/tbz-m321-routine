@@ -1,0 +1,29 @@
+{
+  "name": "routine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Routine – distributed automation platform (TBZ M321)",
+  "type": "module",
+  "workspaces": [
+    "libs/*",
+    "services/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && npm --prefix web run typecheck",
+    "test": "node --test --disable-warning=ExperimentalWarning \"libs/*/test/**/*.test.ts\" \"services/*/test/**/*.test.ts\"",
+    "up": "docker compose up -d --build --wait",
+    "down": "docker compose down",
+    "demo": "bash scripts/demo.sh all"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.8",
+    "@types/node": "^24.13.4",
+    "@types/pg": "^8.23.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^7.0.2"
+  }
+}

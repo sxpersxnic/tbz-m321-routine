@@ -1,0 +1,10 @@
+{
+  "name": "@routine/integration-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stateless, horizontally scalable worker for actions that talk to external services.",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*"
+  }
+}

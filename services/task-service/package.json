@@ -1,0 +1,11 @@
+{
+  "name": "@routine/task-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Task system: executes task.create actions and offers a small task API.",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*",
+    "fastify": "^5.12.4"
+  }
+}

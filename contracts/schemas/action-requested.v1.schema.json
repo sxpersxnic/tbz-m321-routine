@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/action-requested.v1.schema.json",
+  "title": "ActionRequested v1",
+  "description": "Command: execute one action of an execution. Routing key: action.<actionType>. `actionId` is the idempotency key.",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ActionRequested"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "actionId",
+        "executionId",
+        "routineId",
+        "ownerId",
+        "actionKey",
+        "actionType",
+        "params"
+      ],
+      "properties": {
+        "actionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actionKey": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,39}$"
+        },
+        "actionType": {
+          "type": "string",
+          "pattern": "^[a-z]+\\.[a-z]+$"
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
