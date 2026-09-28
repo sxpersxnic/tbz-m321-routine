@@ -1,8 +1,20 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import {
+  createLocalJWKSet,
+  createRemoteJWKSet,
+  customFetch,
+  errors,
+  jwksCache,
+  jwtVerify,
+  type ExportedJWKSCache,
+  type FetchImplementation,
+  type JWKSCacheInput,
+  type JWTVerifyGetKey,
+} from 'jose';
+import { env } from './config.ts';
 import { HttpError } from './errors.ts';
 
-export const JWT_ISSUER = 'routine-identity';
+/** Audience every access token for the API must carry (Keycloak: audience mapper on the clients). */
 export const JWT_AUDIENCE = 'routine-api';
 
 export interface AuthUser {
@@ -21,16 +33,64 @@ export interface TokenVerifier {
   verify(token: string): Promise<AuthUser>;
 }
 
+export interface TokenVerifierOptions {
+  /** Expected `iss` – the realm URL of the identity provider (default: env JWT_ISSUER, required). */
+  issuer?: string;
+  /** Expected `aud` (default: env JWT_AUDIENCE or `routine-api`). */
+  audience?: string;
+  /** Age after which fetched keys are refreshed from the identity service (default 10 min). */
+  cacheMaxAgeMs?: number;
+  /** Pause between refresh attempts while the identity service is unreachable (default 5 s). */
+  retryAfterMs?: number;
+  /** Replaces the HTTP fetch of the key set – for tests. */
+  fetch?: FetchImplementation;
+}
+
 /**
- * Verifies RS256 access tokens against the identity service's public JWKS.
- * Keys are fetched lazily and cached, so services stay available even if the
- * identity service is briefly down (as long as the key is cached).
+ * Verifies RS256 access tokens of the identity provider (Keycloak) against its public JWKS.
+ *
+ * Keys are fetched lazily and refreshed every `cacheMaxAgeMs`. If a refresh fails because the
+ * identity service is unreachable, the last successfully fetched key set keeps verifying tokens –
+ * otherwise an identity outage longer than the cache age would reject every request on every
+ * service (single point of failure). A key missing from a successfully fetched set is still rejected.
  */
-export function createTokenVerifier(jwksUrl: string): TokenVerifier {
-  const jwks = createRemoteJWKSet(new URL(jwksUrl), { cooldownDuration: 5_000, cacheMaxAge: 10 * 60_000 });
+export function createTokenVerifier(jwksUrl: string, options: TokenVerifierOptions = {}): TokenVerifier {
+  const { cacheMaxAgeMs = 10 * 60_000, retryAfterMs = 5_000 } = options;
+  const issuer = options.issuer ?? env('JWT_ISSUER');
+  const audience = options.audience ?? env('JWT_AUDIENCE', JWT_AUDIENCE);
+  const cache: Partial<ExportedJWKSCache> = {}; // jose writes every successfully fetched key set here
+  const remote = createRemoteJWKSet(new URL(jwksUrl), {
+    cooldownDuration: 5_000,
+    cacheMaxAge: cacheMaxAgeMs,
+    timeoutDuration: 2_000,
+    [jwksCache]: cache as JWKSCacheInput,
+    ...(options.fetch && { [customFetch]: options.fetch }),
+  });
+
+  let lastKnownGood: { fetchedAt: number; keys: JWTVerifyGetKey } | undefined;
+  let unreachableUntil = 0;
+  const fallbackKeys = (): JWTVerifyGetKey | undefined => {
+    if (!cache.jwks || !cache.uat) return undefined;
+    if (lastKnownGood?.fetchedAt !== cache.uat) lastKnownGood = { fetchedAt: cache.uat, keys: createLocalJWKSet(cache.jwks) };
+    return lastKnownGood.keys;
+  };
+
+  const keys: JWTVerifyGetKey = async (header, token) => {
+    const fallback = fallbackKeys();
+    if (fallback && Date.now() < unreachableUntil) return fallback(header, token);
+    try {
+      return await remote(header, token);
+    } catch (error) {
+      // the identity service answered, the key just is not in the set → reject
+      if (error instanceof errors.JWKSNoMatchingKey || !fallback) throw error;
+      unreachableUntil = Date.now() + retryAfterMs;
+      return fallback(header, token);
+    }
+  };
+
   return {
     async verify(token) {
-      const { payload } = await jwtVerify(token, jwks, { issuer: JWT_ISSUER, audience: JWT_AUDIENCE });
+      const { payload } = await jwtVerify(token, keys, { issuer, audience });
       if (!payload.sub) throw new Error('token has no subject');
       return {
         id: payload.sub,

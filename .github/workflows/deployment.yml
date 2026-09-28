@@ -1,0 +1,48 @@
+# Deployment configuration: compose (one host) and the Swarm stack (three VMs) must stay valid,
+# the scripts must pass shellcheck.
+name: deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - compose.yaml
+      - deploy/**
+      - infra/**
+      - scripts/**
+      - .github/workflows/deployment.yml
+  pull_request:
+    paths:
+      - compose.yaml
+      - deploy/**
+      - infra/**
+      - scripts/**
+      - .github/workflows/deployment.yml
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: compose.yaml
+        run: docker compose config --quiet
+      - name: deploy/stack.yml
+        run: docker stack config --compose-file deploy/stack.yml >/dev/null
+        env: # placeholders – on the VMs deploy.sh generates the real secrets
+          TAG: ci
+          CONFIG_VERSION: ci
+          RABBITMQ_PASSWORD: ci
+          RABBITMQ_ERLANG_COOKIE: ci
+          KEYCLOAK_DB_PASSWORD: ci
+          KEYCLOAK_ADMIN_PASSWORD: ci
+          PUBLIC_URL: http://ci:8080
+          ROUTINE_DB_PASSWORD: ci
+          TASK_DB_PASSWORD: ci
+          NOTIFICATION_DB_PASSWORD: ci
+          INTEGRATION_DB_PASSWORD: ci
+      - name: RabbitMQ definitions and Keycloak realm are valid JSON
+        run: jq empty infra/rabbitmq/definitions.json infra/keycloak/realm-routine.json
+      - name: shellcheck
+        run: shellcheck --severity=error scripts/*.sh deploy/*.sh

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"index %{http_code}\\\\n\" localhost:8080/)",
+      "Bash(curl -s -o /dev/null -w \"app.js %{http_code}\\\\n\" localhost:8080/app.js)",
+      "mcp__plugin_playwright_playwright__browser_resize",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "Bash(ls ~/Library/Caches/ms-playwright 2>/dev/null; ls /Applications | grep -iE \"chrom|brave|edge|arc\" )",
+      "Bash(node --check app.js)",
+      "Bash(npm test *)",
+      "Bash(scripts/demo.sh all *)",
+      "Bash(sed 's/\\\\x1b\\\\[[0-9;]*m//g' /private/tmp/claude-501/-Users-sxnic-01-Workspaces-01-Active-tbz-m321-routine/ba2e369f-a232-4e6d-ae70-c63de29fd1f9/scratchpad/acceptance.log)",
+      "Bash(git checkout *)",
+      "Bash(*)"
+    ]
+  }
+}

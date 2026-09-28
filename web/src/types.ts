@@ -174,11 +174,15 @@ export interface QueueStatus {
   ready: number;
   unacked: number;
   consumers: number;
+  /** Deliveries per second (absent from older gateways). */
+  rate?: number;
 }
 
 export interface SystemStatus {
   services: Record<string, { status: 'up' | 'down'; instance?: string }>;
   broker: 'up' | 'down';
+  /** Nodes of the broker cluster; empty while no node is reachable. */
+  brokerNodes?: Array<{ name: string; running: boolean }>;
   queues: QueueStatus[];
 }
 

@@ -680,7 +680,7 @@ Routine counts as successfully implemented when:
 
 ## 22. Implementation
 
-The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
+The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · No single point of failure: [docs/availability.md](docs/availability.md) · Deployment on three VMs: [docs/deployment.md](docs/deployment.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
 
 ## Quick start
 
@@ -696,21 +696,23 @@ docker compose down -v                # stop and delete data
 
 | | URL |
 | --- | --- |
-| Web UI & API (gateway) | <http://localhost:8080> – sign in with `demo@routine.local` / `demo12345` |
-| RabbitMQ management | <http://localhost:15672> – `routine` / `routine` |
+| Web UI & API (gateway) | <http://localhost:8080> – **Try the demo**, then sign in on Keycloak's page with `demo@routine.local` / `demo12345` |
+| Keycloak (identity provider) | <http://localhost:8080/auth/admin> – `admin` / `admin` (development only), realm `routine` |
+| RabbitMQ management | <http://localhost:15672> – `routine` / `routine` (cluster nodes 2 and 3: `:15673`, `:15674`) |
 | Jaeger (distributed tracing) | <http://localhost:16686> |
 | Mock external APIs | <http://localhost:8090> |
 
 ## Layout
 
 ```text
-compose.yaml                 whole system (16 containers)
+compose.yaml                 whole system (25 containers: 2 replicas per service, 3 broker nodes)
 contracts/                   OpenAPI, AsyncAPI, JSON Schemas (independent of the services)
-infra/rabbitmq/              broker topology as code
+infra/rabbitmq/              broker topology and cluster as code
+infra/edge/                  load balancer in front of the gateway replicas (and Keycloak under /auth)
+infra/keycloak/              realm "routine" as code: clients, policies, demo user
 libs/service-kit/            technical chassis (logging, HTTP, DB, broker, auth, tracing) – no domain models
 services/
   gateway/                   API gateway (single entry point)
-  identity-service/          users, login, JWT/JWKS
   routine-service/           routines, orchestration, scheduler, outbox
   task-service/              tasks and task lists (action task.create)
   notification-service/      inbox (notification.send, execution events)
@@ -718,6 +720,8 @@ services/
   mock-external/             simulated third-party services
 web/                         web client (React + Vite, nginx) – its own service
 scripts/demo.sh              demo scenarios / acceptance test
+deploy/                      automated deployment on three VMs (Docker Swarm)
+.github/workflows/           CI: one pipeline per service (lint, typecheck, tests, image) + system test
 ```
 
 ## Development
@@ -727,5 +731,10 @@ npm install                # service dependencies (Node ≥ 24)
 npm --prefix web install   # web client dependencies
 npm --prefix web run dev   # UI with hot reload on :5173 (API via the running gateway)
 npm run typecheck          # TypeScript
+npm run lint               # Biome
 npm test                   # unit and contract tests
 ```
+
+CI runs the same checks in one pipeline per service (`.github/workflows/<service>.yml`: lint, typecheck, tests,
+container image) – a pipeline only runs when its service, the shared chassis, the contracts or the build setup change.
+`system.yml` starts the whole system and runs the demo scenarios as acceptance tests.

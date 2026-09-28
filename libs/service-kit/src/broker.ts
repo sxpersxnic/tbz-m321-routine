@@ -51,6 +51,16 @@ export function deadLetterQueueName(queue: string): string {
   return `${queue}.dlq`;
 }
 
+/** `amqp://user:pass@rabbitmq-2:5672` → `rabbitmq-2:5672`, for logs (no credentials). */
+function brokerNode(url: unknown): string | undefined {
+  if (typeof url !== 'string') return undefined;
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Thin wrapper around a self-healing AMQP connection.
  *
@@ -64,10 +74,15 @@ export class Broker {
   #consumers: ChannelWrapper[] = [];
   #logger: Logger;
 
-  constructor(url: string, logger: Logger) {
+  /**
+   * `urls` may list several cluster nodes, comma-separated. When the connected node goes away,
+   * the connection manager moves on to the next one – no single broker node is required.
+   */
+  constructor(urls: string, logger: Logger) {
     this.#logger = logger;
-    this.#connection = amqp.connect([url], { heartbeatIntervalInSeconds: 10, reconnectTimeInSeconds: 2 });
-    this.#connection.on('connect', () => logger.info('connected to message broker'));
+    const nodes = urls.split(',').map((url) => url.trim()).filter(Boolean);
+    this.#connection = amqp.connect(nodes, { heartbeatIntervalInSeconds: 10, reconnectTimeInSeconds: 2 });
+    this.#connection.on('connect', ({ url }) => logger.info({ node: brokerNode(url) }, 'connected to message broker'));
     this.#connection.on('disconnect', ({ err }) => logger.warn({ err: err?.message }, 'disconnected from message broker'));
     this.#connection.on('connectFailed', ({ err }) => logger.warn({ err: err?.message }, 'message broker not reachable, retrying'));
     this.#publisher = this.#connection.createChannel({ name: 'publisher', confirm: true, publishTimeout: 10_000 });
@@ -111,7 +126,9 @@ export class Broker {
           await ch.assertQueue(retryQueueName(queue, delayMs), {
             durable: true,
             arguments: {
-              'x-queue-type': 'classic',
+              // quorum: replicated across broker nodes – a classic queue lives on one node and
+              // silently drops what is published to it while that node is down
+              'x-queue-type': 'quorum',
               'x-message-ttl': delayMs,
               'x-dead-letter-exchange': '',
               'x-dead-letter-routing-key': queue,

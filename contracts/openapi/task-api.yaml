@@ -118,7 +118,12 @@ paths:
 
 components:
   securitySchemes:
-    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    bearerAuth:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/auth/realms/routine/.well-known/openid-configuration
+      description: >-
+        Access token (JWT) from Keycloak, realm `routine` (OpenID Connect), sent as `Authorization: Bearer <token>`.
+        Every service checks the signature against the realm's keys, `iss` = the realm URL and `aud` ∋ `routine-api`.
   responses:
     Problem:
       description: Error (RFC 9457)

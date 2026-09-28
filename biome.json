@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["libs/**", "services/**", "contracts/**", "web/src/**", "!**/node_modules", "!**/dist"]
+  },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": { "recommended": true }
+  },
+  "overrides": [
+    {
+      "includes": ["web/src/**"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "warn",
+            "useAriaPropsSupportedByRole": "warn",
+            "noStaticElementInteractions": "warn",
+            "noNoninteractiveTabindex": "warn",
+            "useFocusableInteractive": "warn",
+            "useKeyWithClickEvents": "warn",
+            "noLabelWithoutControl": "warn"
+          },
+          "correctness": { "useExhaustiveDependencies": "warn" },
+          "suspicious": { "noArrayIndexKey": "warn", "noAssignInExpressions": "warn" }
+        }
+      }
+    }
+  ]
+}

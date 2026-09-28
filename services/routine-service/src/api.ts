@@ -54,6 +54,7 @@ const triggerSchema = {
     timezone: { type: 'string', minLength: 1 },
   },
   if: { properties: { type: { const: 'schedule' } } },
+  // biome-ignore lint/suspicious/noThenProperty: JSON Schema if/then, not a thenable
   then: { required: ['type', 'cron'] },
 } as const;
 

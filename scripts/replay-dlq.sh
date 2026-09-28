@@ -23,7 +23,7 @@ publish() { # publish ROUTING_KEY MESSAGE_JSON [STRIP_HEADERS]
 
 total=$(rabbit "$RABBIT/api/queues/%2F/$DLQ" | jq '.messages // 0')
 for ((i = 0; i < total; i++)); do
-  message=$(get_one reject_requeue_true | jq -c '.[0] // empty') # peek – stays at the head of the (classic) DLQ
+  message=$(get_one reject_requeue_true | jq -c '.[0] // empty') # peek – a requeued message goes back to the head of the DLQ
   [[ -n $message ]] || break
   [[ $(publish "$QUEUE" "$message" true) == true ]] || { echo "Aborted: $QUEUE does not accept messages (not routed)" >&2; exit 1; }
 

@@ -1,0 +1,33 @@
+name: gateway
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/gateway/**
+      - libs/**
+      - contracts/**
+      - docker/node-service.Dockerfile
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/gateway.yml
+      - .github/workflows/_node-service.yml
+  pull_request:
+    paths:
+      - services/gateway/**
+      - libs/**
+      - contracts/**
+      - docker/node-service.Dockerfile
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/gateway.yml
+      - .github/workflows/_node-service.yml
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/_node-service.yml
+    with:
+      service: gateway

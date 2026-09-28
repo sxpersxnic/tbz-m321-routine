@@ -36,8 +36,8 @@ export class TemplateError extends Error {
 
 function collectStrings(value: unknown, into: string[]): string[] {
   if (typeof value === 'string') into.push(value);
-  else if (Array.isArray(value)) value.forEach((item) => collectStrings(item, into));
-  else if (value && typeof value === 'object') Object.values(value).forEach((item) => collectStrings(item, into));
+  else if (Array.isArray(value)) for (const item of value) collectStrings(item, into);
+  else if (value && typeof value === 'object') for (const item of Object.values(value)) collectStrings(item, into);
   return into;
 }
 

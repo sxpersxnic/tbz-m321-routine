@@ -5,12 +5,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ids=$(docker compose exec -T identity-db sh -c \
-  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "select id from users where email like '"'"'%@test.local'"'"';"' \
-  | tr -d '\r' | paste -sd, - | sed "s/[^,]*/'&'/g")
+# test accounts live in Keycloak – found and deleted with its admin CLI inside a Keycloak container
+kcadm() { docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
+kcadm config credentials --server http://localhost:8080/auth --realm master \
+  --user "${KEYCLOAK_ADMIN:-admin}" --password "${KEYCLOAK_ADMIN_PASSWORD:-admin}" >/dev/null
+users=$(kcadm get users -r routine -q email=@test.local -l 10000 | jq -r '.[] | select(.email | endswith("@test.local")) | .id')
+ids=$(printf '%s\n' "$users" | grep . | sed "s/.*/'&'/" | paste -sd, - || true)
 
 if [ -z "$ids" ]; then echo "No test accounts found."; exit 0; fi
-echo "Test accounts: $(echo "$ids" | tr -cd ',' | wc -c | tr -d ' ') + 1"
+echo "Test accounts: $(printf '%s\n' "$users" | grep -c .)"
 
 docker compose exec -T routine-db sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -c \"
   DELETE FROM execution_log WHERE execution_id IN (SELECT id FROM executions WHERE routine_id IN (SELECT id FROM routines WHERE owner_id IN ($ids)));
@@ -19,5 +22,5 @@ docker compose exec -T routine-db sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_D
   DELETE FROM routines WHERE owner_id IN ($ids);\""
 docker compose exec -T task-db sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -c \"DELETE FROM tasks WHERE owner_id IN ($ids);\""
 docker compose exec -T notification-db sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -c \"DELETE FROM notifications WHERE owner_id IN ($ids);\""
-docker compose exec -T identity-db sh -c "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -c \"DELETE FROM users WHERE email LIKE '%@test.local';\""
+for id in $users; do kcadm delete "users/$id" -r routine; done
 echo "Done."

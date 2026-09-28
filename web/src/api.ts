@@ -32,19 +32,16 @@ export interface Session {
   user: User;
 }
 
-const SESSION_KEY = 'routine.session';
-const listeners = new Set<() => void>();
-
-function readSession(): Session | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch {
-    return null;
-  }
+// Tokens are kept (and renewed) by the OIDC client in auth.ts; this store only holds the current session
+// so every screen can react to it. Sessions of the former built-in login are dropped once.
+try {
+  localStorage.removeItem('routine.session');
+} catch {
+  // storage unavailable – nothing to clean up
 }
 
-let session = readSession();
+let session: Session | null = null;
+const listeners = new Set<() => void>();
 
 export const sessionStore = {
   get: () => session,
@@ -54,13 +51,7 @@ export const sessionStore = {
   },
   set(next: Session | null) {
     session = next;
-    try {
-      if (next) localStorage.setItem(SESSION_KEY, JSON.stringify(next));
-      else localStorage.removeItem(SESSION_KEY);
-    } catch {
-      // storage unavailable – session lives in memory only
-    }
-    listeners.forEach((listener) => {listener()});
+    listeners.forEach((listener) => { listener(); });
   },
 };
 
@@ -133,7 +124,7 @@ async function request<T>(method: string, path: string, body?: unknown, headers:
     throw new ApiError(0, 'The server cannot be reached.');
   }
   setReachable(!UNREACHABLE.has(response.status));
-  if (response.status === 401 && session && !path.startsWith('/api/v1/auth/login')) {
+  if (response.status === 401 && session) {
     sessionStore.set(null);
   }
   const data = response.status === 204 ? null : await response.json().catch(() => null);
@@ -150,13 +141,6 @@ const send = async <T>(method: string, path: string, body?: unknown) => (await r
 // ---------------------------------------------------------------- endpoints
 
 export const api = {
-  async login(email: string, password: string): Promise<Session> {
-    const result = await send<{ accessToken: string; user: User }>('POST', '/api/v1/auth/login', { email, password });
-    return { token: result.accessToken, user: result.user };
-  },
-  register: (email: string, password: string, displayName?: string) =>
-    send<User>('POST', '/api/v1/auth/register', { email, password, ...(displayName ? { displayName } : {}) }),
-
   actionTypes: async () => (await get<{ items: ActionType[] }>('/api/v1/action-types')).items,
 
   routines: async () => (await get<{ items: Routine[] }>('/api/v1/routines')).items,

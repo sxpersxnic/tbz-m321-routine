@@ -7,7 +7,7 @@ info:
     executions and query their status. The actual execution happens
     asynchronously through the message broker (see asyncapi/routine-messaging.yaml).
 
-    All endpoints require an access token from the identity service. A user
+    All endpoints require an access token from Keycloak (realm `routine`). A user
     only ever sees their own routines and executions (anyone else's → 404).
 servers:
   - url: http://localhost:8080
@@ -262,7 +262,12 @@ paths:
 
 components:
   securitySchemes:
-    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    bearerAuth:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8080/auth/realms/routine/.well-known/openid-configuration
+      description: >-
+        Access token (JWT) from Keycloak, realm `routine` (OpenID Connect), sent as `Authorization: Bearer <token>`.
+        Every service checks the signature against the realm's keys, `iss` = the realm URL and `aud` ∋ `routine-api`.
 
   parameters:
     RoutineId: { name: routineId, in: path, required: true, schema: { type: string, format: uuid } }

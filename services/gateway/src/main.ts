@@ -5,6 +5,7 @@ import {
   createTokenVerifier,
   env,
   envInt,
+  envList,
   installAuth,
   onShutdown,
 } from '@routine/service-kit';
@@ -13,7 +14,6 @@ const SERVICE = 'gateway';
 const logger = createLogger(SERVICE);
 
 const upstreams = {
-  identity: env('IDENTITY_URL', 'http://identity-service:3000'),
   routine: env('ROUTINE_URL', 'http://routine-service:3000'),
   task: env('TASK_URL', 'http://task-service:3000'),
   notification: env('NOTIFICATION_URL', 'http://notification-service:3000'),
@@ -21,8 +21,8 @@ const upstreams = {
 };
 
 /** Path prefix → upstream service. The gateway knows routes, not business logic. */
+// Sign-in, registration and tokens are Keycloak's (/auth/…, routed by the edge) – not an API route.
 const routes: Array<{ prefix: string; upstream: string }> = [
-  { prefix: '/api/v1/auth', upstream: upstreams.identity },
   { prefix: '/api/v1/routines', upstream: upstreams.routine },
   { prefix: '/api/v1/executions', upstream: upstreams.routine },
   { prefix: '/api/v1/action-types', upstream: upstreams.routine },
@@ -33,10 +33,9 @@ const routes: Array<{ prefix: string; upstream: string }> = [
   { prefix: '/api/v1/notifications', upstream: upstreams.notification },
 ];
 
-/** Everything except login/register and webhook calls requires a valid token. */
-const PUBLIC_PREFIXES = new Set(['/api/v1/auth', '/api/v1/hooks']);
+/** Everything except webhook calls requires a valid token. */
+const PUBLIC_PREFIXES = new Set(['/api/v1/hooks']);
 const PROTECTED_PREFIXES = [
-  '/api/v1/auth/me',
   ...routes.map((route) => route.prefix).filter((prefix) => !PUBLIC_PREFIXES.has(prefix)),
   '/api/v1/system',
 ];
@@ -44,7 +43,11 @@ const PROTECTED_PREFIXES = [
 const app = createHttpServer({ service: SERVICE, logger });
 
 // Reject unauthenticated calls at the edge; services still verify the token themselves (defense in depth).
-installAuth(app, createTokenVerifier(env('JWKS_URL', `${upstreams.identity}/.well-known/jwks.json`)), PROTECTED_PREFIXES);
+installAuth(app, createTokenVerifier(env('JWKS_URL')), PROTECTED_PREFIXES);
+
+// Upstreams run as several replicas behind one DNS name. A connection that breaks because a replica
+// went away is retried on a fresh connection – only for GET/HEAD/OPTIONS without a body, never for writes.
+const RETRIES_ON_BROKEN_CONNECTION = 2;
 
 for (const route of routes) {
   await app.register(proxy, {
@@ -55,6 +58,7 @@ for (const route of routes) {
     replyOptions: {
       // propagate the correlation id so all services log the same id for this request
       rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }),
+      retriesCount: RETRIES_ON_BROKEN_CONNECTION,
     },
   });
 }
@@ -62,24 +66,26 @@ for (const route of routes) {
 // ---------------------------------------------------------------- system status (for the demo UI)
 
 const rabbit = {
-  url: env('RABBITMQ_MANAGEMENT_URL', 'http://rabbitmq:15672'),
+  // any cluster node answers for the whole cluster – ask the next one when a node is down
+  urls: envList('RABBITMQ_MANAGEMENT_URL', ['http://rabbitmq-1:15672']),
   auth: `Basic ${Buffer.from(`${env('RABBITMQ_USER', 'routine')}:${env('RABBITMQ_PASSWORD', 'routine')}`).toString('base64')}`,
 };
 
+/** Service → health URL. Keycloak reports readiness on its management port. */
 const probes: Record<string, string> = {
-  gateway: 'http://127.0.0.1:3000',
-  web: upstreams.web,
-  'identity-service': upstreams.identity,
-  'routine-service': upstreams.routine,
-  'task-service': upstreams.task,
-  'notification-service': upstreams.notification,
-  'integration-worker': env('INTEGRATION_WORKER_URL', 'http://integration-worker:3000'),
-  'mock-external': env('EXTERNAL_API_URL', 'http://mock-external:8090'),
+  gateway: 'http://127.0.0.1:3000/health',
+  web: `${upstreams.web}/health`,
+  keycloak: env('KEYCLOAK_HEALTH_URL', 'http://keycloak:9000/auth/health/ready'),
+  'routine-service': `${upstreams.routine}/health`,
+  'task-service': `${upstreams.task}/health`,
+  'notification-service': `${upstreams.notification}/health`,
+  'integration-worker': `${env('INTEGRATION_WORKER_URL', 'http://integration-worker:3000')}/health`,
+  'mock-external': `${env('EXTERNAL_API_URL', 'http://mock-external:8090')}/health`,
 };
 
 async function probe(url: string): Promise<{ status: 'up' | 'down'; instance?: string }> {
   try {
-    const response = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1_000) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(1_000) });
     if (!response.ok) return { status: 'down' };
     const body = (await response.json()) as { instance?: string };
     return { status: 'up', instance: body.instance };
@@ -94,32 +100,54 @@ interface RabbitQueue {
   messages_ready?: number;
   messages_unacknowledged?: number;
   consumers?: number;
+  message_stats?: { deliver_get_details?: { rate?: number } };
+}
+
+interface RabbitNode {
+  name: string;
+  running: boolean;
+}
+
+/** GET on the management API of the first cluster node that answers. */
+async function rabbitGet<T>(path: string): Promise<T> {
+  let lastError: unknown;
+  for (const url of rabbit.urls) {
+    try {
+      const response = await fetch(`${url}${path}`, { headers: { authorization: rabbit.auth }, signal: AbortSignal.timeout(1_500) });
+      if (response.ok) return (await response.json()) as T;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 app.get('/api/v1/system/status', async () => {
   const services = Object.fromEntries(
     await Promise.all(Object.entries(probes).map(async ([name, url]) => [name, await probe(url)] as const)),
   );
-  let queues: Array<{ name: string; ready: number; unacked: number; consumers: number }> | null = null;
+  let queues: Array<{ name: string; ready: number; unacked: number; consumers: number; rate: number }> | null = null;
+  let brokerNodes: Array<{ name: string; running: boolean }> = [];
   try {
-    const response = await fetch(`${rabbit.url}/api/queues/%2F?columns=name,messages,messages_ready,messages_unacknowledged,consumers`, {
-      headers: { authorization: rabbit.auth },
-      signal: AbortSignal.timeout(1_500),
-    });
-    if (response.ok) {
-      queues = ((await response.json()) as RabbitQueue[])
-        .map((queue) => ({
-          name: queue.name,
-          ready: queue.messages_ready ?? 0,
-          unacked: queue.messages_unacknowledged ?? 0,
-          consumers: queue.consumers ?? 0,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    }
+    const [rawQueues, rawNodes] = await Promise.all([
+      rabbitGet<RabbitQueue[]>('/api/queues/%2F?columns=name,messages,messages_ready,messages_unacknowledged,consumers,message_stats.deliver_get_details.rate'),
+      rabbitGet<RabbitNode[]>('/api/nodes?columns=name,running'),
+    ]);
+    queues = rawQueues
+      .map((queue) => ({
+        name: queue.name,
+        ready: queue.messages_ready ?? 0,
+        unacked: queue.messages_unacknowledged ?? 0,
+        consumers: queue.consumers ?? 0,
+        rate: queue.message_stats?.deliver_get_details?.rate ?? 0, // deliveries per second
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    brokerNodes = rawNodes.map((node) => ({ name: node.name, running: node.running })).sort((a, b) => a.name.localeCompare(b.name));
   } catch {
-    queues = null; // broker unreachable
+    queues = null; // no broker node reachable
   }
-  return { services, broker: queues ? 'up' : 'down', queues: queues ?? [] };
+  return { services, broker: queues ? 'up' : 'down', brokerNodes, queues: queues ?? [] };
 });
 
 // ---------------------------------------------------------------- web UI
@@ -130,7 +158,10 @@ await app.register(proxy, {
   upstream: upstreams.web,
   prefix: '/',
   logLevel: 'warn',
-  replyOptions: { rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }) },
+  replyOptions: {
+    rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }),
+    retriesCount: RETRIES_ON_BROKEN_CONNECTION,
+  },
 });
 
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });

@@ -14,7 +14,7 @@ const H = 50;
 const NODES: Node[] = [
   { id: 'client', label: 'Browser', x: 90, y: 235, kind: 'client' },
   { id: 'gateway', label: 'gateway', x: 270, y: 235 },
-  { id: 'identity-service', label: 'identity-service', x: 450, y: 80 },
+  { id: 'keycloak', label: 'Keycloak', x: 450, y: 80 },
   { id: 'routine-service', label: 'routine-service', x: 450, y: 235 },
   { id: 'rabbitmq', label: 'RabbitMQ', x: 720, y: 235, kind: 'broker' },
   { id: 'task-service', label: 'task-service', x: 1000, y: 90 },
@@ -40,7 +40,8 @@ const QUEUE_EDGES: QueueEdge[] = [
 
 const HTTP_EDGES: Array<[string, string]> = [
   ['client', 'gateway'],
-  ['gateway', 'identity-service'],
+  ['client', 'keycloak'], // sign-in (OpenID Connect)
+  ['gateway', 'keycloak'], // token keys (JWKS)
   ['gateway', 'routine-service'],
   ['integration-worker', 'mock-external'],
 ];

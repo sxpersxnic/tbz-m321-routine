@@ -28,7 +28,7 @@
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "routine-service.triggers.dlq" }
     },
-    { "name": "routine-service.triggers.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } },
+    { "name": "routine-service.triggers.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
     {
       "name": "routine-service.action-results",
       "vhost": "/",
@@ -36,7 +36,7 @@
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "routine-service.action-results.dlq" }
     },
-    { "name": "routine-service.action-results.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } },
+    { "name": "routine-service.action-results.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
     {
       "name": "task-service.actions",
       "vhost": "/",
@@ -44,7 +44,7 @@
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "task-service.actions.dlq" }
     },
-    { "name": "task-service.actions.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } },
+    { "name": "task-service.actions.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
     {
       "name": "integration-worker.actions",
       "vhost": "/",
@@ -52,7 +52,7 @@
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "integration-worker.actions.dlq" }
     },
-    { "name": "integration-worker.actions.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } },
+    { "name": "integration-worker.actions.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
     {
       "name": "notification-service.actions",
       "vhost": "/",
@@ -60,7 +60,7 @@
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "notification-service.actions.dlq" }
     },
-    { "name": "notification-service.actions.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } },
+    { "name": "notification-service.actions.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
     {
       "name": "notification-service.execution-events",
       "vhost": "/",
@@ -68,8 +68,8 @@
       "auto_delete": false,
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "notification-service.execution-events.dlq" }
     },
-    { "name": "notification-service.execution-events.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } },
-    { "name": "routine.unrouted-actions", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "classic" } }
+    { "name": "notification-service.execution-events.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
+    { "name": "routine.unrouted-actions", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } }
   ],
   "bindings": [
     { "source": "routine.events", "vhost": "/", "destination": "routine-service.triggers", "destination_type": "queue", "routing_key": "routine.triggered", "arguments": {} },
