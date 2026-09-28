@@ -76,6 +76,13 @@ export function createHttpServer(options: HttpServerOptions): FastifyInstance {
       return reply.status(status).type('application/problem+json').send(problem(status, error.code ?? 'error', error.message));
     }
     request.log.error({ err: error }, 'unhandled error');
+    // no replica of an upstream reachable (proxy): keep the status – clients may retry a 503, not a 500
+    if (status === 502 || status === 503 || status === 504) {
+      return reply
+        .status(status)
+        .type('application/problem+json')
+        .send(problem(status, 'upstream_unavailable', 'The service is temporarily unavailable, try again shortly'));
+    }
     return reply
       .status(500)
       .type('application/problem+json')
