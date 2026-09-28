@@ -3,3 +3,7 @@ node_modules/
 .env
 .DS_Store
 dist/
+
+# deployment inventories (contain your VM addresses)
+deploy/vms.env
+deploy/local-vms.env

@@ -16,7 +16,8 @@
     "test": "node --test --disable-warning=ExperimentalWarning \"libs/*/test/**/*.test.ts\" \"services/*/test/**/*.test.ts\"",
     "up": "docker compose up -d --build --wait",
     "down": "docker compose down",
-    "demo": "bash scripts/demo.sh all"
+    "demo": "bash scripts/demo.sh all",
+    "deploy:vms": "bash deploy/deploy.sh"
   },
   "devDependencies": {
     "@types/amqplib": "^0.10.8",

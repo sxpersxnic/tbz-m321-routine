@@ -78,9 +78,9 @@ keeps working.
 
 | Component | Why it is still single | Blast radius | Mitigation in place | Production path |
 | --- | --- | --- | --- | --- |
-| **PostgreSQL** (one per service) | Automatic failover needs a replication manager (Patroni + etcd, or a managed service). That is five clusters, and `pg` has no multi-host connection strings | Only the owning service. Database per service keeps the failure inside one bounded context. Messages for it wait in the broker and are retried (1 s → 5 s → 15 s). `routine-db` is the most critical one: no new runs, no progress | Durable volumes, `restart: unless-stopped`, `/ready` checks the DB, services wait for the DB on start | Managed Postgres with a standby in another zone (RDS Multi-AZ, Cloud SQL HA) or CloudNativePG on Kubernetes |
-| **edge** | One process owns the public port per host | UI/API unreachable until Docker restarts it (seconds) | Config-only, stateless, no dependencies. The part with the least that can fail | Two edge hosts with a floating IP (keepalived), or a cloud load balancer |
-| **Docker host** | Compose runs on one machine | Everything | – | Several nodes with an orchestrator (Kubernetes, Swarm): replicas spread across nodes, broker nodes on separate nodes |
+| **PostgreSQL** (one per service; on the VMs all on vm1) | Automatic failover needs a replication manager (Patroni + etcd, or a managed service). That is five clusters, and `pg` has no multi-host connection strings | Only the owning service. Database per service keeps the failure inside one bounded context. Messages for it wait in the broker and are retried (1 s → 5 s → 15 s). `routine-db` is the most critical one: no new runs, no progress | Durable volumes, `restart: unless-stopped`, `/ready` checks the DB, services wait for the DB on start | Managed Postgres with a standby in another zone (RDS Multi-AZ, Cloud SQL HA) or CloudNativePG on Kubernetes |
+| **edge** (single host) | One process owns the public port per host | UI/API unreachable until Docker restarts it (seconds) | Config-only, stateless, no dependencies. The part with the least that can fail | **Removed in the 3-VM deployment**: one edge per VM behind a load balancer / DNS ([deployment.md](deployment.md)) |
+| **Docker host** (single host) | Compose runs on one machine | Everything | – | **Removed in the 3-VM deployment**: Docker Swarm spreads replicas and broker nodes over three VMs; losing vm2 or vm3 has no impact |
 | **Jaeger** | In-memory, not in the request path | Only traces. Span export is asynchronous, and requests do not wait for it | – | Collector with persistent storage |
 | **mock-external** | Stands in for third-party APIs, not part of the platform | Actions of the affected type | Retries, then `FAILED` with a clear error | – (third party) |
 
@@ -90,7 +90,8 @@ Limits of the fixes:
   outbox keeps every state change and publishes it once a majority is back.
 * **Right after the first start** the queues declared while the cluster was forming still get their missing
   replicas (a few seconds). A node lost in that window takes the queues it led with it until it is back.
-  `scripts/demo.sh failover` waits for all replicas before it kills a node.
+  `deploy/deploy.sh` therefore adds the replicas explicitly and waits for 3 per queue, and `demo.sh failover`
+  waits for them too.
 * **Cold start during an identity outage.** A service replica that *starts* while identity-service is down has not
   fetched any keys yet and rejects tokens until identity-service is back. Replicas that were already running keep
   working.
