@@ -25,13 +25,13 @@ const ENGINE_DOMAINS = new Set(['scripting', 'routines']);
  * notifications and connections do from M2-04 on; after that, only prefixes nobody owns fall back
  * here). Only what v1 validated: the type and its required params.
  */
-const V1_FALLBACK: Array<{ type: string; description: string; required: string[] }> = [
-  { type: 'weather.get', description: 'Get the current weather from an external service', required: ['city'] },
+const V1_FALLBACK: Array<{ type: string; description: string; required: string[]; value?: true; preview?: true }> = [
+  { type: 'weather.get', description: 'Get the current weather from an external service', required: ['city'], value: true },
   { type: 'http.request', description: 'Send an HTTP request to an external service or webhook', required: ['url'] },
-  { type: 'summary.generate', description: 'Build a summary from the results of earlier actions', required: ['title'] },
+  { type: 'summary.generate', description: 'Build a summary from the results of earlier actions', required: ['title'], value: true },
   { type: 'task.create', description: 'Create a task in the task system (optional listId, default list otherwise)', required: ['title'] },
   { type: 'notification.send', description: 'Send a notification to the user', required: ['title'] },
-  { type: 'email.send', description: 'Send an e-mail (through the mail provider)', required: ['to', 'subject'] },
+  { type: 'email.send', description: 'Send an e-mail (through the mail provider)', required: ['to', 'subject'], preview: true },
 ];
 
 const V1_DOMAIN: Record<string, string> = { weather: 'connections', http: 'connections', summary: 'connections', email: 'connections', task: 'tasks', notification: 'notifications' };
@@ -42,13 +42,14 @@ function fallbackCapability(entry: (typeof V1_FALLBACK)[number]): CatalogCapabil
     type: entry.type,
     domain: V1_DOMAIN[prefix] ?? prefix,
     runsIn: 'worker',
-    kind: 'action',
+    kind: entry.value ? 'value' : 'action',
     label: entry.type,
     sentence: entry.type,
     description: entry.description,
     params: entry.required.map((name): ParamSpec => ({ name, label: name, type: 'value', required: true })),
     output: [],
-    sideEffects: true,
+    sideEffects: !entry.value,
+    ...(entry.preview && { preview: true }),
     since: 1,
   };
 }

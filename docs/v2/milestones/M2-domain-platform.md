@@ -59,7 +59,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - `weather.get` and `summary.generate` are values (`sideEffects: false`), `email.send` gets
     `preview`.
 
-- [ ] **M2-07 · Test mode from manifests**
+- [x] **M2-07 · Test mode from manifests**
   - Engine decides what a test run sends from the catalog (`sideEffects`, `preview`) instead of
     M1's hard-coded list. `email.send` preview returns `{ preview: { to, subject }, wouldDo }`.
 

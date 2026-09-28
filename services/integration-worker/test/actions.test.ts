@@ -53,6 +53,14 @@ describe('integration-worker actions', () => {
     assert.deepEqual(output, { messageId: 'msg-1', to: 'ada@example.com, bob@example.com', subject: 'Hi', sentAt: '2026-09-19T08:00:00.000Z' });
   });
 
+  it('answers a test run with a preview and sends nothing', async () => {
+    const before = seenKeys.length;
+    const output = await executeAction('email.send', { to: 'ada@example.com, bob@example.com', subject: 'Hi' }, { ...environment(), mode: 'test' });
+    assert.deepEqual(output, { preview: { to: 'ada@example.com, bob@example.com', subject: 'Hi' }, wouldDo: 'Send e-mail "Hi" to ada@example.com, bob@example.com' });
+    assert.equal(seenKeys.length, before, 'no request to the mail provider');
+    await assert.rejects(executeAction('email.send', { to: 'nope', subject: 'Hi' }, { ...environment(), mode: 'test' }), { code: 'INVALID_PARAMS' }, 'still validated');
+  });
+
   it('rejects unusable e-mails permanently', async () => {
     await assert.rejects(executeAction('email.send', { to: 'not-an-address', subject: 'Hi' }, environment()), PermanentError);
     await assert.rejects(executeAction('email.send', { to: 'ada@example.com' }, environment()), PermanentError);

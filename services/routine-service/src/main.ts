@@ -40,9 +40,11 @@ await runMigrations(pool, join(import.meta.dirname, '..', 'migrations'), logger)
 await runKitMigrations(pool, ['outbox'], logger);
 
 const broker = new Broker(env('AMQP_URL'), logger);
+const catalog = new CatalogStore(pool);
 const engine = new ExecutionEngine(pool, logger, {
   completionEventFormat,
   waitingAfterMs: envInt('WAITING_AFTER_MS', 10_000),
+  catalog: () => catalog.get(),
 });
 
 const app = createHttpServer({
@@ -57,7 +59,6 @@ const app = createHttpServer({
 });
 // webhook calls carry their secret in the URL instead of a user token
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/'], ['/api/v1/hooks/']);
-const catalog = new CatalogStore(pool);
 registerRoutes(app, { pool, engine, catalog });
 
 // The routine service consumes its own RoutineTriggered events: triggering

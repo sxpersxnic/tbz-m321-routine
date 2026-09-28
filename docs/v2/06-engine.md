@@ -282,8 +282,9 @@ execution with `kind = 'test'` and one action (a run needs its routine, so only 
 can try a step – the step itself may be unsaved). The template scope comes from
 `sampleExecutionId` (the routine's last run by default): its completed steps are copied into
 the test run as `COMPLETED` rows, so references, variables and loop items resolve to real
-values through the normal scope. In M1 only engine scripting steps and `weather.get` /
-`summary.generate` run; others are `SKIPPED` (`test`). The client polls
+values through the normal scope. What runs comes from the catalog (M2): values and
+side-effect-free steps as usual, actions with `preview` (their domain answers with a preview
+and changes nothing); everything else is `SKIPPED` (`test`). The client polls
 `GET /api/v1/executions/:id` (≤ 10 s). Test executions are excluded from lists, stats, health
 and events, and deleted after 1 hour.
 

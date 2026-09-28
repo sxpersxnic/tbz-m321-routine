@@ -46,7 +46,8 @@ export async function engineHarness() {
   await runMigrations(pool, join(import.meta.dirname, '..', '..', 'migrations'), logger);
   await runKitMigrations(pool, ['outbox'], logger);
 
-  const engine = new ExecutionEngine(pool, logger, { completionEventFormat: 'v2', waitingAfterMs: 10_000 });
+  const catalogStore = new CatalogStore(pool, 0);
+  const engine = new ExecutionEngine(pool, logger, { completionEventFormat: 'v2', waitingAfterMs: 10_000, catalog: () => catalogStore.get() });
   const ownerId = randomUUID();
 
   const harness = {
@@ -108,7 +109,7 @@ export async function engineHarness() {
       app.addHook('preHandler', async (request) => {
         request.user = { id: ownerId, email: 'test@routine.local', roles: ['user'] };
       });
-      registerRoutes(app, { pool, engine, catalog: new CatalogStore(pool, 0) });
+      registerRoutes(app, { pool, engine, catalog: catalogStore });
       await app.ready();
       return app;
     },

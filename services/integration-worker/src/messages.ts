@@ -12,6 +12,8 @@ export interface ActionRef {
 
 export interface ActionCommand extends ActionRef {
   params: Record<string, unknown>;
+  /** `test`: a "Try this step" run – steps with a preview answer it instead of acting (04 §3.4). */
+  mode: 'live' | 'test';
 }
 
 export function actionRef(envelope: Envelope): ActionRef | null {
@@ -25,7 +27,8 @@ export function parseActionRequested(envelope: Envelope): ActionCommand {
   const ref = actionRef(envelope);
   if (!ref) throw new PermanentError('ActionRequested is missing ids');
   const params = envelope.data.params;
-  return { ...ref, params: params && typeof params === 'object' ? (params as Record<string, unknown>) : {} };
+  const context = envelope.data.context as { mode?: unknown } | undefined;
+  return { ...ref, params: params && typeof params === 'object' ? (params as Record<string, unknown>) : {}, mode: context?.mode === 'test' ? 'test' : 'live' };
 }
 
 export function actionCompleted(ref: ActionRef, output: Record<string, unknown>, processedBy: string, duplicate: boolean) {

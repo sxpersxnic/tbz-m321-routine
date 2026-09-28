@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, enqueue, withTransaction, type ErrorCode, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
+import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './domain/catalog.ts';
 import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import {
@@ -44,6 +45,8 @@ import {
 export interface EngineOptions {
   completionEventFormat: CompletionEventFormat;
   waitingAfterMs: number;
+  /** The current catalog – decides what a test run may send (default: routine-service's own domains + v1). */
+  catalog?: () => Promise<Catalog>;
 }
 
 export interface TriggerRequest {
@@ -73,11 +76,14 @@ function subRoutineOutput(actions: ExecutionActionRow[]): Record<string, unknown
 }
 
 /**
- * What a test run may really do in M1 (06-engine §12): the engine's own scripting steps and the
- * integration-worker steps without side effects. Everything else is skipped (`test`). M2 takes
- * this from the manifests (`sideEffects: false`, `preview`).
+ * What a test run may send (04 §3.4, 06 §4): values and everything else without side effects run as
+ * usual; an action runs only if its domain can answer with a preview (it then changes nothing).
+ * Everything else is skipped (`test`).
  */
-const TEST_SAFE_TYPES: ReadonlySet<string> = new Set([...CONTROL_ACTION_TYPES, 'weather.get', 'summary.generate']);
+export function runsInTest(capability: CatalogCapability | undefined): boolean {
+  if (!capability) return false;
+  return capability.kind === 'value' || !capability.sideEffects || (capability.kind === 'action' && capability.preview === true);
+}
 
 /** `processed_by` of what the engine did itself (scripting actions, loop expansion). */
 const ENGINE = 'routine-engine';
@@ -103,11 +109,13 @@ export class ExecutionEngine {
   #pool: Pool;
   #logger: Logger;
   #options: EngineOptions;
+  #catalog: () => Promise<Catalog>;
 
   constructor(pool: Pool, logger: Logger, options: EngineOptions) {
     this.#pool = pool;
     this.#logger = logger;
     this.#options = options;
+    this.#catalog = options.catalog ?? (async () => BUILTIN_CATALOG);
   }
 
   /** Creates a PENDING execution and emits RoutineTriggered – inside the caller's transaction. */
@@ -372,7 +380,7 @@ export class ExecutionEngine {
             }
 
             // a test run tries only what can't change anything
-            if (execution.kind === 'test' && !TEST_SAFE_TYPES.has(action.type)) {
+            if (execution.kind === 'test' && !runsInTest((await this.#catalog()).capability(action.type))) {
               await markActionSkipped(client, action.id, 'test');
               await appendLog(client, execution.id, 'ACTION_SKIPPED', `Skipped – ${action.type} doesn't run in a test`, action.key);
               Object.assign(action, { status: 'SKIPPED', skip_reason: 'test' });

@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import type { FastifyInstance } from 'fastify';
+import { runsInTest } from '../src/engine.ts';
 import { deleteExpiredTestRuns, getRoutine, type RoutineRow } from '../src/store.ts';
 import { engineHarness, needsDatabase, type EngineHarness } from './support/engine-harness.ts';
 
@@ -52,6 +53,19 @@ describe('test runs', { skip: needsDatabase }, () => {
     const { body } = await tryStep({ key: 'double', type: 'math.calculate', params: { a: '{{actions.weather.temperatureC}}', operator: '*', b: 2 } });
     assert.equal(body.status, 'COMPLETED');
     assert.deepEqual(body.actions.find((action: { key: string }) => action.key === 'double').output, { result: 42 });
+  });
+
+  it('decides from the catalog: values and previews run, other actions are skipped (04 §3.4)', async () => {
+    const fixture = (kind: 'action' | 'value', extra: Record<string, unknown> = {}) =>
+      ({ type: 'x.y', kind, label: 'x', sentence: 'x', description: 'x', params: [], output: [], sideEffects: kind === 'action', since: 1, domain: 'x', runsIn: 'worker', ...extra }) as never;
+    assert.equal(runsInTest(fixture('value')), true);
+    assert.equal(runsInTest(fixture('action')), false);
+    assert.equal(runsInTest(fixture('action', { preview: true })), true);
+    assert.equal(runsInTest(undefined), false);
+
+    const { body } = await tryStep({ key: 'mail', type: 'email.send', params: { to: 'ada@example.com', subject: 'Hi' } });
+    const [command] = (await h.dispatched(body.id)).filter((candidate) => candidate.actionKey === 'mail');
+    assert.equal(command?.context?.mode, 'test', 'sent – its domain answers with a preview');
   });
 
   it('skips steps that would change something', async () => {

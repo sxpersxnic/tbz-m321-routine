@@ -117,7 +117,7 @@ broker.consume(
       const started = Date.now();
       logger.info({ actionType: command.actionType, attempt: context.attempt }, 'executing action');
       try {
-        const environment: ActionEnvironment = { ...settings, actionId: command.actionId };
+        const environment: ActionEnvironment = { ...settings, actionId: command.actionId, mode: command.mode };
         const output = await executeAction(command.actionType, command.params, environment);
         await pool.query(
           `UPDATE action_executions SET status = 'COMPLETED', output = $2, lease_until = NULL, updated_at = now() WHERE action_id = $1`,

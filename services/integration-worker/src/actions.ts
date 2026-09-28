@@ -2,6 +2,8 @@ import { PermanentError, TransientError, type ErrorCode } from '@routine/service
 
 export interface ActionEnvironment {
   actionId: string;
+  /** `test`: answer with a preview instead of acting (only steps whose manifest says `preview`). */
+  mode?: 'live' | 'test';
   externalApiUrl: string;
   /** Hostnames http.request may call ('*' = any) – prevents SSRF against internal services. */
   allowedHosts: string[];
@@ -188,6 +190,8 @@ async function sendEmail(params: Record<string, unknown>, environment: ActionEnv
   const subject = params.subject;
   if (typeof subject !== 'string' || subject.trim() === '') throw new PermanentError('param "subject" is required', INVALID_PARAMS);
   const body = params.body === undefined ? '' : typeof params.body === 'string' ? params.body : JSON.stringify(params.body);
+  // a test run: everything checked, nothing sent (the manifest declares email.send with `preview`)
+  if (environment.mode === 'test') return { preview: { to: to.join(', '), subject }, wouldDo: `Send e-mail "${subject}" to ${to.join(', ')}` };
 
   const url = new URL('/mail/messages', environment.externalApiUrl);
   const response = await call(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to, subject, body }) }, environment);
