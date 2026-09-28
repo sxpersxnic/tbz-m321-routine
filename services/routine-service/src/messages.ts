@@ -322,6 +322,23 @@ export function parseActionResult(envelope: Envelope): ActionResult {
   }
 }
 
+export type RegistryMessage =
+  | { kind: 'registered'; manifest: unknown; digest: string | undefined; instance: string }
+  | { kind: 'heartbeat'; domain: string; manifestVersion: number; instance: string };
+
+/** DomainRegistered / DomainHeartbeat (tolerant: the manifest itself is validated by the registry). */
+export function parseRegistryMessage(envelope: Envelope): RegistryMessage {
+  const data = envelope.data;
+  const instance = typeof data.instance === 'string' ? data.instance : 'unknown';
+  if (envelope.type === 'DomainRegistered') {
+    return { kind: 'registered', manifest: data.manifest, digest: typeof data.digest === 'string' ? data.digest : undefined, instance };
+  }
+  if (envelope.type === 'DomainHeartbeat') {
+    return { kind: 'heartbeat', domain: requireString(data, 'domain'), manifestVersion: Number(data.manifestVersion ?? 0), instance };
+  }
+  throw new PermanentError(`unsupported message type ${envelope.type}`);
+}
+
 export function parseRoutineTriggered(envelope: Envelope): { executionId: string } {
   if (envelope.type !== 'RoutineTriggered') throw new PermanentError(`unsupported message type ${envelope.type}`);
   return { executionId: requireString(envelope.data, 'executionId') };

@@ -9,6 +9,8 @@ import {
   envFloat,
   envInt,
   installAuth,
+  instanceId,
+  manifestDigest,
   onShutdown,
   OutboxRelay,
   runKitMigrations,
@@ -18,9 +20,11 @@ import {
   withContext,
 } from '@routine/service-kit';
 import { ExecutionEngine } from './engine.ts';
-import { parseActionResult, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
+import { parseActionResult, parseRegistryMessage, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
 import { registerRoutes } from './api.ts';
 import { Scheduler } from './scheduler.ts';
+import { BUILTIN_MANIFESTS } from './domain/builtin-manifests.ts';
+import { applyHeartbeat, applyRegistration, staleDomains, type Registration } from './registry.ts';
 import { deleteExpiredTestRuns, refreshHealthIfDue } from './store.ts';
 
 const SERVICE = 'routine-service';
@@ -69,6 +73,39 @@ broker.consume(
   },
 );
 
+// ------------------------------------------------------------ domain registry (04 §4)
+
+/** Applies a registration and logs what became of it – rejections loudly, they need a person. */
+async function register(registration: Registration) {
+  const outcome = await applyRegistration(pool, registration);
+  const domain = (registration.manifest as { domain?: unknown } | null)?.domain;
+  if (outcome.kind === 'rejected') logger.warn({ domain, instance: registration.instance, reason: outcome.reason }, 'domain registration rejected');
+  else if (outcome.kind === 'accepted') logger.info({ domain, version: outcome.version, instance: registration.instance }, 'domain registered');
+  else logger.debug({ domain, outcome: outcome.kind }, 'domain registration');
+}
+
+// routine-service's own domains go through the same code path, in-process
+const builtinHeartbeat = async () => {
+  for (const manifest of BUILTIN_MANIFESTS) await applyHeartbeat(pool, { domain: manifest.domain });
+};
+for (const manifest of BUILTIN_MANIFESTS) await register({ manifest, digest: manifestDigest(manifest), instance: `${SERVICE}@${instanceId}` });
+
+broker.consume({ queue: 'routine-service.registry', retryDelaysMs: [1_000, 5_000] }, async (envelope) => {
+  const message = parseRegistryMessage(envelope);
+  if (message.kind === 'registered') await register(message);
+  else if (!(await applyHeartbeat(pool, message))) logger.debug({ domain: message.domain }, 'heartbeat of an unregistered domain ignored');
+});
+
+const staleAfterMs = envInt('REGISTRY_STALE_AFTER_MS', 90_000);
+let stale = '';
+const registryLoop = startLoop('registry', 30_000, logger, async () => {
+  await builtinHeartbeat();
+  // said once per change, not every 30 s
+  const now = (await staleDomains(pool, staleAfterMs)).join(',');
+  if (now !== stale) logger.warn({ stale: now ? now.split(',') : [] }, now ? 'domains stale – no heartbeat' : 'all domains fresh again');
+  stale = now;
+});
+
 const relay = new OutboxRelay(pool, broker, logger, {
   batchSize: 50,
   intervalMs: envInt('OUTBOX_POLL_INTERVAL_MS', 200),
@@ -99,6 +136,7 @@ onShutdown(
   () => app.close(),
   () => schedulerLoop.stop(),
   () => housekeepingLoop.stop(),
+  () => registryLoop.stop(),
   () => relayLoop.stop(),
   () => broker.close(),
   () => pool.end(),

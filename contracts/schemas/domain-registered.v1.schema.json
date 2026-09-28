@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/domain-registered.v1.schema.json",
+  "title": "DomainRegistered v1",
+  "description": "A domain service (re-)registers its manifest (docs/v2/04-domain-platform.md §4.1): on start and on every reconnect, after declaring its queue and bindings. Routing key: domain.registered on platform.registry",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "DomainRegistered"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "manifest",
+        "digest",
+        "instance"
+      ],
+      "properties": {
+        "manifest": {
+          "$ref": "domain-manifest.v1.schema.json"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the manifest's canonical JSON (keys sorted)"
+        },
+        "instance": {
+          "type": "string",
+          "description": "the registering replica, e.g. task-service@3f2a…"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

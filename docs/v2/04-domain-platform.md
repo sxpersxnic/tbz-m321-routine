@@ -302,7 +302,7 @@ CREATE TABLE domain_manifests (
 );
 CREATE TABLE domains (
   domain             text PRIMARY KEY,
-  current_version    integer     NOT NULL,
+  current_version    integer,               -- null: only rejected registrations so far (shown too)
   service            text        NOT NULL,
   last_heartbeat_at  timestamptz NOT NULL,
   rejected           jsonb                  -- last rejected registration and why (shown on Infrastructure)

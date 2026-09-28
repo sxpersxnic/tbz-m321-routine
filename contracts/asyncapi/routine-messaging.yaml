@@ -76,7 +76,28 @@ channels:
       ExecutionResumed: { $ref: '#/components/messages/ExecutionResumed' }
       RoutineUnhealthy: { $ref: '#/components/messages/RoutineUnhealthy' }
 
+  platformRegistry:
+    address: platform.registry
+    title: Domain registry
+    description: 'Topic exchange. Routing keys: domain.registered, domain.heartbeat. Domains announce their manifests (docs/v2/04-domain-platform.md §4).'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange: { name: platform.registry, type: topic, durable: true, autoDelete: false }
+    messages:
+      DomainRegistered: { $ref: '#/components/messages/DomainRegistered' }
+      DomainHeartbeat: { $ref: '#/components/messages/DomainHeartbeat' }
+
 operations:
+  # ---- registry
+  registerDomains:
+    action: receive
+    channel: { $ref: '#/channels/platformRegistry' }
+    summary: routine-service – queue routine-service.registry (domain.*); applies the acceptance rules of 04 §4.3
+    messages:
+      - { $ref: '#/channels/platformRegistry/messages/DomainRegistered' }
+      - { $ref: '#/channels/platformRegistry/messages/DomainHeartbeat' }
+
   # ---- routine-service
   publishRoutineTriggered:
     action: send
@@ -183,6 +204,16 @@ components:
       title: ExecutionResumed v1
       summary: 'A failed execution goes on from its failed step: { executionId, routineId, ownerId, fromActionKey, resumedBy, resumeCount }'
       payload: { $ref: '../schemas/execution-resumed.v1.schema.json' }
+    DomainRegistered:
+      name: DomainRegistered
+      title: DomainRegistered v1
+      summary: '{ manifest, digest, instance } – sent by the domain kit on start and reconnect'
+      payload: { $ref: '../schemas/domain-registered.v1.schema.json' }
+    DomainHeartbeat:
+      name: DomainHeartbeat
+      title: DomainHeartbeat v1
+      summary: '{ domain, manifestVersion, digest, instance } – every 30 s'
+      payload: { $ref: '../schemas/domain-heartbeat.v1.schema.json' }
     RoutineUnhealthy:
       name: RoutineUnhealthy
       title: RoutineUnhealthy v1

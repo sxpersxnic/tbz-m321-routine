@@ -13,7 +13,7 @@ from manifests (no visible difference for v1 steps, which is the point).
 
 ---
 
-- [ ] **M2-01 · Registry in routine-service**
+- [x] **M2-01 · Registry in routine-service**
   - Migration: `domain_manifests`, `domains` ([04 §4.2](../04-domain-platform.md)). Queue
     `routine-service.registry` in `definitions.json`. Consumer applying the acceptance rules of
     [04 §4.3](../04-domain-platform.md) and the compatibility rules of §5. Staleness check loop.

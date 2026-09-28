@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { createEnvelope } from '@routine/service-kit';
+import { createEnvelope, manifestDigest } from '@routine/service-kit';
+import { BUILTIN_MANIFESTS } from '../src/domain/builtin-manifests.ts';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionRequested, executionCompleted, executionFailed, executionResumed, parseActionResult, routineTriggered, routineUnhealthy, subRoutineResult } from '../src/messages.ts';
+import { actionRequested, executionCompleted, executionFailed, executionResumed, parseActionResult, parseRegistryMessage, routineTriggered, routineUnhealthy, subRoutineResult } from '../src/messages.ts';
 
 const ids = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), correlationId: randomUUID() };
 
@@ -158,5 +159,19 @@ describe('routine-service reads results tolerantly', () => {
       processedBy: 'w1',
       duplicate: false,
     });
+  });
+});
+
+describe('registry messages (05-messaging §4.6)', () => {
+  it('DomainRegistered and DomainHeartbeat as the kit sends them validate and parse', () => {
+    for (const manifest of BUILTIN_MANIFESTS) {
+      const digest = manifestDigest(manifest);
+      const registered = createEnvelope({ type: 'DomainRegistered', version: 1, source: 'test', data: { manifest, digest, instance: 'x@1' } });
+      assert.deepEqual(contractErrors('domain-registered.v1.schema.json', registered), [], manifest.domain);
+      assert.deepEqual(parseRegistryMessage(registered), { kind: 'registered', manifest, digest, instance: 'x@1' });
+      const heartbeat = createEnvelope({ type: 'DomainHeartbeat', version: 1, source: 'test', data: { domain: manifest.domain, manifestVersion: 1, digest, instance: 'x@1' } });
+      assert.deepEqual(contractErrors('domain-heartbeat.v1.schema.json', heartbeat), []);
+      assert.equal(parseRegistryMessage(heartbeat).kind, 'heartbeat');
+    }
   });
 });
