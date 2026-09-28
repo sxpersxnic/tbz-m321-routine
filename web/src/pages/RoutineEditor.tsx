@@ -3,6 +3,7 @@ import { GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, condi
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
 import { runsInTest } from '../catalog/catalog.ts';
+import { pickerGroups } from '../catalog/picker.ts';
 import { useCatalog } from '../catalog/store.ts';
 import { shortValue, TryStep } from '../components/try-step.tsx';
 import { DateInput } from '../forms/date-input.tsx';
@@ -335,6 +336,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   const [version, setVersion] = useState<number>();
   const [loaded, setLoaded] = useState(!editing);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [stepQuery, setStepQuery] = useState('');
   const [issues, setIssues] = useState<Issue[]>([]);
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -613,7 +615,9 @@ export function RoutineEditor({ id }: { id?: string }) {
   const timezone = draft.timezone || 'Europe/Zurich';
   const blank = !editing && draft.actions.length === 0 && !draft.name;
   // the catalog's steps – none until it has loaded (from the cache that is at once, after the first visit)
-  const steps = catalog.capabilities().map((capability) => ({ type: capability.type, label: actionLabel(capability.type), description: capability.description, scripting: formOf(capability.type)?.scripting === true }));
+  const lastStep = Math.max(0, ...draft.actions.map((action) => action.step));
+  const previousType = draft.actions.filter((action) => action.step === lastStep).at(-1)?.type;
+  const pickerGroupsShown = pickerGroups(catalog, { query: stepQuery, previousType });
 
   /** Literal names of variables set in steps before `action` – what {{vars.…}} can read there. */
   const variablesBefore = (action: DraftAction) => [
@@ -1092,27 +1096,35 @@ export function RoutineEditor({ id }: { id?: string }) {
             )}
 
             <div>
-              <h3 style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
-                {draft.actions.length >= MAX_ACTIONS ? `At most ${MAX_ACTIONS} steps` : 'Add a step'}
-              </h3>
-              {[
-                { label: 'Actions', types: steps.filter((type) => !type.scripting) },
-                { label: 'Scripting', types: steps.filter((type) => type.scripting) },
-              ].filter((group) => group.types.length > 0).map((group) => (
-              <div key={group.label} className="palette-group">
-              <h4 className="palette-label">{group.label}</h4>
+              <div className="picker-head">
+                <h3>{draft.actions.length >= MAX_ACTIONS ? `At most ${MAX_ACTIONS} steps` : 'Add a step'}</h3>
+                <input type="search" className="picker-search" placeholder="Search" aria-label="Search steps" value={stepQuery}
+                  onChange={(event) => setStepQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Enter takes the first match – search, Enter, done
+                    const first = pickerGroupsShown[0]?.items[0];
+                    if (event.key !== 'Enter' || !first || draft.actions.length >= MAX_ACTIONS) return;
+                    event.preventDefault();
+                    addAction(first.type);
+                    setStepQuery('');
+                  }} />
+              </div>
+              {pickerGroupsShown.map((group) => (
+              <div key={group.id} className="palette-group" role="group" aria-labelledby={`picker-${group.id}`}>
+              <h4 className="palette-label" id={`picker-${group.id}`}>{group.label}</h4>
               <div className="palette">
-                {group.types.map((type) => (
-                  <button key={type.type} type="button" className="palette-item" onClick={() => addAction(type.type)}
-                    title={formOf(type.type)?.blurb ?? type.description} disabled={draft.actions.length >= MAX_ACTIONS}>
-                    <ActionGlyph type={type.type} size={30} />
-                    <span className="grow">{type.label}</span>
+                {group.items.map((item) => (
+                  <button key={item.type} type="button" className="palette-item" onClick={() => addAction(item.type)}
+                    title={formOf(item.type)?.blurb ?? item.description} disabled={draft.actions.length >= MAX_ACTIONS}>
+                    <ActionGlyph type={item.type} size={30} />
+                    <span className="grow">{item.label}{item.hint && <span className="blurb">{item.hint}</span>}</span>
                     <Icon name="plus" size={15} />
                   </button>
                 ))}
               </div>
               </div>
               ))}
+              {stepQuery.trim() && pickerGroupsShown.length === 0 && <p className="muted">No matching steps</p>}
             </div>
           </section>
         </div>

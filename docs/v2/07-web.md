@@ -123,6 +123,11 @@ Groups: *Suggested* (capabilities whose params can be filled from the previous s
 max 3), *You* (all `kind: 'human'`), one group per enabled domain in profile order,
 *Scripting*. Search matches label, description and domain name.
 
+A step is *suggested* when the previous step outputs a field named like one of its required
+params (`task.create` → `taskId` → *Move task*, *Complete task*); own domain first, then by how
+many params fit. Domain order is the manifests' `order` until the profile has one (M5). While
+searching there are no suggestions; Enter adds the first match.
+
 ### 5.5 Test a step
 
 *Try this step* on values, scripting steps and actions with `preview`:

@@ -71,7 +71,7 @@ from manifests (no visible difference for v1 steps, which is the point).
     `SentenceView` from manifest sentences. Visual regression check: every v1 step type renders
     the same sentence as before (fixture comparison).
 
-- [ ] **M2-10 · Step picker by domain**
+- [x] **M2-10 · Step picker by domain**
   - Grouped picker with search ([02 §6](../02-experience.md), [07 §5.4](../07-web.md)). The *You* group
     appears once M3 adds human capabilities.
 

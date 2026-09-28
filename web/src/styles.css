@@ -1290,6 +1290,9 @@ button.notice-main { cursor: pointer; }
 .flow-controls .field > span:first-child { display: inline-flex; align-items: center; gap: 5px; }
 .palette-group + .palette-group { margin-top: 14px; }
 .palette-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px; }
+.picker-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.picker-head h3 { font-size: 14px; color: var(--muted); margin: 0; }
+.picker-search { max-width: 220px; }
 .run-hero p a { color: var(--accent); }
 .run-hero p a:hover { text-decoration: underline; }
 

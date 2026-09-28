@@ -8,7 +8,7 @@ import type { Capability, CatalogDomain, ParamSpec } from '../types.ts';
  */
 
 /** Domains whose steps steer the run instead of doing something – the palette's "Scripting". */
-const SCRIPTING_DOMAINS = new Set(['scripting', 'routines']);
+export const SCRIPTING_DOMAINS = new Set(['scripting', 'routines']);
 
 /** The editor field for a manifest param type. */
 function kindOf(param: ParamSpec): FieldKind {
