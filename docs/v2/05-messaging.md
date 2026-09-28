@@ -65,7 +65,8 @@ kit adds exact bindings for new capability types.
 
 ### ExecutionFailed v1
 
-New optional fields `errorCode` (of the failed action) and `failedActionType`.
+New optional fields `errorCode` (of the failed action), `failedActionType` and `resumeCount`
+(how often the run was resumed before this failure; 0 = first failure).
 
 ### RoutineTriggered v1
 
@@ -106,7 +107,7 @@ The domain closes the item (task → `CANCELLED`, question → `EXPIRED`) and se
 
 | Type | Routing key | Data | Consumers |
 | --- | --- | --- | --- |
-| `ExecutionResumed` v1 | `execution.resumed` | `executionId, routineId, ownerId, fromActionKey, resumedBy` | notification-service (marks the failure notification resolved) |
+| `ExecutionResumed` v1 | `execution.resumed` | `executionId, routineId, ownerId, fromActionKey, resumedBy, resumeCount` | notification-service (marks the failure notification resolved) |
 | `ExecutionWaitingForYou` v1 | `execution.waitingForYou` | `executionId, routineId, ownerId, routineName, awaiting: [{actionKey, kind, refId, title, dueAt}]` | delivery-service (push) |
 | `RoutineSaved` v1 | `routine.saved` | `routineId, ownerId, version, active, name, trigger` (full trigger definition), `areaId` | trigger-service |
 | `RoutineDeleted` v1 | `routine.deleted` | `routineId, ownerId` | trigger-service |

@@ -80,6 +80,8 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   const routineName = text(data.routineName) ?? 'Routine';
 
   if (envelope.type === 'ExecutionFailed') {
+    // one notification per failure: a resumed run that fails again is news again
+    const resumes = typeof data.resumeCount === 'number' && data.resumeCount > 0 ? data.resumeCount : 0;
     return {
       ownerId,
       executionId,
@@ -87,7 +89,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
       body: text(data.reason) ?? '',
       priority: 'high',
       category: 'execution',
-      sourceKey: `execution:${executionId}:failed`,
+      sourceKey: resumes ? `execution:${executionId}:failed:${resumes}` : `execution:${executionId}:failed`,
     };
   }
   if (envelope.type !== 'ExecutionCompleted') throw new PermanentError(`unsupported event type ${envelope.type}`);
@@ -107,6 +109,17 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   if (title) return { ...base, title, body: text(notification?.body) ?? '', priority: asPriority(data.priority) };
   if (legacyMessage) return { ...base, title: legacyMessage, body: '', priority: 'normal' };
   throw new PermanentError('ExecutionCompleted has neither "notification" nor "message"');
+}
+
+/** The execution events this service acts on; others on `execution.#` are acknowledged and ignored. */
+export const NOTIFYING_EVENTS = new Set(['ExecutionCompleted', 'ExecutionFailed']);
+
+/** ExecutionResumed: whose failure notifications are resolved now. */
+export function readExecutionResumed(envelope: Envelope): { executionId: string; ownerId: string } {
+  const executionId = text(envelope.data.executionId);
+  const ownerId = text(envelope.data.ownerId);
+  if (!executionId || !ownerId) throw new PermanentError('ExecutionResumed is missing executionId/ownerId');
+  return { executionId, ownerId };
 }
 
 // ---------------------------------------------------------------- results

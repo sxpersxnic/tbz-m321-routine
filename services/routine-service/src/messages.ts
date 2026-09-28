@@ -173,6 +173,8 @@ export function executionFailed(input: {
   failedActionKey: string | null;
   failedActionType?: string | null;
   errorCode?: ErrorCode | null;
+  /** How often the run was resumed before this failure – consumers key their notification on it. */
+  resumeCount?: number;
   correlationId: string;
 }): OutgoingMessage {
   return {
@@ -192,6 +194,37 @@ export function executionFailed(input: {
         failedActionKey: input.failedActionKey,
         failedActionType: input.failedActionType ?? null,
         errorCode: input.errorCode ?? null,
+        resumeCount: input.resumeCount ?? 0,
+      },
+    }),
+  };
+}
+
+/** A failed run was resumed from its failed step (06-engine §6). */
+export function executionResumed(input: {
+  executionId: string;
+  routineId: string;
+  ownerId: string;
+  fromActionKey: string;
+  resumedBy: string;
+  resumeCount: number;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'execution.resumed',
+    envelope: createEnvelope({
+      type: 'ExecutionResumed',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        executionId: input.executionId,
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        fromActionKey: input.fromActionKey,
+        resumedBy: input.resumedBy,
+        resumeCount: input.resumeCount,
       },
     }),
   };

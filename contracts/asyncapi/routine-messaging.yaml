@@ -63,7 +63,7 @@ channels:
   routineEvents:
     address: routine.events
     title: Domain events of the routine service
-    description: 'Topic exchange. Routing keys: routine.triggered, execution.completed, execution.failed'
+    description: 'Topic exchange. Routing keys: routine.triggered, execution.completed, execution.failed, execution.resumed'
     bindings:
       amqp:
         is: routingKey
@@ -73,6 +73,7 @@ channels:
       ExecutionCompletedV1: { $ref: '#/components/messages/ExecutionCompletedV1' }
       ExecutionCompletedV2: { $ref: '#/components/messages/ExecutionCompletedV2' }
       ExecutionFailed: { $ref: '#/components/messages/ExecutionFailed' }
+      ExecutionResumed: { $ref: '#/components/messages/ExecutionResumed' }
 
 operations:
   # ---- routine-service
@@ -107,6 +108,7 @@ operations:
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV1' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionResumed' }
 
   # ---- workers
   executeActions:
@@ -127,11 +129,12 @@ operations:
   notifyOnExecutionEvents:
     action: receive
     channel: { $ref: '#/channels/routineEvents' }
-    summary: notification-service – queue notification-service.execution-events (execution.#)
+    summary: notification-service – queue notification-service.execution-events (execution.#); other execution events are acknowledged and ignored
     messages:
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV1' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionResumed' }
 
 components:
   messages:
@@ -170,5 +173,10 @@ components:
     ExecutionFailed:
       name: ExecutionFailed
       title: ExecutionFailed v1
-      summary: 'v1.1 (additive): optional errorCode and failedActionType of the failed action'
+      summary: 'v1.1 (additive): optional errorCode and failedActionType of the failed action, resumeCount'
       payload: { $ref: '../schemas/execution-failed.v1.schema.json' }
+    ExecutionResumed:
+      name: ExecutionResumed
+      title: ExecutionResumed v1
+      summary: 'A failed execution goes on from its failed step: { executionId, routineId, ownerId, fromActionKey, resumedBy, resumeCount }'
+      payload: { $ref: '../schemas/execution-resumed.v1.schema.json' }

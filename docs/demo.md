@@ -19,6 +19,7 @@ Every scenario can be shown in the terminal (`scripts/demo.sh <scenario>`) or in
 | --- | --- | --- |
 | Main workflow (§17) | `scripts/demo.sh main` | Routine "Weekly Review": weather + task in parallel, summary, notification; `PENDING → RUNNING → COMPLETED`; which worker processed what; Jaeger link |
 | Retry | `scripts/demo.sh retry` | External service answers 503 twice → retries after 1 s and 5 s, execution `WAITING`, then `COMPLETED`. HTTP 404 → `FAILED` immediately, follow-up action `SKIPPED` |
+| Resume | `scripts/demo.sh resume` | A step calls an endpoint that doesn't exist → `FAILED`, `errorCode NOT_FOUND`. The endpoint is fixed, `POST …/resume` → the same run goes on from the failed step: the completed step keeps its result, the failed one reruns with the same `actionId`, `COMPLETED`; the failure notification is marked resolved. Also: fix by editing the step, then resume; resuming a completed run → 409 |
 | Resilience (§18) | `scripts/demo.sh resilience` | integration-worker stopped → message waits in the queue (0 consumers), the API and other routines keep working, execution `WAITING`; start the worker → `COMPLETED` |
 | Idempotency | `scripts/demo.sh idempotency` | Same `Idempotency-Key` → same execution. The same `ActionRequested` sent to the broker twice → only one task, logs say "duplicate … ignored" |
 | Scaling | `scripts/demo.sh scale` | 16 parallel actions with 1 vs. 4 worker replicas; duration and distribution per instance |

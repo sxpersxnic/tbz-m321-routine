@@ -260,6 +260,22 @@ paths:
         '200': { description: execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /api/v1/executions/{executionId}/resume:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: '"Retry from here": a FAILED execution goes on from its failed step'
+      description: |
+        Completed steps keep their results. The failed step (same actionId, so workers see the same
+        idempotency key) and the steps skipped because of the failure run again – with the routine's
+        current settings when the step still exists with the same key and type. Steps skipped by a
+        condition stay skipped. Publishes ExecutionResumed.
+      operationId: resumeExecution
+      responses:
+        '200': { description: the resumed execution (RUNNING), content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the execution is not FAILED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -439,6 +455,7 @@ components:
         status: { $ref: '#/components/schemas/ExecutionStatus' }
         trigger: { enum: [manual, schedule, webhook, routine], description: 'routine = called by a routine.run step of another routine' }
         calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
+        resumeCount: { type: integer, minimum: 0, description: 'how often the execution was resumed ("Retry from here")' }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: shared ID in all logs and messages of this execution }
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }

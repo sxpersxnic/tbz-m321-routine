@@ -100,6 +100,20 @@ app.route<{ Params: { code: string } }>({
   handler: async (request, reply) => reply.status(Number(request.params.code) || 500).send({ status: Number(request.params.code) }),
 });
 
+// ---- switch: a broken endpoint (404) until someone fixes it – for "fix, then Retry from here" demos
+const fixed = new Set<string>();
+
+app.route<{ Params: { name: string } }>({
+  method: ['GET', 'POST'],
+  url: '/switch/:name',
+  handler: async (request, reply) =>
+    fixed.has(request.params.name) ? { ok: true, name: request.params.name } : reply.status(404).send({ error: 'not here (yet)' }),
+});
+app.put<{ Params: { name: string } }>('/switch/:name', async (request) => {
+  fixed.add(request.params.name);
+  return { fixed: request.params.name };
+});
+
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 8090) });
 logger.info('mock-external ready');
 onShutdown(logger, () => app.close());

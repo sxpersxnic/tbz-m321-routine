@@ -24,8 +24,10 @@ import {
   actionFailed,
   actionRef,
   actionRetryScheduled,
+  NOTIFYING_EVENTS,
   parseSendNotification,
   readExecutionEvent,
+  readExecutionResumed,
   RESULTS_EXCHANGE,
   type CompletionReaderMode,
   type NotificationDraft,
@@ -53,6 +55,7 @@ interface NotificationRow {
   execution_id: string | null;
   created_at: Date;
   read_at: Date | null;
+  resolved_at: Date | null;
 }
 
 const notificationDto = (row: NotificationRow) => ({
@@ -64,6 +67,7 @@ const notificationDto = (row: NotificationRow) => ({
   executionId: row.execution_id,
   createdAt: row.created_at,
   readAt: row.read_at,
+  resolvedAt: row.resolved_at,
 });
 
 /** Stores (= delivers to the inbox) exactly once per source message. */
@@ -117,10 +121,26 @@ broker.consume(
   },
 );
 
-// ExecutionCompleted / ExecutionFailed events (pub/sub – the producer does not know this consumer)
+// Execution events (pub/sub – the producer does not know this consumer)
 broker.consume(
   { queue: 'notification-service.execution-events', retryDelaysMs: [1_000, 5_000], chaosFailureRate },
   async (envelope) => {
+    if (envelope.type === 'ExecutionResumed') {
+      // "Retry from here": the failure it told the user about is being dealt with (idempotent)
+      const { executionId, ownerId } = readExecutionResumed(envelope);
+      const { rowCount } = await pool.query(
+        `UPDATE notifications SET resolved_at = now()
+          WHERE execution_id = $1 AND owner_id = $2 AND source_key LIKE 'execution:%:failed%' AND resolved_at IS NULL`,
+        [executionId, ownerId],
+      );
+      logger.info({ executionId, resolved: rowCount }, 'failure notification resolved – run resumed');
+      return;
+    }
+    // tolerant reader: new execution events (e.g. waiting for you) are not this service's business yet
+    if (!NOTIFYING_EVENTS.has(envelope.type)) {
+      logger.debug({ event: envelope.type }, 'execution event ignored');
+      return;
+    }
     const draft = readExecutionEvent(envelope, readerMode);
     await withContext({ executionId: draft.executionId ?? undefined }, async () => {
       const { row, created } = await deliver(draft);

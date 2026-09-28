@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { createEnvelope, PermanentError } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionCompleted, parseSendNotification, readExecutionEvent } from '../src/messages.ts';
+import { actionCompleted, NOTIFYING_EVENTS, parseSendNotification, readExecutionEvent, readExecutionResumed } from '../src/messages.ts';
 
 const base = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), routineName: 'Weekly Review' };
 const v2Fields = { notification: { title: 'Routine completed', body: 'All done' }, priority: 'high' };
@@ -62,5 +62,29 @@ describe('notification.send', () => {
   it('produces a valid ActionCompleted', () => {
     const { ref } = parseSendNotification(request({ title: 'Hallo' }));
     assert.deepEqual(contractErrors('action-completed.v1.schema.json', actionCompleted(ref, { notificationId: randomUUID() }, 'n@1', false)), []);
+  });
+});
+
+describe('failure notifications and resume', () => {
+  const failed = (resumeCount?: number) =>
+    createEnvelope({ type: 'ExecutionFailed', version: 1, source: 'routine-service', data: { ...base, reason: 'Action "call" failed', ...(resumeCount !== undefined && { resumeCount }) } });
+
+  it('keeps one notification per failure: the first keeps the v1 key, a failure after a resume gets its own', () => {
+    assert.equal(readExecutionEvent(failed(), 'tolerant').sourceKey, `execution:${base.executionId}:failed`);
+    assert.equal(readExecutionEvent(failed(0), 'tolerant').sourceKey, `execution:${base.executionId}:failed`);
+    assert.equal(readExecutionEvent(failed(2), 'tolerant').sourceKey, `execution:${base.executionId}:failed:2`);
+  });
+
+  it('reads ExecutionResumed, and only notifies for completed and failed runs', () => {
+    const resumed = createEnvelope({
+      type: 'ExecutionResumed',
+      version: 1,
+      source: 'routine-service',
+      data: { executionId: base.executionId, routineId: base.routineId, ownerId: base.ownerId, fromActionKey: 'call', resumedBy: base.ownerId, resumeCount: 1 },
+    });
+    assert.deepEqual(contractErrors('execution-resumed.v1.schema.json', resumed), []);
+    assert.deepEqual(readExecutionResumed(resumed), { executionId: base.executionId, ownerId: base.ownerId });
+    assert.ok(!NOTIFYING_EVENTS.has('ExecutionResumed'));
+    assert.ok(!NOTIFYING_EVENTS.has('ExecutionWaitingForYou'), 'future execution events are ignored, not dead-lettered');
   });
 });

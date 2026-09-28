@@ -61,6 +61,11 @@
             "string",
             "null"
           ]
+        },
+        "resumeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how often the execution was resumed before this failure (0 = first failure); consumers keep one notification per failure with it"
         }
       },
       "additionalProperties": true

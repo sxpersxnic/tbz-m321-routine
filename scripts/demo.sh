@@ -13,6 +13,7 @@
 #   schedule     Time-based trigger (cron)
 #   webhook      External event: a public webhook URL starts a routine (idempotent, rotatable)
 #   evolution    Schema evolution with expand-and-contract, including a breaking-change demo
+#   resume       A failed run is fixed and resumed from its failed step ("Retry from here")
 #   all          All scenarios in sequence (acceptance test)
 #   trace <id>   Logs of all services for a correlation or execution ID
 #   hook <routine> [json]  Call a webhook routine by ID or name, then follow the run (manual testing)
@@ -25,6 +26,7 @@ cd "$(dirname "$0")/.."
 GATEWAY=${GATEWAY:-http://localhost:8080}
 RABBIT=${RABBIT:-http://localhost:15672}
 RABBIT_AUTH=${RABBIT_AUTH:-routine:routine}
+MOCK=${MOCK:-http://localhost:8090}
 EMAIL=${DEMO_EMAIL:-demo@routine.local}
 PASSWORD=${DEMO_PASSWORD:-demo12345}
 TOKEN=""
@@ -186,6 +188,55 @@ scenario_retry() {
   [[ $(execution "$eid" | jq -r .status) == FAILED ]] || fail "expected: FAILED"
   info "Error: $(execution "$eid" | jq -r .error)"
   ok "FAILED immediately (1 attempt), follow-up action SKIPPED, user is notified"
+}
+
+scenario_resume() {
+  title "Resume: fix it, then retry from the failed step"
+  login
+  local name rid eid before after notification
+  name="backup-$(uuid)"
+  step "A routine whose second step calls an endpoint that does not exist (yet)"
+  rid=$(create_routine "$(jq -nc --arg url "http://mock-external:8090/switch/$name" '{name: "Backup Check", trigger: {type: "manual"}, actions: [
+      {key: "weather", type: "weather.get", params: {city: "Bern"}},
+      {key: "call", type: "http.request", step: 2, params: {url: $url}},
+      {key: "notify", type: "notification.send", step: 3, params: {title: "Backup checked ({{actions.weather.summary}})"}}]}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 FAILED COMPLETED
+  show_actions "$eid"
+  [[ $(execution "$eid" | jq -r .errorCode) == NOT_FOUND ]] || fail "expected errorCode NOT_FOUND"
+  before=$(execution "$eid" | jq -c '{weather: (.actions[] | select(.key=="weather") | {id, output}), call: (.actions[] | select(.key=="call") | .id)}')
+  ok "FAILED with errorCode NOT_FOUND – the web says \"The website said this page doesn't exist\""
+
+  step "Fix it at the source, then POST /api/v1/executions/$eid/resume"
+  curl -sS -f -X PUT "$MOCK/switch/$name" >/dev/null || fail "mock-external not reachable on $MOCK"
+  api POST "/api/v1/executions/$eid/resume" | jq -r '"  status after resume: \(.status), resumed \(.resumeCount)×"'
+  wait_for "$eid" 30 COMPLETED FAILED
+  show_actions "$eid"
+  after=$(execution "$eid" | jq -c '{weather: (.actions[] | select(.key=="weather") | {id, output}), call: (.actions[] | select(.key=="call") | .id)}')
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "expected COMPLETED after the resume"
+  [[ $before == "$after" ]] || fail "the completed step or the failed step's id changed: $before → $after"
+  ok "COMPLETED in the same run: weather kept its result, \"call\" ran again with the same actionId (idempotency key)"
+  show_log "$eid" | grep -E "FAILED|RESUMED|COMPLETED" || true
+  sleep 1
+  notification=$(api GET "/api/v1/notifications?category=execution" | jq -r --arg e "$eid" '[.items[] | select(.executionId==$e and (.title | test("failed")))][0].resolvedAt // empty')
+  [[ -n $notification ]] || fail "the failure notification was not marked resolved"
+  ok "the failure notification is resolved (ExecutionResumed → notification-service)"
+
+  step "Or fix the step itself: edit the routine, then resume"
+  rid=$(create_routine "$(jq -nc '{name: "Broken Endpoint", trigger: {type: "manual"}, actions: [
+      {key: "call", type: "http.request", params: {url: "http://mock-external:8090/status/404"}},
+      {key: "notify", type: "notification.send", params: {title: "fixed by editing the step"}}]}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 FAILED COMPLETED
+  api PUT "/api/v1/routines/$rid" "$(jq -nc '{name: "Broken Endpoint", trigger: {type: "manual"}, actions: [
+      {key: "call", type: "http.request", params: {url: "http://mock-external:8090/status/200"}},
+      {key: "notify", type: "notification.send", params: {title: "fixed by editing the step"}}]}')" >/dev/null
+  api POST "/api/v1/executions/$eid/resume" >/dev/null
+  wait_for "$eid" 30 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r '.actions[] | select(.key=="call") | .params.url') == *"/status/200" ]] || fail "the resumed step did not use the edited URL"
+  ok "the resumed step ran with the routine's current settings"
+  [[ $(api POST "/api/v1/executions/$eid/resume" | jq -r .status) == 409 ]] || fail "resuming a completed run must answer 409"
+  ok "a run that isn't failed can't be resumed (409)"
 }
 
 scenario_resilience() {
@@ -484,11 +535,12 @@ case "${1:-}" in
   schedule) scenario_schedule ;;
   webhook) scenario_webhook ;;
   evolution) scenario_evolution ;;
+  resume) scenario_resume ;;
   trace) scenario_trace "${2:-}" ;;
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
+    scenario_main; scenario_retry; scenario_resume; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

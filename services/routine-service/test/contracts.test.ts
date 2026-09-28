@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { createEnvelope } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionRequested, executionCompleted, executionFailed, parseActionResult, routineTriggered, subRoutineResult } from '../src/messages.ts';
+import { actionRequested, executionCompleted, executionFailed, executionResumed, parseActionResult, routineTriggered, subRoutineResult } from '../src/messages.ts';
 
 const ids = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), correlationId: randomUUID() };
 
@@ -45,6 +45,14 @@ describe('routine-service produces valid messages', () => {
   it('ExecutionFailed v1', () => {
     const message = executionFailed({ ...ids, routineName: 'X', reason: 'boom', failedActionKey: 'a' });
     assert.deepEqual(contractErrors('execution-failed.v1.schema.json', message.envelope), []);
+    const again = executionFailed({ ...ids, routineName: 'X', reason: 'boom', failedActionKey: 'a', resumeCount: 2 });
+    assert.deepEqual(contractErrors('execution-failed.v1.schema.json', again.envelope), []);
+  });
+
+  it('ExecutionResumed v1', () => {
+    const message = executionResumed({ ...ids, fromActionKey: 'call', resumedBy: ids.ownerId, resumeCount: 1 });
+    assert.deepEqual(contractErrors('execution-resumed.v1.schema.json', message.envelope), []);
+    assert.equal(message.routingKey, 'execution.resumed');
   });
 
   describe('ExecutionCompleted – expand and contract', () => {

@@ -38,6 +38,7 @@ export interface ExecutionRow {
   parent_execution_id: string | null;
   call_depth: number;
   error: string | null;
+  resume_count: number;
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -432,6 +433,56 @@ export async function markActionRetrying(db: Queryable, id: string, attempt: num
   );
 }
 
+/** A step as the routine defines it now – resume runs reset steps with their current settings. */
+export interface CurrentStep {
+  type: string;
+  params: Record<string, unknown>;
+  runIf: RunIf | null;
+  forEach: string | null;
+}
+
+/**
+ * Resume (06-engine §6): the failed steps and the ones skipped because of the failure go back to
+ * PENDING – same ids, so workers see the same idempotency key, attempts kept. A step still in the
+ * routine with the same key and type takes its current params (a loop child: its loop's params),
+ * so "Edit step" followed by "Retry from here" runs the fixed step. Returns the reset rows.
+ */
+export async function resetForResume(db: Queryable, executionId: string, current: Map<string, CurrentStep>): Promise<ExecutionActionRow[]> {
+  const { rows } = await db.query<ExecutionActionRow>(
+    `UPDATE execution_actions
+        SET status = 'PENDING', error = NULL, error_code = NULL, skip_reason = NULL, output = NULL,
+            resolved_params = NULL, dispatched_at = NULL, finished_at = NULL, updated_at = now()
+      WHERE execution_id = $1 AND (status = 'FAILED' OR (status = 'SKIPPED' AND skip_reason = 'failure'))
+      RETURNING *`,
+    [executionId],
+  );
+  const byId = new Map((await listExecutionActions(db, executionId)).map((action) => [action.id, action]));
+  for (const row of rows) {
+    const parent = row.parent_id ? byId.get(row.parent_id) : undefined;
+    const step = current.get(parent?.key ?? row.key);
+    if (!step || step.type !== row.type) continue;
+    // a loop child keeps its item; only a top-level step takes over its condition and loop
+    const runIf = parent ? row.run_if : step.runIf;
+    const forEach = parent ? row.for_each : step.forEach;
+    await db.query('UPDATE execution_actions SET params = $2, run_if = $3, for_each = $4 WHERE id = $1', [
+      row.id,
+      JSON.stringify(step.params),
+      runIf ? JSON.stringify(runIf) : null,
+      forEach,
+    ]);
+    Object.assign(row, { params: step.params, run_if: runIf, for_each: forEach });
+  }
+  return rows;
+}
+
+/** FAILED → RUNNING for a resume: error and end cleared, one more resume counted. */
+export async function markExecutionResumed(db: Queryable, id: string): Promise<void> {
+  await db.query(
+    `UPDATE executions SET status = 'RUNNING', error = NULL, finished_at = NULL, resume_count = resume_count + 1, updated_at = now() WHERE id = $1`,
+    [id],
+  );
+}
+
 /** After a failure: everything not run yet is skipped *because of* it – resume runs these again. */
 export async function skipPendingActions(db: Queryable, executionId: string): Promise<void> {
   await db.query(
@@ -519,6 +570,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     calledBy: row.parent_execution_id,
+    resumeCount: row.resume_count,
     ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({

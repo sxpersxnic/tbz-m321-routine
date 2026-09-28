@@ -39,6 +39,8 @@ export async function engineHarness() {
   const url = new URL(TEST_DATABASE_URL);
   url.pathname = `/${name}`;
   const pool: Pool = createPool(url.toString());
+  // DROP … WITH (FORCE) at the end terminates backends whose sockets are still closing – not an error here
+  pool.on('error', () => undefined);
   await runMigrations(pool, join(import.meta.dirname, '..', '..', 'migrations'), logger);
   await runKitMigrations(pool, ['outbox'], logger);
 

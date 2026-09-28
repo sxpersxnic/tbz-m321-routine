@@ -328,4 +328,20 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
       return executionDto(execution, actions, log);
     },
   );
+
+  // "Retry from here": a failed run goes on from its failed step (06-engine §6)
+  app.post<{ Params: { executionId: string } }>(
+    '/api/v1/executions/:executionId/resume',
+    { schema: { params: executionParams } },
+    async (request) => {
+      const user = requireUser(request);
+      const outcome = await engine.resume(request.params.executionId, user.id, user.id);
+      if (outcome === 'not_found') throw notFound('Execution');
+      if (outcome === 'not_failed') throw conflict('Only a failed run can be resumed');
+      const execution = await getExecution(pool, user.id, request.params.executionId);
+      if (!execution) throw notFound('Execution');
+      const [actions, log] = await Promise.all([listExecutionActions(pool, execution.id), listLog(pool, execution.id)]);
+      return executionDto(execution, actions, log);
+    },
+  );
 }

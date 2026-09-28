@@ -182,11 +182,16 @@ secret.
    its parent).
 2. Reset it to `PENDING` (same `id`: workers' idempotency stores only remember *completed*
    actions, so a failed one runs again; external services see the same idempotency key).
-   Keep `attempts`. Clear `error`, `error_code`, `finished_at`.
+   Keep `attempts`. Clear `error`, `error_code`, `finished_at`. A reset step that still exists
+   in the routine with the same key and type takes its **current** params (a loop child: its
+   loop's params; a top-level step also its `runIf`/`forEach`), so *Edit step* followed by
+   *Retry from here* runs the fixed step. Steps added to the routine since the run started are
+   not added to it.
 3. Reset every action with `skip_reason = 'failure'` (skipped because of this failure) to
    `PENDING`. Actions skipped by a condition keep `SKIPPED`.
 4. Execution → `RUNNING`, clear `error`, `finished_at`. Increment `resume_count`. Log
-   `RESUMED`. Enqueue `ExecutionResumed`.
+   `RESUMED`. Enqueue `ExecutionResumed`. A later failure publishes `ExecutionFailed` with
+   `resumeCount`, so consumers keep one notification per failure.
 5. `#advance`.
 
 `skipPendingActions` (v1) sets `skip_reason = 'failure'`. Condition skips set `'condition'`.

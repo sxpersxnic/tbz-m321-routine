@@ -31,7 +31,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
     `condition` / `failure`. DTO exposes `skipReason`.
   - Tests: both reasons set correctly in `scripting.test.ts`-style engine tests.
 
-- [ ] **M1-04 · Resume (engine + API)**
+- [x] **M1-04 · Resume (engine + API)**
   - `POST /api/v1/executions/:id/resume` per [06 §6](../06-engine.md). Migration: `executions.resume_count`.
     Message `ExecutionResumed` (schema + AsyncAPI + contract test).
   - notification-service consumes `execution.resumed` (binding on

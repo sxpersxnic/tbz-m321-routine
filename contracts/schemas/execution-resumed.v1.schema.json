@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/execution-resumed.v1.schema.json",
+  "title": "ExecutionResumed v1",
+  "description": "A failed execution was resumed from its failed step (\"Retry from here\", docs/v2/06-engine.md §6). Routing key: execution.resumed",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ExecutionResumed"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "executionId",
+        "routineId",
+        "ownerId",
+        "fromActionKey",
+        "resumedBy",
+        "resumeCount"
+      ],
+      "properties": {
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "fromActionKey": {
+          "type": "string",
+          "description": "key of the failed step the run goes on from"
+        },
+        "resumedBy": {
+          "type": "string",
+          "description": "user id of who resumed it"
+        },
+        "resumeCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how often this execution has been resumed, including this time"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -8,6 +8,7 @@ import {
   actionRequested,
   executionCompleted,
   executionFailed,
+  executionResumed,
   routineTriggered,
   subRoutineResult,
   type ActionResult,
@@ -22,6 +23,8 @@ import {
   insertLoopActions,
   listExecutionActions,
   lockExecution,
+  markExecutionResumed,
+  resetForResume,
   markActionCompleted,
   markActionDispatched,
   markActionFailed,
@@ -229,6 +232,44 @@ export class ExecutionEngine {
     });
   }
 
+  /**
+   * "Retry from here" (06-engine §6): a FAILED run goes on from its failed step. Completed steps keep
+   * their results; the failed step and the steps skipped because of it run again, with the routine's
+   * current settings for them. `not_failed` when the run isn't FAILED (any more).
+   */
+  async resume(executionId: string, ownerId: string, resumedBy: string): Promise<'resumed' | 'not_found' | 'not_failed'> {
+    return withTransaction(this.#pool, async (client) => {
+      const execution = await lockExecution(client, executionId);
+      if (!execution || execution.owner_id !== ownerId) return 'not_found';
+      if (execution.status !== 'FAILED') return 'not_failed';
+
+      const routine = await getRoutine(client, ownerId, execution.routine_id);
+      const current = new Map(
+        (routine?.actions ?? []).map((action) => [action.key, { type: action.type, params: action.params, runIf: action.runIf ?? null, forEach: action.forEach ?? null }]),
+      );
+      const from = (await listExecutionActions(client, execution.id)).filter((action) => action.status === 'FAILED').sort((a, b) => a.step - b.step)[0];
+      await resetForResume(client, execution.id, current);
+      await markExecutionResumed(client, execution.id);
+      Object.assign(execution, { status: 'RUNNING', error: null, finished_at: null, resume_count: execution.resume_count + 1 });
+      await appendLog(client, execution.id, 'RESUMED', `Resumed from "${from?.key ?? '?'}"`, from?.key);
+      await enqueue(
+        client,
+        executionResumed({
+          executionId: execution.id,
+          routineId: execution.routine_id,
+          ownerId,
+          fromActionKey: from?.key ?? '',
+          resumedBy,
+          resumeCount: execution.resume_count,
+          correlationId: execution.correlation_id,
+        }),
+      );
+      this.#logger.info({ executionId, from: from?.key, resumeCount: execution.resume_count }, 'execution resumed');
+      await this.#advance(client, execution, await listExecutionActions(client, execution.id));
+      return 'resumed';
+    });
+  }
+
   /** Periodic check: executions waiting for an unresponsive worker become WAITING. */
   async markStaleExecutions(): Promise<void> {
     const ids = await markStaleExecutionsWaiting(this.#pool, this.#options.waitingAfterMs);
@@ -409,6 +450,7 @@ export class ExecutionEngine {
               failedActionKey: decision.failedKey,
               failedActionType: failed?.type ?? null,
               errorCode: failed?.error_code ?? null,
+              resumeCount: execution.resume_count,
               correlationId: execution.correlation_id,
             }),
           );

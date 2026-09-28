@@ -75,3 +75,4 @@ components:
         executionId: { type: [string, 'null'], format: uuid }
         createdAt: { type: string, format: date-time }
         readAt: { type: [string, 'null'], format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time, description: 'set on a failure notification once its run was resumed (ExecutionResumed)' }
