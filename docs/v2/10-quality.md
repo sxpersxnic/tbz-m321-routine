@@ -28,7 +28,7 @@ or the compose stack: `node web/scripts/a11y.mjs http://localhost:5173`.
 
 ## 3. System test scenarios
 
-Added to `scripts/demo.sh` (each also documented in `docs/demo.md` on the `v2` branch):
+Added to `scripts/demo.sh` (each also documented in `docs/demo.md` on `feat/v2-dev`):
 
 | Scenario | Milestone | Shows |
 | --- | --- | --- |
@@ -48,8 +48,9 @@ Added to `scripts/demo.sh` (each also documented in `docs/demo.md` on the `v2` b
 
 ## 4. Working rules for implementing agents
 
-1. **Branches.** `main` stays the v1 hand-in. Work on `v2/<milestone>` branches cut from `v2`
-   (e.g. `v2/m1-trust`), and open one PR per milestone into `v2`.
+1. **Branches.** `main` stays the v1 hand-in (tag `v1.0.0`). All v2 work happens on the one
+   integration branch `feat/v2-dev`, cut from `v1.0.0`. No per-milestone branches: the
+   milestone boundary is the push (rule 3).
 2. **One work package = one commit** that also ticks its checkbox in the milestone file. A
    large package may be split into commits named *part 1/2*, *part 2/2*. The box is ticked in
    the last one. Commit messages follow the repository's style (`feat(scope): …`,
@@ -97,7 +98,7 @@ home, calendar) is created the same way:
 - [ ] queues in `definitions.json` if it consumes fixed platform queues. Domain action queues
       are declared by the kit
 - [ ] topology component in the web (`components/topology.tsx`) knows the new node
-- [ ] `docs/architecture.md` service table updated on the `v2` branch
+- [ ] `docs/architecture.md` service table updated on `feat/v2-dev`
 
 ## 6. Definition of done (per work package)
 

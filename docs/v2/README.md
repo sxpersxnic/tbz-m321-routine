@@ -10,7 +10,7 @@ This folder is the complete plan: product, experience, architecture, contracts, 
 and a milestone-by-milestone implementation plan precise enough for Claude Code agents to
 implement without further design work.
 
-> **Status:** planned, not started. v1 stays untouched until v2 is approved.
+> **Status:** in progress on branch `feat/v2-dev` (cut from the `v1.0.0` tag).
 
 ---
 

@@ -8,9 +8,9 @@
 
 ---
 
-- [ ] **M0-01 · Branch and tag**
-  - Tag the v1 hand-in commit `v1.0.0` on `main`. Create branch `v2` from it. All v2 work
-    merges into `v2` via PRs per milestone (`v2/m1-trust`, …).
+- [x] **M0-01 · Branch and tag**
+  - Tag the v1 hand-in commit `v1.0.0` on `main`. Create branch `feat/v2-dev` from it. All v2
+    work lands there, one commit per work package ([10 §4](../10-quality.md)).
   - Done when: tag and branch exist, `docs/v2/README.md` status says *in progress*.
 
 - [ ] **M0-02 · Move the outbox into service-kit**
