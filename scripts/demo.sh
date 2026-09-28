@@ -48,12 +48,14 @@ api() { # api METHOD PATH [JSON]
   curl "${args[@]}"
 }
 
-login() {
-  TOKEN=$(curl -sS -f "$GATEWAY/api/v1/auth/login" -H 'content-type: application/json' \
-    -d "$(jq -nc --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p}')" | jq -r .accessToken) \
+login() { # token from Keycloak: client routine-cli (password grant, for scripts only – the web app uses the code flow)
+  TOKEN=$(curl -sS -f "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" -d grant_type=password -d client_id=routine-cli \
+    --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASSWORD" | jq -r .access_token) \
     || fail "Login failed – is the system running? (docker compose up -d --wait)"
   [[ -n $TOKEN && $TOKEN != null ]] || fail "no token received"
 }
+
+user_id() { curl -sS -H "authorization: Bearer $TOKEN" "$GATEWAY/auth/realms/routine/protocol/openid-connect/userinfo" | jq -r .sub; }
 
 create_routine() { # create_routine JSON → prints id (routine is activated)
   local response id
@@ -255,7 +257,7 @@ scenario_failover() {
   ok "Raft elected a new leader, clients reconnected to another node – $leader rejoined"
 
   step "2. Services: kill one replica of every platform service – under traffic"
-  for service in gateway web identity-service routine-service task-service notification-service integration-worker; do
+  for service in gateway web keycloak routine-service task-service notification-service integration-worker; do
     container=$(docker compose ps -q "$service" | head -1)
     docker kill "$container" >/dev/null
     info "killed $(docker inspect -f '{{.Name}}' "$container" | tr -d /)"
@@ -263,18 +265,18 @@ scenario_failover() {
   codes=$(for _ in $(seq 1 100); do curl -s -o /dev/null -w '%{http_code}\n' -H "authorization: Bearer $TOKEN" "$GATEWAY/api/v1/routines"; done | sort | uniq -c | xargs)
   info "100 × GET /api/v1/routines → $codes"
   [[ $codes == "100 200" ]] || fail "requests failed while a replica was gone"
-  login && ok "new login (identity-service replica 2)"
+  login && ok "new sign-in (Keycloak replica 2)"
   eid=$(trigger "$rid")
   wait_for "$eid" 60 COMPLETED
   docker compose up -d --no-build --wait >/dev/null 2>&1 || fail "replicas could not be restarted"
   ok "the surviving replicas carried the load – replicas restarted"
 
-  step "3. Identity: stop every identity-service replica"
-  docker compose stop identity-service >/dev/null 2>&1
+  step "3. Identity: stop every Keycloak replica"
+  docker compose stop keycloak >/dev/null 2>&1
   info "GET /api/v1/routines (signed in) → HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $TOKEN" "$GATEWAY/api/v1/routines")"
-  info "POST /api/v1/auth/login         → HTTP $(curl -s -o /dev/null -w '%{http_code}' "$GATEWAY/api/v1/auth/login" -H 'content-type: application/json' -d '{}')"
-  docker compose up -d --no-build --wait identity-service >/dev/null 2>&1 || fail "identity-service could not be started"
-  ok "signed-in users keep working, only new logins wait (503 = retry later)"
+  info "new sign-in (token endpoint)     → HTTP $(curl -s -o /dev/null -w '%{http_code}' "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" -d grant_type=password -d client_id=routine-cli -d "username=$EMAIL" -d "password=$PASSWORD")"
+  docker compose up -d --no-build --wait keycloak >/dev/null 2>&1 || fail "keycloak could not be started"
+  ok "signed-in users keep working, only new sign-ins wait until Keycloak is back"
   note "Beyond the 10-minute key cache too: services fall back to the last fetched keys (libs/service-kit/test/auth.test.ts)"
 }
 
@@ -294,7 +296,7 @@ scenario_idempotency() {
 
   step "b) The same ActionRequested message is delivered twice"
   action_id=$(execution "$first" | jq -r '.actions[0].id')
-  owner=$(api GET /api/v1/auth/me | jq -r .id)
+  owner=$(user_id)
   before=$(count /api/v1/tasks)
   envelope=$(jq -nc --arg mid "$(uuid)" --arg aid "$action_id" --arg eid "$first" --arg rid "$rid" --arg owner "$owner" '{
     messageId: $mid, type: "ActionRequested", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $eid,

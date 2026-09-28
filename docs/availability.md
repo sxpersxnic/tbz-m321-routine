@@ -18,7 +18,7 @@ flowchart LR
     Client([Browser / curl]) -->|:8080| EDGE[edge · nginx]
     EDGE --> GW1[gateway 1] & GW2[gateway 2]
     GW1 & GW2 --> WEB[web ×2]
-    GW1 & GW2 --> ID[identity-service ×2]
+    EDGE -->|/auth| KC[Keycloak ×2]
     GW1 & GW2 --> RS[routine-service ×2]
     GW1 & GW2 --> TS[task-service ×2]
     GW1 & GW2 --> NS[notification-service ×2]
@@ -35,9 +35,9 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | 1 | **RabbitMQ** | 1 node | No action was dispatched and no result arrived. Every execution stalled (the outbox buffered, nothing moved on) | 3-node cluster (`rabbitmq-1..3`), quorum queues with 3 replicas, clients know all nodes | `failover` step 1: the queue leader is killed mid-run, the run still completes |
 | 2 | **Classic DLQ / retry / unrouted queues** | classic queues (live on one node) | While their node was down, publishes to them were *confirmed and dropped*: silent loss of retries and dead letters | All are quorum queues now (`definitions.json`, `broker.ts`). DLQs have `x-delivery-limit: -1` so peeking never drops a message | `/api/queues`: 29/29 queues quorum, 3 replicas |
-| 3 | **Token key cache** (code) | jose refetched the JWKS every 10 min and failed hard | identity-service down for more than 10 min → **every** API call on **every** service returned 401 | Last-known-good key set: if the refresh fails, the last fetched keys keep verifying (`auth.ts`) | `libs/service-kit/test/auth.test.ts` |
+| 3 | **Token key cache** (code) | jose refetched the JWKS every 10 min and failed hard | identity provider down for more than 10 min → **every** API call on **every** service returned 401 | Last-known-good key set: if the refresh fails, the last fetched keys keep verifying (`auth.ts`) | `libs/service-kit/test/auth.test.ts` |
 | 4 | **gateway** | 1 instance, owned the public port | UI and API unreachable | 2 replicas behind the `edge` load balancer; the gateway retries idempotent requests when a replica drops a connection | `failover` step 2: 100/100 requests OK while a gateway is killed |
-| 5 | **identity-service** | 1 instance | No login, no JWKS for services that start up | 2 replicas; they share the signing key through `identity-db` | `failover` step 2 (new login after a kill) and step 3 |
+| 5 | **identity** (then identity-service, now Keycloak) | 1 instance | No sign-in, no JWKS for services that start up | Keycloak runs as 2 replicas that form one cluster: they find each other through `keycloak-db` (JDBC_PING) and replicate sessions, so a sign-in survives the loss of either replica | `failover` step 2 (new sign-in after a kill) and step 3 |
 | 6 | **routine-service** | 1 instance | No API for routines, no orchestration, no scheduler | 2 replicas; outbox relay, scheduler and migrations were already replica-safe (`SKIP LOCKED`, unique slots, advisory lock) | `failover` step 2 |
 | 7 | **task- / notification-service** | 1 instance each | Their actions waited, their API was down | 2 replicas each, competing consumers on the same queue | `failover` step 2 |
 | 8 | **web** | 1 instance | UI unreachable | 2 replicas | `failover` step 2 |
@@ -69,9 +69,9 @@ is gone moves on to the next one. POST/PATCH/DELETE requests are never repeated 
 failover cannot double a write.
 
 **Key cache.** jose treats its `cacheMaxAge` as a hard expiry: once the cache is stale, it refetches *before* it checks
-the cached keys, and it fails if identity-service is unreachable. The verifier now remembers the last successfully
+the cached keys, and it fails if the identity provider is unreachable. The verifier now remembers the last successfully
 fetched key set and falls back to it. After a failed refresh it waits 5 s before the next attempt, so requests do not
-each wait for a timeout. It still rejects a key that a *reachable* identity-service no longer publishes, so key rotation
+each wait for a timeout. It still rejects a key that a *reachable* Keycloak no longer publishes, so key rotation
 keeps working.
 
 ## 3. What remains, on purpose
@@ -92,8 +92,15 @@ Limits of the fixes:
   replicas (a few seconds). A node lost in that window takes the queues it led with it until it is back.
   `deploy/deploy.sh` therefore adds the replicas explicitly and waits for 3 per queue, and `demo.sh failover`
   waits for them too.
-* **Cold start during an identity outage.** A service replica that *starts* while identity-service is down has not
-  fetched any keys yet and rejects tokens until identity-service is back. Replicas that were already running keep
+* **Keycloak outage longer than a token.** Services keep accepting valid tokens, but access tokens live 5 minutes:
+  if Keycloak stays down past that, the web client cannot renew and signs the user out when the token expires.
+  Scripts' tokens (`routine-cli`) live 30 minutes.
+* **Keycloak replica failure.** The request that was in flight on the lost replica can fail (the edge answers
+  `503` + `Retry-After`); the next ones reach the surviving replica with the session intact. The web client retries a
+  failed token renewal every 5 s. Two replicas tolerate one failure – a second one shortly after the first
+  replica rejoined (before the cluster re-replicated its state) loses the sign-ins of that window.
+* **Cold start during an identity outage.** A service replica that *starts* while Keycloak is down has not
+  fetched any keys yet and rejects tokens until Keycloak is back. Replicas that were already running keep
   working.
 * **Moving from the single-node broker** starts the cluster with new volumes (`rabbitmq-1-data`…). Messages still in the
   old broker are not carried over. Drain the queues before switching, then remove the old volume with
@@ -111,6 +118,6 @@ Limits of the fixes:
 
 ```bash
 docker compose up -d --build --wait
-scripts/demo.sh failover   # kill the broker leader mid-run, kill one replica of every service under traffic, stop identity
+scripts/demo.sh failover   # kill the broker leader mid-run, kill one replica of every service under traffic, stop Keycloak
 npm test                   # includes the key-cache fallback (libs/service-kit/test/auth.test.ts)
 ```

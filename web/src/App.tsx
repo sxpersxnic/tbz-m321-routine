@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { sessionStore, api } from './api.ts';
+import { api } from './api.ts';
+import { signOut } from './auth.ts';
 import { Icon, ThemeToggle } from './components/ui.tsx';
 import { matchRoute, useReachable, useRoute, usePolling, useSession } from './hooks.ts';
 import { Dashboard } from './pages/Dashboard.tsx';
@@ -131,7 +132,7 @@ function Shell() {
           </div>
           <div className="foot-actions" role="group" aria-label="Account">
             <ThemeToggle />
-            <button type="button" className="btn plain small icon-only" onClick={() => sessionStore.set(null)} title="Sign out" aria-label="Sign out">
+            <button type="button" className="btn plain small icon-only" onClick={() => void signOut()} title="Sign out" aria-label="Sign out">
               <Icon name="logout" size={16} />
             </button>
           </div>

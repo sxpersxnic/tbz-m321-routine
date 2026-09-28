@@ -11,9 +11,10 @@ import {
   type JWKSCacheInput,
   type JWTVerifyGetKey,
 } from 'jose';
+import { env } from './config.ts';
 import { HttpError } from './errors.ts';
 
-export const JWT_ISSUER = 'routine-identity';
+/** Audience every access token for the API must carry (Keycloak: audience mapper on the clients). */
 export const JWT_AUDIENCE = 'routine-api';
 
 export interface AuthUser {
@@ -33,6 +34,10 @@ export interface TokenVerifier {
 }
 
 export interface TokenVerifierOptions {
+  /** Expected `iss` – the realm URL of the identity provider (default: env JWT_ISSUER, required). */
+  issuer?: string;
+  /** Expected `aud` (default: env JWT_AUDIENCE or `routine-api`). */
+  audience?: string;
   /** Age after which fetched keys are refreshed from the identity service (default 10 min). */
   cacheMaxAgeMs?: number;
   /** Pause between refresh attempts while the identity service is unreachable (default 5 s). */
@@ -42,7 +47,7 @@ export interface TokenVerifierOptions {
 }
 
 /**
- * Verifies RS256 access tokens against the identity service's public JWKS.
+ * Verifies RS256 access tokens of the identity provider (Keycloak) against its public JWKS.
  *
  * Keys are fetched lazily and refreshed every `cacheMaxAgeMs`. If a refresh fails because the
  * identity service is unreachable, the last successfully fetched key set keeps verifying tokens –
@@ -51,6 +56,8 @@ export interface TokenVerifierOptions {
  */
 export function createTokenVerifier(jwksUrl: string, options: TokenVerifierOptions = {}): TokenVerifier {
   const { cacheMaxAgeMs = 10 * 60_000, retryAfterMs = 5_000 } = options;
+  const issuer = options.issuer ?? env('JWT_ISSUER');
+  const audience = options.audience ?? env('JWT_AUDIENCE', JWT_AUDIENCE);
   const cache: Partial<ExportedJWKSCache> = {}; // jose writes every successfully fetched key set here
   const remote = createRemoteJWKSet(new URL(jwksUrl), {
     cooldownDuration: 5_000,
@@ -83,7 +90,7 @@ export function createTokenVerifier(jwksUrl: string, options: TokenVerifierOptio
 
   return {
     async verify(token) {
-      const { payload } = await jwtVerify(token, keys, { issuer: JWT_ISSUER, audience: JWT_AUDIENCE });
+      const { payload } = await jwtVerify(token, keys, { issuer, audience });
       if (!payload.sub) throw new Error('token has no subject');
       return {
         id: payload.sub,

@@ -696,7 +696,8 @@ docker compose down -v                # stop and delete data
 
 | | URL |
 | --- | --- |
-| Web UI & API (gateway) | <http://localhost:8080> – sign in with `demo@routine.local` / `demo12345` |
+| Web UI & API (gateway) | <http://localhost:8080> – **Try the demo**, then sign in on Keycloak's page with `demo@routine.local` / `demo12345` |
+| Keycloak (identity provider) | <http://localhost:8080/auth/admin> – `admin` / `admin` (development only), realm `routine` |
 | RabbitMQ management | <http://localhost:15672> – `routine` / `routine` (cluster nodes 2 and 3: `:15673`, `:15674`) |
 | Jaeger (distributed tracing) | <http://localhost:16686> |
 | Mock external APIs | <http://localhost:8090> |
@@ -707,11 +708,11 @@ docker compose down -v                # stop and delete data
 compose.yaml                 whole system (25 containers: 2 replicas per service, 3 broker nodes)
 contracts/                   OpenAPI, AsyncAPI, JSON Schemas (independent of the services)
 infra/rabbitmq/              broker topology and cluster as code
-infra/edge/                  load balancer in front of the gateway replicas
+infra/edge/                  load balancer in front of the gateway replicas (and Keycloak under /auth)
+infra/keycloak/              realm "routine" as code: clients, policies, demo user
 libs/service-kit/            technical chassis (logging, HTTP, DB, broker, auth, tracing) – no domain models
 services/
   gateway/                   API gateway (single entry point)
-  identity-service/          users, login, JWT/JWKS
   routine-service/           routines, orchestration, scheduler, outbox
   task-service/              tasks and task lists (action task.create)
   notification-service/      inbox (notification.send, execution events)

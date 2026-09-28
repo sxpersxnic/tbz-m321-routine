@@ -7,8 +7,9 @@ This document describes how the platform outlined in the [README](../README.md) 
 ```mermaid
 flowchart LR
     Client([Browser / curl]) -->|HTTPS/JSON| EDGE[Edge LB] --> GW[API Gateway ×2]
+    EDGE -->|/auth · OpenID Connect| KC[Keycloak ×2<br/>realm routine]
     GW -->|/ static UI| WEB[Web client]
-    GW -->|/auth| ID[Identity Service]
+    GW -. token keys JWKS .-> KC
     GW -->|/routines /executions| RS[Routine Service]
     GW -->|/tasks| TS[Task Service]
     GW -->|/notifications| NS[Notification Service]
@@ -21,7 +22,7 @@ flowchart LR
     MB --> RS
     IW1 -->|HTTP + Idempotency-Key| EXT[(Mock External APIs)]
 
-    ID --- IDDB[(identity-db)]
+    KC --- KCDB[(keycloak-db)]
     RS --- RSDB[(routine-db)]
     TS --- TSDB[(task-db)]
     NS --- NSDB[(notification-db)]
@@ -42,7 +43,7 @@ so the browser only ever sees one origin (no CORS), and the client shares no cod
 | **edge** | Load balancer on the public port, spreads requests over the gateway replicas; config only (nginx) | – (stateless) | HTTP |
 | **gateway** | Single entry point, routing, token check at the edge, correlation ID, system status | – (stateless) | HTTP |
 | **web** | Web client (React + Vite, served by nginx); talks to the API only through the gateway | – (static) | HTTP |
-| **identity-service** | Users, login, issuing RS256 tokens, JWKS | `users`, `signing_keys` | HTTP |
+| **keycloak** | Identity provider (Keycloak 26, *configured*, not written by us): users, sign-in and registration pages, tokens, keys. Realm `routine` as code: `infra/keycloak/realm-routine.json` | its own `keycloak-db` | OpenID Connect over HTTP |
 | **routine-service** | Manages routines, orchestrates executions, schedule, status | `routines`, `executions`, `execution_actions`, `execution_log`, `outbox` | HTTP, publishes commands/events, consumes results |
 | **task-service** | Task system with lists; executes `task.create` | `tasks`, `task_lists` | HTTP, consumes actions |
 | **notification-service** | Inbox; executes `notification.send`, reacts to execution events | `notifications` | HTTP, consumes actions + events |
@@ -59,7 +60,8 @@ needs a new binding – no deployment of the routine service (apart from the cat
 | From → to | Kind | Purpose |
 | --- | --- | --- |
 | Client → gateway → services | synchronous HTTP | user requests, CRUD, status, login |
-| Services → identity-service (JWKS) | synchronous HTTP, cached | token verification (key fetch only, not per request) |
+| Browser ↔ Keycloak (via the edge, `/auth`) | OpenID Connect, Authorization Code + PKCE | sign-in, registration, token renewal |
+| Services → Keycloak (JWKS) | synchronous HTTP, cached | token verification (key fetch only, not per request) |
 | routine-service → workers | asynchronous **command** `ActionRequested` (topic `routine.actions`) | executing an action |
 | Workers → routine-service | asynchronous **event** `ActionCompleted/Failed/RetryScheduled` | reporting a result |
 | routine-service → everyone | asynchronous **event** `ExecutionCompleted/Failed` (pub/sub) | the notification service reacts without the producer knowing it |
@@ -142,7 +144,7 @@ Modelled on the *Scripting* actions of Apple's Shortcuts, without changing the s
 | Broker restart | `amqp-connection-manager` reconnects and re-registers consumers automatically | `broker.ts` |
 | Broker node fails | 3-node cluster; quorum queues (retry queues and DLQs too) keep a replica on every node and elect a new leader; clients know all nodes and move on | `rabbitmq.conf`, `broker.ts` |
 | Service replica fails | 2 replicas per service; the edge and the gateway send the next request to a surviving replica | `compose.yaml`, `infra/edge/` |
-| Identity service unreachable | Token check falls back to the last fetched key set instead of failing after the cache age | `service-kit/src/auth.ts` |
+| Keycloak unreachable | Token check falls back to the last fetched key set instead of failing after the cache age; two clustered Keycloak replicas | `service-kit/src/auth.ts` |
 | Several scheduler replicas | `FOR UPDATE SKIP LOCKED` + `UNIQUE (routine_id, scheduled_for)` | `scheduler.ts` |
 | Duplicate external side effects | `Idempotency-Key: <actionId>` sent to external APIs | `integration-worker/src/actions.ts` |
 
@@ -157,7 +159,7 @@ The integration-worker is stateless (its only state is in its own DB). Replicas 
 docker compose up -d --scale integration-worker=5
 ```
 
-routine-service, task-service, notification-service, identity-service, gateway and web run as **two replicas** each
+routine-service, task-service, notification-service, keycloak, gateway and web run as **two replicas** each
 (`SERVICE_REPLICAS`), which covers availability more than load: all background processes (outbox relay, scheduler,
 migrations) are replica-safe through `SKIP LOCKED` or advisory locks.
 
@@ -178,17 +180,43 @@ migrations) are replica-safe through `SKIP LOCKED` or advisory locks.
 
 ## 8. Security
 
-* A standalone **identity service** issues RS256 JWTs; the private key never leaves it.
-* The gateway **and** every service verify the token themselves (defence in depth) against the public JWKS.
-* **Tenant isolation**: every query filters on `owner_id = sub`; other users' resources return 404.
-* Passwords are hashed with scrypt; unknown users and wrong passwords get an identical response – in timing too
-  (unknown emails are checked against a dummy hash, otherwise the response time would reveal registered addresses).
+**Identity provider: Keycloak.** Users, passwords, sign-in and registration belong to Keycloak (realm `routine`,
+imported from `infra/keycloak/realm-routine.json` on first start). The platform never sees a password:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser (web client)
+    participant K as Keycloak (realm routine)
+    participant G as Gateway / services
+    B->>B: random code_verifier, code_challenge = SHA-256(verifier)
+    B->>K: /auth/realms/routine/…/auth?client_id=routine-web&code_challenge=…&state=…
+    K-->>B: sign-in page – the password is typed here only
+    B->>K: e-mail + password
+    K-->>B: redirect back to the app with ?code&state
+    B->>K: POST …/token (code + code_verifier)
+    K-->>B: access token (RS256, 5 min, aud routine-api) + refresh token
+    B->>G: API call, Authorization: Bearer <access token>
+    G->>G: signature (JWKS, cached), iss, aud, exp
+    Note over B,K: before the access token expires: refresh token → new access token, in the background
+```
+
+* **Clients** (`realm-routine.json`): `routine-web` – public client, Authorization Code flow with **PKCE (S256)**, no
+  password grant, redirect only back to the platform's own URL. `routine-cli` – password grant for the demo scripts and
+  CI only, never used by the browser.
+* **Realm policy**: password length ≥ 8 and not the user name, brute-force protection (lock after 10 failures),
+  registration with e-mail as user name. Keycloak hashes passwords with Argon2id and signs tokens with keys that never leave it.
+* The gateway **and** every service verify each token themselves (defence in depth): signature against Keycloak's
+  public JWKS, `iss` = the realm URL (`JWT_ISSUER`), `aud` = `routine-api` (audience mapper on the clients), expiry.
+* **Tenant isolation**: every query filters on `owner_id = sub` (the Keycloak user id); other users' resources return 404.
+* Signing out ends the Keycloak session too (RP-initiated logout), so the next sign-in asks for the password again.
 * `http.request` only reaches hosts on the allow-list (`HTTP_ALLOWED_HOSTS`) → no SSRF against internal services. Redirects
   are followed manually and every target is checked again; responses are truncated after 256 KiB.
 * **Webhook triggers** are the only unauthenticated write: the credential is a 256-bit random token in the path
   (unique index, stored per routine). Unknown tokens and non-webhook routines both answer 404, the response reveals
   only the execution ID, bodies are capped at 64 KiB, and the owner can rotate the token, which invalidates the old URL at once.
-* Services and databases are not reachable from the host – only the gateway is (plus tools for the demo).
+* Services and databases are not reachable from the host – only the edge is (plus tools for the demo). The Keycloak
+  admin console (`/auth/admin`) uses `admin`/`admin` in `compose.yaml` (development); the VM deployment generates the password.
 
 ## 9. Interface evolution
 
@@ -213,6 +241,7 @@ phase against the JSON Schemas.
 | TypeScript on Node 24 (type stripping, no build step) | Fast iteration, good libraries for AMQP/OTel | Java/Spring, .NET |
 | RabbitMQ 4 (quorum queues) | Commands with routing, acks, DLX/TTL for retries, management UI for the demo | Kafka (a log rather than a queue, retries harder) |
 | PostgreSQL per service | Autonomous data, transactions for outbox and idempotency | shared DB (violates autonomy) |
+| Keycloak as identity provider (OIDC, code flow + PKCE) | A proven identity provider instead of our own password and token code: hashing, brute-force protection, registration, sessions, key rotation, standard protocol any client understands | own identity service (earlier version of this project), Auth0 / Cognito (external SaaS, not self-hosted) |
 | Orchestration in the routine service | Steps, dependencies, data flow, central status | pure choreography |
 | Topology as code (`definitions.json`) | Queues exist before consumers run → no message loss | consumers declare their own queues |
 | Web client as its own service (React, Vite, nginx) | UI builds and deploys independently; nginx serves static files efficiently | serve the UI from the gateway |

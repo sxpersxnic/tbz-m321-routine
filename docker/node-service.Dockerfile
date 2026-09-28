@@ -8,7 +8,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY libs/service-kit/package.json libs/service-kit/
 COPY services/gateway/package.json services/gateway/
-COPY services/identity-service/package.json services/identity-service/
 COPY services/routine-service/package.json services/routine-service/
 COPY services/task-service/package.json services/task-service/
 COPY services/notification-service/package.json services/notification-service/

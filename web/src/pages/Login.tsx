@@ -1,36 +1,29 @@
-import { useState, type FormEvent } from 'react';
-import { api, sessionStore } from '../api.ts';
+import { useState } from 'react';
+import { signIn, takeSignInError, type SignInOptions } from '../auth.ts';
 import { Icon, ThemeToggle } from '../components/ui.tsx';
 import { ActionGlyph } from '../components/visual.tsx';
 
 const DEMO = { email: 'demo@routine.local', password: 'demo12345' };
 
+type Action = 'demo' | 'sign-in' | 'register';
+
+/** Landing page. Passwords are typed on Keycloak's page, never here (OpenID Connect, see auth.ts). */
 export function Login() {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [reveal, setReveal] = useState(false);
-  const [error, setError] = useState<string>();
-  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(takeSignInError);
+  const [busy, setBusy] = useState<Action>();
 
-  async function signIn(credentials: { email: string; password: string }, register = false) {
-    setBusy(true);
+  function start(action: Action, options: SignInOptions) {
+    setBusy(action);
     setError(undefined);
-    try {
-      if (register) await api.register(credentials.email, credentials.password, displayName || undefined);
-      sessionStore.set(await api.login(credentials.email, credentials.password));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setBusy(false);
-    }
+    // on success the browser leaves for Keycloak; a failure means Keycloak did not answer
+    signIn(options).catch(() => {
+      setBusy(undefined);
+      setError('Sign-in is unavailable right now. Try again in a moment.');
+    });
   }
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    void signIn({ email, password }, mode === 'register');
-  }
+  const label = (action: Action, text: string) =>
+    busy === action ? <><span className="spinner" /><span className="sr-only">Please wait</span></> : text;
 
   return (
     // <main>: without a landmark, screen-reader users cannot jump to the form
@@ -64,53 +57,29 @@ export function Login() {
       </section>
       <div className="login-side">
         <div className="login-theme"><ThemeToggle withLabel /></div>
-        <form className="login-card" onSubmit={submit}>
-          <h2>{mode === 'login' ? 'Welcome back' : 'Create account'}</h2>
-          {mode === 'login' && (
-            <>
-              <button type="button" className="btn primary large block" disabled={busy} onClick={() => void signIn(DEMO)}>
-                <Icon name="play" size={16} /> Try the demo
-              </button>
-              <div className="divider"><span>or</span></div>
-            </>
-          )}
-          {mode === 'register' && (
-            <label className="field">
-              <span>Name</span>
-              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} autoComplete="name" />
-            </label>
-          )}
-          <label className="field">
-            <span>Email</span>
-            <input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
-          </label>
-          <label className="field">
-            <span>Password</span>
-            <span className="password">
-              <input type={reveal ? 'text' : 'password'} required minLength={8} value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
-              <button type="button" className="btn plain icon-only" onClick={() => setReveal(!reveal)}
-                aria-label={reveal ? 'Hide password' : 'Show password'} aria-pressed={reveal}>
-                <Icon name={reveal ? 'eye-off' : 'eye'} size={16} />
-              </button>
-            </span>
-            {mode === 'register' && <small className="muted">At least 8 characters.</small>}
-          </label>
-          {error && <p className="error-note" role="alert">{error}</p>}
-          <button type="submit" className={`btn block ${mode === 'register' ? 'primary' : ''}`} disabled={busy}>
-            {busy ? <><span className="spinner" /><span className="sr-only">Please wait</span></> : mode === 'login' ? 'Sign in' : 'Sign up'}
+        <div className="login-card">
+          <h2>Welcome</h2>
+          <button type="button" className="btn primary large block" disabled={busy !== undefined}
+            onClick={() => start('demo', { loginHint: DEMO.email })}>
+            {busy === 'demo' ? label('demo', '') : <><Icon name="play" size={16} /> Try the demo</>}
           </button>
+          <p className="muted small center">Demo password: <code>{DEMO.password}</code></p>
+          <div className="divider"><span>or</span></div>
+          <button type="button" className="btn block" disabled={busy !== undefined} onClick={() => start('sign-in', {})}>
+            {label('sign-in', 'Sign in')}
+          </button>
+          {error && <p className="error-note" role="alert">{error}</p>}
           <p className="muted small center">
-            {mode === 'login' ? 'No account yet? ' : 'Already registered? '}
-            <button type="button" className="link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-              {mode === 'login' ? 'Sign up' : 'Sign in'}
+            No account yet?{' '}
+            <button type="button" className="link" disabled={busy !== undefined} onClick={() => start('register', { register: true })}>
+              Sign up
             </button>
           </p>
           <p className="tech-note">
             A school project (module 321): distributed services that work together asynchronously through a message broker.
+            Sign-in by Keycloak (OpenID Connect).
           </p>
-        </form>
+        </div>
       </div>
     </main>
   );

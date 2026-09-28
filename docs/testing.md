@@ -11,7 +11,8 @@ scripts/demo.sh status                 # every service "up"?
 
 | What | Where | Login |
 | --- | --- | --- |
-| Web UI and API | <http://localhost:8080> | `demo@routine.local` / `demo12345` (or **Try the demo**) |
+| Web UI and API | <http://localhost:8080> | **Try the demo** → on Keycloak's page `demo@routine.local` / `demo12345` |
+| Keycloak admin console | <http://localhost:8080/auth/admin> | `admin` / `admin` – realm `routine` |
 | RabbitMQ management | <http://localhost:15672> | `routine` / `routine` |
 | Jaeger (traces) | <http://localhost:16686> | – |
 | Mock external APIs | <http://localhost:8090> | – |
@@ -30,8 +31,12 @@ PORT=5391 npm --prefix web run dev             # if 5173 is taken
 GATEWAY_URL=http://other-host:8080 npm --prefix web run dev
 ```
 
-Use your own accounts for experiments: register with any address ending in `@test.local`,
-and remove all of them (with their data) afterwards with `scripts/cleanup-test-users.sh`.
+Use your own accounts for experiments: **Sign up** on the landing page opens Keycloak's registration – use any
+address ending in `@test.local`, and remove all of them (from Keycloak, with their data) afterwards with
+`scripts/cleanup-test-users.sh`.
+
+`npm run dev` signs in against the Keycloak of the running system (<http://localhost:8080/auth>); the realm allows
+redirects back to <http://localhost:5173>. Another Keycloak: `VITE_KEYCLOAK_URL=http://other-host:8080/auth`.
 
 ## 3. Try each kind of trigger
 

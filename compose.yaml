@@ -2,6 +2,7 @@
 #   docker compose up -d --build --wait
 #
 # UI / API:        http://localhost:8080   (edge → gateway replicas → web + services)
+# Keycloak admin:  http://localhost:8080/auth/admin   (admin / admin – development only)
 # RabbitMQ:        http://localhost:15672   (routine / routine; nodes 2 and 3 on :15673 / :15674)
 # Jaeger tracing:  http://localhost:16686
 # Mock external:   http://localhost:8090
@@ -26,7 +27,9 @@ x-common-env: &common-env
   LOG_LEVEL: ${LOG_LEVEL:-info}
   # every broker node – a client moves on to the next node when its node fails
   AMQP_URL: amqp://routine:routine@rabbitmq-1:5672,amqp://routine:routine@rabbitmq-2:5672,amqp://routine:routine@rabbitmq-3:5672
-  JWKS_URL: http://identity-service:3000/.well-known/jwks.json
+  # Keycloak: keys fetched inside the network, `iss` is the public realm URL the browser sees
+  JWKS_URL: http://keycloak:8080/auth/realms/routine/protocol/openid-connect/certs
+  JWT_ISSUER: ${PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8080}}/auth/realms/routine
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   OTEL_TRACES_EXPORTER: otlp
   OTEL_METRICS_EXPORTER: none
@@ -105,10 +108,10 @@ services:
       - "16686:16686"
 
   # one database per service – no service can reach another service's data
-  identity-db:
+  keycloak-db:
     <<: *postgres
-    environment: { POSTGRES_USER: identity, POSTGRES_PASSWORD: identity, POSTGRES_DB: identity }
-    volumes: [identity-db-data:/var/lib/postgresql/data]
+    environment: { POSTGRES_USER: keycloak, POSTGRES_PASSWORD: keycloak, POSTGRES_DB: keycloak }
+    volumes: [keycloak-db-data:/var/lib/postgresql/data]
   routine-db:
     <<: *postgres
     environment: { POSTGRES_USER: routine, POSTGRES_PASSWORD: routine, POSTGRES_DB: routine }
@@ -163,7 +166,6 @@ services:
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: gateway
-      IDENTITY_URL: http://identity-service:3000
       ROUTINE_URL: http://routine-service:3000
       TASK_URL: http://task-service:3000
       NOTIFICATION_URL: http://notification-service:3000
@@ -172,19 +174,35 @@ services:
       EXTERNAL_API_URL: http://mock-external:8090
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq-1:15672,http://rabbitmq-2:15672,http://rabbitmq-3:15672
 
-  identity-service:
-    <<: *node-service
-    build: { <<: *build, args: { SERVICE: identity-service } }
-    image: routine/identity-service:latest
+  # identity provider: users, sign-in, registration, tokens (realm "routine" as code: infra/keycloak/).
+  # Two replicas form one cluster – they find each other through their database (jdbc-ping) and share
+  # sessions, so a sign-in survives the loss of either replica.
+  keycloak:
+    build: { context: ., dockerfile: docker/keycloak.Dockerfile }
+    image: routine/keycloak:latest
+    restart: unless-stopped
     deploy: *replicated
     environment:
-      <<: *common-env
-      OTEL_SERVICE_NAME: identity-service
-      DATABASE_URL: postgres://identity:identity@identity-db:5432/identity
-      DEMO_USER_EMAIL: demo@routine.local
-      DEMO_USER_PASSWORD: demo12345
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      # every URL Keycloak hands out (issuer, token endpoint …) is this public one – services still fetch
+      # the keys from http://keycloak:8080 directly (JWKS_URL), which works whatever the hostname
+      KC_HOSTNAME: ${PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8080}}/auth
+      KC_HTTP_ENABLED: "true" # no TLS in this setup (docs/architecture.md §11)
+      KC_PROXY_HEADERS: xforwarded
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin # development only – the VM deployment generates it
+      ROUTINE_PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8080}} # allowed redirect after sign-in
+    healthcheck:
+      # the image has no curl/wget – plain bash against the management port
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
     depends_on:
-      identity-db: { condition: service_healthy }
+      keycloak-db: { condition: service_healthy }
 
   routine-service:
     <<: *node-service
@@ -272,7 +290,7 @@ volumes:
   rabbitmq-1-data:
   rabbitmq-2-data:
   rabbitmq-3-data:
-  identity-db-data:
+  keycloak-db-data:
   routine-db-data:
   task-db-data:
   notification-db-data:
