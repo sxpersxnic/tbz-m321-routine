@@ -194,6 +194,8 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin # development only – the VM deployment generates it
       ROUTINE_PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8080}} # allowed redirect after sign-in
+      # service accounts (confidential clients in the realm) – the same secret goes to the service itself
+      INTEGRATION_WORKER_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:-dev-integration-worker-secret}
     healthcheck:
       # the image has no curl/wget – plain bash against the management port
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]
@@ -261,6 +263,7 @@ services:
       <<: *common-env
       OTEL_SERVICE_NAME: integration-worker
       DATABASE_URL: postgres://integration:integration@integration-db:5432/integration
+      SERVICE_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:-dev-integration-worker-secret} # its service account (client-credentials)
       EXTERNAL_API_URL: http://mock-external:8090
       HTTP_ALLOWED_HOSTS: mock-external
       PREFETCH: ${INTEGRATION_WORKER_PREFETCH:-1}

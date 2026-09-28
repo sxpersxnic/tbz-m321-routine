@@ -94,7 +94,7 @@ home, calendar) is created the same way:
 - [ ] `deploy/stack.yml` entry with the v1 placement/update rules
 - [ ] `.github/workflows/<name>.yml` calling `_node-service.yml`, path filters like the others
 - [ ] gateway: upstream env, route prefix, probe in `/api/v1/system/status`
-- [ ] service account in `SERVICE_ACCOUNTS` if it calls `/internal` endpoints
+- [ ] service account (Keycloak client + `SERVICE_TOKEN_SECRET`, [identity-service.md §6](services/identity-service.md)) if it calls `/internal` endpoints
 - [ ] queues in `definitions.json` if it consumes fixed platform queues. Domain action queues
       are declared by the kit
 - [ ] topology component in the web (`components/topology.tsx`) knows the new node

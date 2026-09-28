@@ -6,6 +6,7 @@ export * from './db.ts';
 export * from './envelope.ts';
 export * from './errors.ts';
 export * from './http.ts';
+export * from './internal-auth.ts';
 export * from './lifecycle.ts';
 export * from './logger.ts';
 export * from './manifest.ts';

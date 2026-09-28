@@ -66,7 +66,7 @@ A missing `profiles` row means defaults. It is created on first `PATCH /me` or a
 
 | Method & path | Milestone | Purpose |
 | --- | --- | --- |
-| `POST /api/v1/auth/service-token` | M0 | `{ name, secret }` → `{ token, expiresIn }` (`aud: routine-internal`, `sub: service:<name>`, 15 min) |
+| ~~`POST /api/v1/auth/service-token`~~ | M0 | Keycloak's token endpoint instead (client-credentials), see §6 |
 | `GET /api/v1/auth/me` | M5 | + `role`, `profile`, `workspaces` (M11) |
 | `PATCH /api/v1/me` | M5 | profile fields |
 | `PUT /api/v1/me/domains` | M5 | `{ enabled: string[], order: string[] }` → emits `profile.domainsChanged` |
@@ -104,14 +104,21 @@ Produces (outbox, `domain.events`): `profile.updated` (all profile fields), `pro
 | `users.role`, demo user `admin` | Realm role `admin`, granted to the demo user in the realm file. Every signed-in user counts as `user`. |
 | `roles` claim | Protocol mapper `roles` (realm roles, multivalued) on `routine-web` and `routine-cli`. service-kit `rolesOf` also reads Keycloak's `realm_access.roles`. |
 | `ADMIN_EMAILS` | Dropped: Keycloak can't grant a role on registration by e-mail without a custom extension. Admins are granted in the admin console (`/auth/admin`). |
+| `service_accounts` table, `POST /api/v1/auth/service-token` | One **confidential client per service account** in the realm (client-credentials grant only, `access.token.lifespan` 900 s, audience mapper `routine-internal`). Services get tokens from Keycloak's token endpoint (`TOKEN_URL`, default: `JWKS_URL` with `/certs` → `/token`) through service-kit `serviceTokenProvider`. |
+| `sub: service:<name>` | Keycloak's `sub` is the service-account user's id; the service name is the token's **`azp`** (the client id). `installServiceAuth` checks `aud: routine-internal` and `azp` ∈ allowed. |
+| `SERVICE_ACCOUNTS=name:secret,…` | The realm file lists the clients; each secret is a placeholder `${<NAME>_TOKEN_SECRET}` filled from Keycloak's environment, and the same value reaches the service as `SERVICE_TOKEN_SECRET`. On VMs `deploy.sh` generates it like the other secrets. |
+
+Adding a service account = a client in `realm-routine.json` (copy `integration-worker`), the
+secret in `compose.yaml` (Keycloak and the service), `deploy/stack.yml` and `deploy.sh`
+`SECRET_NAMES`.
 
 The realm file is imported only when the realm doesn't exist yet. An existing Keycloak database
-keeps its realm: grant `admin` in the admin console there (or recreate the `keycloak-db` volume
-in a development stack).
+keeps its realm: add new roles, grants and service-account clients in the admin console there
+(or recreate the `keycloak-db` volume in a development stack).
 
 ## 8. Configuration
 
-`SERVICE_ACCOUNTS`, `ADMIN_EMAILS` (users that get `admin` on registration), v1 variables.
+v1 variables. Roles and service accounts are Keycloak configuration (§6).
 
 ## 10. Tests
 

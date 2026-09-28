@@ -194,6 +194,8 @@ services:
       # a task has the overlay (eth0) and a VM-local bridge – cluster traffic must use the overlay
       KC_CACHE_EMBEDDED_NETWORK_BIND_ADDRESS: match-interface:eth0
       ROUTINE_PUBLIC_URL: ${PUBLIC_URL:?}
+      # service accounts (confidential clients in the realm) – the same secret goes to the service itself
+      INTEGRATION_WORKER_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:?}
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]
       interval: 5s
@@ -246,6 +248,7 @@ services:
       <<: *common-env
       OTEL_SERVICE_NAME: integration-worker
       DATABASE_URL: postgres://integration:${INTEGRATION_DB_PASSWORD:?}@integration-db:5432/integration
+      SERVICE_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:?} # its service account (client-credentials)
       EXTERNAL_API_URL: http://mock-external:8090
       HTTP_ALLOWED_HOSTS: mock-external
       PREFETCH: ${INTEGRATION_WORKER_PREFETCH:-1}

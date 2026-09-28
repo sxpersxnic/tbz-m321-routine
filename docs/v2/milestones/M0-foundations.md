@@ -62,14 +62,15 @@
     the v1 Infrastructure page must keep working for non-admins, read-only).
   - Tests: non-admin `403` on an admin route.
 
-- [ ] **M0-07 · Service accounts and internal auth**
-  - identity-service: `service_accounts`, `POST /api/v1/auth/service-token`, seeding from
-    `SERVICE_ACCOUNTS`.
-  - service-kit `internal-auth.ts`: `installServiceAuth(app, allowed: string[])` for
-    `/internal/` (checks `aud: routine-internal`, `sub: service:<name>` ∈ allowed) and
+- [x] **M0-07 · Service accounts and internal auth**
+  - Keycloak: one confidential client per service account (the first: `integration-worker`),
+    client-credentials grant, secrets from the environment ([identity-service.md §6](../services/identity-service.md)).
+    (Planned as `service_accounts` + `POST /api/v1/auth/service-token` + `SERVICE_ACCOUNTS`.)
+  - service-kit `internal-auth.ts`: `installServiceAuth(app, verifier, allowed: string[])` for
+    `/internal/` (checks `aud: routine-internal`, `azp` ∈ allowed) and
     `serviceTokenProvider(name, secret)` (fetches and caches a token, refreshes at 80 % of its
     lifetime).
-  - compose + `deploy/stack.yml`: `SERVICE_ACCOUNTS` and per-service `SERVICE_TOKEN_SECRET`.
+  - compose + `deploy/stack.yml`: the account's secret for Keycloak and per-service `SERVICE_TOKEN_SECRET`.
   - Tests: user token rejected on `/internal`, service token accepted, unknown service rejected.
 
 - [ ] **M0-08 · New exchanges**
