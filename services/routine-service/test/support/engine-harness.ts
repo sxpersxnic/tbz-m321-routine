@@ -14,6 +14,7 @@ import { createHttpServer, createPool, runKitMigrations, runMigrations, withTran
 import pg from 'pg';
 import pino from 'pino';
 import { registerRoutes } from '../../src/api.ts';
+import { CatalogStore } from '../../src/catalog-store.ts';
 import { validateRoutine, type RoutineInput } from '../../src/domain/definition.ts';
 import { ExecutionEngine, type TriggerRequest } from '../../src/engine.ts';
 import { getExecution, insertRoutine, listExecutionActions, listLog, setRoutineActive, type ExecutionActionRow, type RoutineRow } from '../../src/store.ts';
@@ -107,7 +108,7 @@ export async function engineHarness() {
       app.addHook('preHandler', async (request) => {
         request.user = { id: ownerId, email: 'test@routine.local', roles: ['user'] };
       });
-      registerRoutes(app, { pool, engine });
+      registerRoutes(app, { pool, engine, catalog: new CatalogStore(pool, 0) });
       await app.ready();
       return app;
     },

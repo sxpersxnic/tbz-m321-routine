@@ -294,6 +294,41 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/InvalidRoutine' }
 
+  /api/v1/catalog:
+    get:
+      summary: Every domain's current manifest – what routines can use (docs/v2/04-domain-platform.md §4.5)
+      description: |
+        Manifests as the registry holds them (schema: contracts/schemas/domain-manifest.v1.schema.json),
+        each with `enabled` for the caller (until M5 every domain counts as enabled). The ETag
+        covers every manifest version: send If-None-Match to get 304 while nothing changed.
+      operationId: getCatalog
+      responses:
+        '200':
+          description: catalog
+          headers: { ETag: { schema: { type: string } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domains:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '../schemas/domain-manifest.v1.schema.json'
+                        - { type: object, properties: { enabled: { type: boolean } } }
+        '304': { description: unchanged since the ETag in If-None-Match }
+
+  /api/v1/routines/validate:
+    post:
+      summary: Validate a routine against the catalog without saving it
+      operationId: validateRoutine
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RoutineInput' } } } }
+      responses:
+        '200':
+          description: 'issues: what saving would refuse (empty = valid); warnings: advice'
+          content: { application/json: { schema: { type: object, properties: { issues: { type: array, items: { type: string } }, warnings: { type: array, items: { type: string } } } } } }
+
   /api/v1/routines/test-step:
     post:
       summary: '"Try this step": a test run of one step of a saved routine'

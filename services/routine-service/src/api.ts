@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { conflict, HttpError, notFound, requireUser, withContext, withTransaction, type Pool } from '@routine/service-kit';
-import { ACTION_TYPES, KNOWN_ACTION_TYPES } from './domain/action-catalog.ts';
+import type { CatalogStore } from './catalog-store.ts';
+import type { Catalog } from './domain/catalog.ts';
 import { DefinitionError, ROUTINE_COLORS, validateRoutine, type Appearance, type RoutineDefinition, type RoutineInput } from './domain/definition.ts';
 import { nextRun } from './domain/schedule.ts';
 import type { ExecutionEngine } from './engine.ts';
@@ -137,9 +138,9 @@ const statsQuery = {
 
 type RoutineBody = RoutineInput & { version?: number };
 
-function validate(input: RoutineInput): RoutineDefinition {
+function validate(input: RoutineInput, catalog: Catalog): RoutineDefinition {
   try {
-    return validateRoutine(input);
+    return validateRoutine(input, catalog);
   } catch (error) {
     if (error instanceof DefinitionError) throw new HttpError(422, 'invalid_routine', 'Routine definition is invalid', error.issues);
     throw error;
@@ -151,10 +152,36 @@ function firstRun(definition: Pick<RoutineDefinition, 'trigger'>, active: boolea
   return nextRun(definition.trigger.cron, definition.trigger.timezone, new Date());
 }
 
-export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine: ExecutionEngine }): void {
+export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine: ExecutionEngine; catalog: CatalogStore }): void {
   const { pool, engine } = deps;
 
-  app.get('/api/v1/action-types', async () => ({ items: ACTION_TYPES }));
+  // ------------------------------------------------------------ catalog (04 §4.5)
+
+  // every current manifest; the ETag changes when any domain registers a new version
+  app.get('/api/v1/catalog', async (request, reply) => {
+    requireUser(request);
+    const catalog = await deps.catalog.get();
+    const etag = `"${catalog.digest}"`;
+    reply.header('etag', etag).header('cache-control', 'private, no-cache');
+    if (request.headers['if-none-match'] === etag) return reply.status(304).send();
+    // every domain counts as enabled until the profile projection exists (M5)
+    return { domains: catalog.manifests.map((manifest) => ({ ...manifest, enabled: true })) };
+  });
+
+  // v1: the same catalog in the old shape
+  app.get('/api/v1/action-types', async () => ({ items: (await deps.catalog.get()).actionTypes() }));
+
+  // validates without saving – for the editor (and the assistant, M10)
+  app.post<{ Body: RoutineBody }>('/api/v1/routines/validate', { schema: { body: routineBodySchema } }, async (request) => {
+    requireUser(request);
+    try {
+      validateRoutine(request.body, await deps.catalog.get());
+      return { issues: [], warnings: [] };
+    } catch (error) {
+      if (error instanceof DefinitionError) return { issues: error.issues, warnings: [] };
+      throw error;
+    }
+  });
 
   // ------------------------------------------------------------ routines
 
@@ -165,7 +192,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
 
   app.post<{ Body: RoutineBody }>('/api/v1/routines', { schema: { body: routineBodySchema } }, async (request, reply) => {
     const user = requireUser(request);
-    const definition = validate(request.body);
+    const definition = validate(request.body, await deps.catalog.get());
     const routine = await withTransaction(pool, (client) => insertRoutine(client, randomUUID(), user.id, definition, user.id));
     request.log.info({ routineId: routine.id, name: routine.name }, 'routine created');
     return reply.status(201).header('location', `/api/v1/routines/${routine.id}`).send(routineDto(routine));
@@ -183,7 +210,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
     { schema: { params: routineParams, body: routineBodySchema } },
     async (request) => {
       const user = requireUser(request);
-      const definition = validate(request.body);
+      const definition = validate(request.body, await deps.catalog.get());
       const updated = await withTransaction(pool, async (client) => {
         const routine = await getRoutine(client, user.id, request.params.routineId, true);
         if (!routine) throw notFound('Routine');
@@ -291,7 +318,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
         const version = await getVersion(client, routine.id, request.params.version);
         if (!version) throw notFound('Version');
         const { active: _active, ...old } = version.definition;
-        const definition = validate(old);
+        const definition = validate(old, await deps.catalog.get());
         return updateRoutine(client, routine, definition, firstRun(definition, routine.active), { by: user.id, origin: 'restore' });
       });
       request.log.info({ routineId: restored.id, from: request.params.version, version: restored.version }, 'routine version restored');
@@ -400,7 +427,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
       const routine = await getRoutine(pool, user.id, request.body.routineId);
       if (!routine) throw notFound('Routine');
       const { action } = request.body;
-      if (!KNOWN_ACTION_TYPES.has(action.type)) throw new HttpError(422, 'invalid_routine', `unknown action type "${action.type}"`);
+      if (!(await deps.catalog.get()).capability(action.type)) throw new HttpError(422, 'invalid_routine', `unknown action type "${action.type}"`);
       // the values to resolve references with: the given run of this routine, else its last one
       const sample = request.body.sampleExecutionId
         ? await getExecution(pool, user.id, request.body.sampleExecutionId)

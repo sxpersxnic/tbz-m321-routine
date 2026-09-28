@@ -21,7 +21,7 @@ from manifests (no visible difference for v1 steps, which is the point).
     code path.
   - Tests: every acceptance/compatibility rule. Two replicas registering concurrently.
 
-- [ ] **M2-02 · Catalog API and validation against the registry**
+- [x] **M2-02 · Catalog API and validation against the registry**
   - `GET /api/v1/catalog` (ETag), `GET /api/v1/action-types` derived from it,
     `POST /api/v1/routines/validate`. `validateRoutine` takes the catalog instead of
     `ACTION_TYPES` (delete `action-catalog.ts` once nothing imports it). Param checks per

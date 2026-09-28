@@ -22,6 +22,7 @@ import {
 import { ExecutionEngine } from './engine.ts';
 import { parseActionResult, parseRegistryMessage, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
 import { registerRoutes } from './api.ts';
+import { CatalogStore } from './catalog-store.ts';
 import { Scheduler } from './scheduler.ts';
 import { BUILTIN_MANIFESTS } from './domain/builtin-manifests.ts';
 import { applyHeartbeat, applyRegistration, staleDomains, type Registration } from './registry.ts';
@@ -56,7 +57,8 @@ const app = createHttpServer({
 });
 // webhook calls carry their secret in the URL instead of a user token
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/'], ['/api/v1/hooks/']);
-registerRoutes(app, { pool, engine });
+const catalog = new CatalogStore(pool);
+registerRoutes(app, { pool, engine, catalog });
 
 // The routine service consumes its own RoutineTriggered events: triggering
 // (API/scheduler) stays fast and works even while the broker is unavailable.
@@ -80,7 +82,10 @@ async function register(registration: Registration) {
   const outcome = await applyRegistration(pool, registration);
   const domain = (registration.manifest as { domain?: unknown } | null)?.domain;
   if (outcome.kind === 'rejected') logger.warn({ domain, instance: registration.instance, reason: outcome.reason }, 'domain registration rejected');
-  else if (outcome.kind === 'accepted') logger.info({ domain, version: outcome.version, instance: registration.instance }, 'domain registered');
+  else if (outcome.kind === 'accepted') {
+    logger.info({ domain, version: outcome.version, instance: registration.instance }, 'domain registered');
+    catalog.invalidate();
+  }
   else logger.debug({ domain, outcome: outcome.kind }, 'domain registration');
 }
 
