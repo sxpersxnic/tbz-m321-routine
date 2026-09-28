@@ -1,5 +1,6 @@
 import type {
   ActionDefinition,
+  DeadLetterQueue,
   ActionType,
   Execution,
   ExecutionDetail,
@@ -204,4 +205,8 @@ export const api = {
   deleteNotification: (id: string) => send<null>('DELETE', `/api/v1/notifications/${id}`),
 
   system: () => get<SystemStatus>('/api/v1/system/status'),
+  deadLetters: async () => (await get<{ items: DeadLetterQueue[] }>('/api/v1/system/dead-letters')).items,
+  replayDeadLetters: (queue: string) => send<{ moved: number }>('POST', `/api/v1/system/dead-letters/${encodeURIComponent(queue)}/replay`),
+  discardDeadLetters: (queue: string, messageIds: string[]) =>
+    send<{ discarded: number }>('POST', `/api/v1/system/dead-letters/${encodeURIComponent(queue)}/discard`, { messageIds }),
 };

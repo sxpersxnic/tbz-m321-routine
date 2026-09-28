@@ -1,5 +1,6 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api.ts';
+import { DeadLetters } from '../components/dead-letters.tsx';
 import { useCreateRoutine } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { Sparkline, Topology } from '../components/topology.tsx';
@@ -7,7 +8,7 @@ import { ErrorNote, Icon, StatusBadge } from '../components/ui.tsx';
 import { ActionGlyph, StatusIcon } from '../components/visual.tsx';
 import { DEMO_SCENARIOS, type DemoScenario } from '../demo-scenarios.ts';
 import { JAEGER_URL, RABBITMQ_URL } from '../format.ts';
-import { usePolling } from '../hooks.ts';
+import { usePolling, useSession } from '../hooks.ts';
 import type { QueueStatus } from '../types.ts';
 
 const HISTORY = 60;
@@ -82,6 +83,7 @@ export function System() {
   // queue depth history (last 60 s), kept only in this browser tab
   const history = useRef(new Map<string, number[]>());
   const [view, setView] = useState<TopologyView>(storedView);
+  const admin = useSession()?.user.roles?.includes('admin') ?? false;
   const chooseView = (next: TopologyView) => {
     setView(next);
     try {
@@ -238,11 +240,12 @@ export function System() {
                 ))}
               </ul>
             )}
-            <p className="muted small" style={{ marginTop: 10 }}>Replay after a fix: <code>scripts/replay-dlq.sh &lt;queue&gt;</code></p>
+            {!admin && <p className="muted small" style={{ marginTop: 10 }}>Replay after a fix: <code>scripts/replay-dlq.sh &lt;queue&gt;</code></p>}
           </div>
           <DemoScenarios />
         </div>
       </div>
+      {admin && <DeadLetters />}
     </div>
   );
 }

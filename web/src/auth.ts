@@ -22,9 +22,23 @@ const manager = new UserManager({
   automaticSilentRenew: true,
 });
 
+/**
+ * The roles in the access token – as the services read them (service-kit rolesOf): `admin` from the
+ * `roles` claim or Keycloak's `realm_access.roles`. Only decides what the UI offers; the API checks.
+ */
+export function rolesOf(accessToken: string): Array<'user' | 'admin'> {
+  try {
+    const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { roles?: unknown; realm_access?: { roles?: unknown } };
+    const claimed = Array.isArray(payload.roles) ? payload.roles : Array.isArray(payload.realm_access?.roles) ? payload.realm_access.roles : [];
+    return claimed.includes('admin') ? ['user', 'admin'] : ['user'];
+  } catch {
+    return ['user'];
+  }
+}
+
 function toSession(user: OidcUser): Session {
   const { sub, email = '', name, preferred_username } = user.profile;
-  return { token: user.access_token, user: { id: sub, email, displayName: name ?? preferred_username ?? email } };
+  return { token: user.access_token, user: { id: sub, email, displayName: name ?? preferred_username ?? email, roles: rolesOf(user.access_token) } };
 }
 
 manager.events.addUserLoaded((user) => sessionStore.set(toSession(user))); // also after every renewal

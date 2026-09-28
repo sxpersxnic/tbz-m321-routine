@@ -77,7 +77,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - *Try this step* on eligible step cards. Inline result. Example values in token pills from
     the last real run (`GET /executions?routineId=&limit=1` → output lookup).
 
-- [ ] **M1-12 · Dead letters (gateway + web)**
+- [x] **M1-12 · Dead letters (gateway + web)**
   - Gateway admin endpoints ([services/gateway.md](../services/gateway.md)): list, replay, discard.
     Port the logic of `scripts/replay-dlq.sh` exactly (peek → publish → remove, abort on a
     concurrent change).

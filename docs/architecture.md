@@ -144,7 +144,7 @@ flowchart TD
     C -->|permanent: 4xx, invalid params<br/>or retries used up| D[queue.dlq]
     C -.->|ActionFailed| F[execution FAILED<br/>later steps SKIPPED]
     Q -->|crash loop:<br/>more than 10 deliveries| D
-    D -.->|after the fix:<br/>scripts/replay-dlq.sh| Q
+    D -.->|after the fix: Replay on Infrastructure<br/>or scripts/replay-dlq.sh| Q
     NR[no result within WAITING_AFTER_MS] -.-> W
 ```
 
@@ -258,7 +258,8 @@ sequenceDiagram
 
 Each phase redeploys exactly **one** service. The breaking change (going from phase 1 straight to 4) is
 demonstrated too: the legacy consumer rejects the event as permanently broken, it lands in the DLQ (not lost)
-and can be replayed with `scripts/replay-dlq.sh` after the consumer update. Contract tests check every
+and can be replayed after the consumer update – with *Replay* under Infrastructure → Dead letters (admins; the gateway's
+`POST /api/v1/system/dead-letters/:queue/replay`) or `scripts/replay-dlq.sh`, which do the same. Contract tests check every
 phase against the JSON Schemas.
 
 ## 10. Technology decisions (short ADRs)

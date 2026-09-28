@@ -26,7 +26,7 @@ Every scenario can be shown in the terminal (`scripts/demo.sh <scenario>`) or in
 | Failover | `scripts/demo.sh failover` | The RabbitMQ node leading the queues is killed mid-run → new leader, run `COMPLETED`, UI shows `2/3 nodes`. One replica of every service is killed → 100/100 requests OK, a new run completes. All Keycloak replicas stopped → signed-in users keep working, a new sign-in answers 503 (retry later) ([availability.md](availability.md)) |
 | Schedule | `scripts/demo.sh schedule` | Cron `*/15 * * * * *` fires twice |
 | Webhook | `scripts/demo.sh webhook` | An external `curl` without a user token starts a routine; the JSON body becomes step input; a retry with the same `Idempotency-Key` returns the same run; after rotating the URL the old one answers 404 |
-| Evolution | `scripts/demo.sh evolution` | ExecutionCompleted v1 → expand → consumer update → v2; the breaking change lands in the DLQ and is replayed after the fix |
+| Evolution | `scripts/demo.sh evolution` | ExecutionCompleted v1 → expand → consumer update → v2; the breaking change lands in the DLQ and is replayed after the fix – through the gateway's dead-letter API, which *Replay* on Infrastructure uses (admins) |
 | Tracing | `scripts/demo.sh trace <correlationId>` | Logs of all services for one execution, sorted by time |
 
 ### Manually in the UI (for the presentation)

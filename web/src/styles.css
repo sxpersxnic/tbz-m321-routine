@@ -428,6 +428,13 @@ a.list-row:active, button.list-row:active { background: var(--surface-3); }
 .failure-card p { margin: 0; }
 .contents { display: contents; }
 
+/* dead letters (Infrastructure, admins) */
+.dead-letters { list-style: none; margin: 0; padding: 0; }
+.dead-letters > li + li { border-top: 1px solid var(--separator); padding-top: 12px; margin-top: 12px; }
+.dead-letter-head, .dead-letter-message { display: flex; align-items: flex-start; gap: 12px; }
+.dead-letter-messages { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.dead-letter-message { overflow-wrap: anywhere; }
+
 /* routine history: one card per version, what changed in words */
 .history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .history-entry { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 18px; }

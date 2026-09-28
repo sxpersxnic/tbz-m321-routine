@@ -223,6 +223,24 @@ export interface Notification {
   readAt: string | null;
 }
 
+export interface DeadLetter {
+  messageId: string | null;
+  type: string | null;
+  error: string | null;
+  failedAt: string | null;
+  attempts: number | null;
+  routingKey: string;
+  body: unknown;
+}
+
+export interface DeadLetterQueue {
+  queue: string;
+  workQueue: string;
+  count: number;
+  /** Up to 20 messages from the head (a peek). */
+  sample: DeadLetter[];
+}
+
 export interface QueueStatus {
   name: string;
   ready: number;
@@ -244,6 +262,8 @@ export interface User {
   id: string;
   email: string;
   displayName: string;
+  /** `admin` opens the system views (dead letters …); every signed-in user is `user`. */
+  roles: Array<'user' | 'admin'>;
 }
 
 export const TERMINAL_STATUSES: ReadonlySet<ExecutionStatus> = new Set(['COMPLETED', 'FAILED']);

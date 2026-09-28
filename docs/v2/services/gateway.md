@@ -34,9 +34,9 @@ in this profile) answers `503 upstream_unavailable` with `detail: "Budget is not
 | Method & path | Milestone | Purpose |
 | --- | --- | --- |
 | `GET /api/v1/system/status` | v1 | + `domains` (from routine-service registry) |
-| `GET /api/v1/system/dead-letters` | M1 | per DLQ: `{ queue, count, sample: [{ messageId, type, error, failedAt, attempts, routingKey }] }` (peek via management API `get` with `ackmode: reject_requeue_true`, max 20) |
-| `POST /api/v1/system/dead-letters/:queue/replay` | M1 | port of `scripts/replay-dlq.sh` (peek → publish copy → remove original, stop on concurrent change). Returns `{ moved }`. |
-| `POST /api/v1/system/dead-letters/:queue/discard` | M1 | `{ messageIds }` → remove only those (peek-and-match loop) |
+| `GET /api/v1/system/dead-letters` | M1 | per DLQ: `{ queue, workQueue, count, sample: [{ messageId, type, error, failedAt, attempts, routingKey, body }] }` (peek via management API `get` with `ackmode: reject_requeue_true`, max 20) |
+| `POST /api/v1/system/dead-letters/:queue/replay` | M1 | `:queue` = the DLQ (`task-service.actions.dlq`). Port of `scripts/replay-dlq.sh` (peek → publish copy without the failure headers → remove original, `409` on a concurrent change or an unrouted copy). Returns `{ moved }`. |
+| `POST /api/v1/system/dead-letters/:queue/discard` | M1 | `{ messageIds }` → removes only those: one walk through the DLQ, a kept message is copied to the tail before its original is removed (order kept, nothing lost on a crash). Returns `{ discarded }`. |
 | `POST /api/v1/system/services/:name/consuming` | M12 | `{ paused: boolean }` → forwards to `POST /internal/v1/chaos/consuming` on every replica of that service (DNS lookup of all replicas) |
 | `POST /api/v1/system/services/:name/chaos` | M12 | `{ failureRate }` → `POST /internal/v1/chaos/failure-rate` on every replica |
 

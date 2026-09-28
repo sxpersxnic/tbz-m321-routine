@@ -476,8 +476,8 @@ scenario_evolution() {
   step "Update the consumer – the tolerant reader reads v2 (only notification-service redeployed)"
   recreate notification-service COMPLETION_EVENT_READER=tolerant
   out=$(evolution_run); echo "$out"; [[ $out == *"All actions succeeded"* ]] || fail "the new consumer does not use the v2 fields"
-  info "Replay the event from the DLQ:"
-  scripts/replay-dlq.sh notification-service.execution-events | sed 's/^/    /'
+  info "Replay the event from the DLQ – what \"Replay\" on Infrastructure → Dead letters does (scripts/replay-dlq.sh does the same from a terminal):"
+  api POST /api/v1/system/dead-letters/notification-service.execution-events.dlq/replay | jq -r '"    \(.moved) message(s) moved back to notification-service.execution-events"'
 
   step "Contract – remove the old fields (the producer only sends v2)"
   recreate routine-service EXECUTION_COMPLETED_FORMAT=v2
