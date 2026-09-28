@@ -63,7 +63,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - Engine decides what a test run sends from the catalog (`sideEffects`, `preview`) instead of
     M1's hard-coded list. `email.send` preview returns `{ preview: { to, subject }, wouldDo }`.
 
-- [ ] **M2-08 · Catalog in the web**
+- [x] **M2-08 · Catalog in the web**
   - `web/src/catalog/` ([07 §4](../07-web.md)). Replace direct `GET /action-types` use.
 
 - [ ] **M2-09 · Generated step forms**

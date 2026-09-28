@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ACTION_FORMS, GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, type ParamField } from '../action-forms.ts';
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
-import { shortValue, TRYABLE_TYPES, TryStep } from '../components/try-step.tsx';
+import { runsInTest } from '../catalog/catalog.ts';
+import { useCatalog } from '../catalog/store.ts';
+import { shortValue, TryStep } from '../components/try-step.tsx';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
@@ -320,7 +322,7 @@ function safeParams(action: DraftAction): Record<string, unknown> {
 export function RoutineEditor({ id }: { id?: string }) {
   const toast = useToast();
   const editing = Boolean(id);
-  const actionTypes = usePolling(() => api.actionTypes(), 0);
+  const catalog = useCatalog();
   const taskLists = usePolling(() => api.taskLists(), 0);
   const routineList = usePolling(() => api.routines(), 0);
   // One shared starting value: fromRoutine() mints random uids, so calling it
@@ -607,7 +609,10 @@ export function RoutineEditor({ id }: { id?: string }) {
   const leaveHref = editing ? `#/routines/${id}` : '#/routines';
   const timezone = draft.timezone || 'Europe/Zurich';
   const blank = !editing && draft.actions.length === 0 && !draft.name;
-  const catalog = actionTypes.data ?? Object.keys(ACTION_FORMS).map((type) => ({ type, description: '', requiredParams: [], example: {} }));
+  // the catalog's steps; the v1 list only until the catalog has loaded
+  const steps = catalog.loaded
+    ? catalog.capabilities().map((capability) => ({ type: capability.type, label: ACTION_FORMS[capability.type]?.label ?? capability.label, description: capability.description, scripting: ['scripting', 'routines'].includes(capability.domain.domain) }))
+    : Object.keys(ACTION_FORMS).map((type) => ({ type, label: actionLabel(type), description: '', scripting: ACTION_FORMS[type].scripting === true }));
 
   /** Literal names of variables set in steps before `action` – what {{vars.…}} can read there. */
   const variablesBefore = (action: DraftAction) => [
@@ -1017,7 +1022,7 @@ export function RoutineEditor({ id }: { id?: string }) {
                                 onChange={(patch) => updateAction(action.uid, patch)} />
 
                               {/* a saved routine can try steps that only read or compute – nothing is sent or created */}
-                              {id && TRYABLE_TYPES.has(action.type) && (
+                              {id && runsInTest(catalog.capability(action.type)) && (
                                 <TryStep routineId={id} action={definitionOf(action)} types={types} onOutput={rememberOutputs} />
                               )}
 
@@ -1053,8 +1058,8 @@ export function RoutineEditor({ id }: { id?: string }) {
                 {draft.actions.length >= MAX_ACTIONS ? `At most ${MAX_ACTIONS} steps` : 'Add a step'}
               </h3>
               {[
-                { label: 'Actions', types: catalog.filter((type) => !ACTION_FORMS[type.type]?.scripting) },
-                { label: 'Scripting', types: catalog.filter((type) => ACTION_FORMS[type.type]?.scripting) },
+                { label: 'Actions', types: steps.filter((type) => !type.scripting) },
+                { label: 'Scripting', types: steps.filter((type) => type.scripting) },
               ].filter((group) => group.types.length > 0).map((group) => (
               <div key={group.label} className="palette-group">
               <h4 className="palette-label">{group.label}</h4>
@@ -1063,7 +1068,7 @@ export function RoutineEditor({ id }: { id?: string }) {
                   <button key={type.type} type="button" className="palette-item" onClick={() => addAction(type.type)}
                     title={ACTION_FORMS[type.type]?.blurb ?? type.description} disabled={draft.actions.length >= MAX_ACTIONS}>
                     <ActionGlyph type={type.type} size={30} />
-                    <span className="grow">{actionLabel(type.type)}</span>
+                    <span className="grow">{type.label}</span>
                     <Icon name="plus" size={15} />
                   </button>
                 ))}

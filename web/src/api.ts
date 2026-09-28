@@ -1,7 +1,7 @@
 import type {
   ActionDefinition,
+  CatalogDomain,
   DeadLetterQueue,
-  ActionType,
   Execution,
   ExecutionDetail,
   ExecutionStats,
@@ -144,7 +144,16 @@ const send = async <T>(method: string, path: string, body?: unknown) => (await r
 // ---------------------------------------------------------------- endpoints
 
 export const api = {
-  actionTypes: async () => (await get<{ items: ActionType[] }>('/api/v1/action-types')).items,
+  /** The catalog; with the ETag of what we have, 304 means "still current". */
+  catalog: async (etag?: string): Promise<{ status: 200; etag: string | null; domains: CatalogDomain[] } | { status: 304 }> => {
+    try {
+      const response = await request<{ domains: CatalogDomain[] }>('GET', '/api/v1/catalog', undefined, etag ? { 'if-none-match': etag } : {});
+      return { status: 200, etag: response.headers.get('etag'), domains: response.data.domains };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 304) return { status: 304 };
+      throw error;
+    }
+  },
 
   routines: async () => (await get<{ items: Routine[] }>('/api/v1/routines')).items,
   routine: (id: string) => get<Routine>(`/api/v1/routines/${id}`),

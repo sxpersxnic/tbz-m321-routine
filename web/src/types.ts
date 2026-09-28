@@ -101,12 +101,95 @@ export interface RoutineVersion {
   definition: VersionDefinition;
 }
 
-export interface ActionType {
+// ---------------------------------------------------------------- catalog (docs/v2/07-web.md §3, copied from 04 §2)
+
+export type ParamType =
+  | 'text' | 'longText' | 'number' | 'integer' | 'money' | 'boolean'
+  | 'date' | 'time' | 'duration' | 'choice' | 'ref' | 'list' | 'object' | 'value';
+
+export interface ParamSpec {
+  name: string;
+  label: string;
+  type: ParamType;
+  required?: boolean;
+  default?: unknown;
+  options?: Array<{ value: string; label: string }>;
+  ref?: { domain: string; collection: string };
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  hint?: string;
+  /** Default true: `{{…}}` allowed. */
+  templating?: boolean;
+  /** Shown under "More options". */
+  advanced?: boolean;
+}
+
+export interface OutputField {
+  name: string;
+  label: string;
+  type: ParamType;
+  example?: unknown;
+}
+
+export type Tint = 'sky' | 'indigo' | 'violet' | 'pink' | 'orange' | 'green' | 'teal' | 'grey';
+
+export interface Capability {
   type: string;
+  kind: 'action' | 'value' | 'human';
+  label: string;
+  /** `Record {amount} for {category}` – `{param}` placeholders. */
+  sentence: string;
   description: string;
-  runsIn?: 'engine' | 'worker';
-  requiredParams: string[];
-  example: Record<string, unknown>;
+  icon?: string;
+  tint?: Tint;
+  params: ParamSpec[];
+  output: OutputField[];
+  sideEffects: boolean;
+  preview?: boolean;
+  human?: { awaits: 'task' | 'question' | 'checkIn'; defaultTimeout?: string };
+  acceptsSecrets?: string[];
+  since: number;
+  deprecated?: { since: number; replacedBy?: string; message: string };
+}
+
+export interface TriggerSpec {
+  type: string;
+  label: string;
+  sentence: string;
+  description: string;
+  fields: OutputField[];
+  since: number;
+  deprecated?: { since: number; replacedBy?: string; message: string };
+}
+
+export interface CollectionSpec {
+  label: string;
+  list: string;
+  idField: string;
+  labelField: string;
+  iconField?: string;
+  tintField?: string;
+}
+
+/** A domain as GET /api/v1/catalog returns it: its manifest, and whether it is on for the user. */
+export interface CatalogDomain {
+  contract: 1;
+  domain: string;
+  manifestVersion: number;
+  service: string;
+  name: string;
+  description: string;
+  icon: string;
+  tint: Tint;
+  order: number;
+  optional: boolean;
+  prefixes: string[];
+  page?: string;
+  collections?: Record<string, CollectionSpec>;
+  capabilities: Capability[];
+  triggers?: TriggerSpec[];
+  enabled: boolean;
 }
 
 export interface Execution {
