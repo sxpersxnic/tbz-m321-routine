@@ -836,6 +836,11 @@ a.outcome-card:hover { background: var(--surface-2); }
   color: var(--text); background: var(--surface-2); display: inline-flex; align-items: center; gap: 6px;
 }
 .ref-chip:hover { background: var(--surface-3); }
+.ref-example { color: var(--muted); font-weight: 400; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.try-step { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.try-result { flex: 1; min-width: 0; }
+.try-result .kv { margin: 0; }
+.try-failed { display: inline-flex; align-items: center; gap: 6px; color: var(--err); font-size: 14px; font-weight: 500; }
 .ref-chip .glyph { width: 16px !important; height: 16px !important; border-radius: 5px !important; }
 .kv-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 8px; }
 .key-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); align-self: flex-end; }

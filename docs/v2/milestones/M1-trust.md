@@ -73,7 +73,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - `ActionRequested.context.mode = 'test'` from here on.
   - Tests: test runs never appear in `GET /executions` or stats. Cleanup after TTL.
 
-- [ ] **M1-11 · Test a step (web)**
+- [x] **M1-11 · Test a step (web)**
   - *Try this step* on eligible step cards. Inline result. Example values in token pills from
     the last real run (`GET /executions?routineId=&limit=1` → output lookup).
 

@@ -1,4 +1,5 @@
 import type {
+  ActionDefinition,
   ActionType,
   Execution,
   ExecutionDetail,
@@ -178,6 +179,8 @@ export const api = {
   routineExecutions: async (id: string, limit = 20) =>
     (await get<{ items: Execution[] }>(`/api/v1/routines/${id}/executions?limit=${limit}`)).items,
   execution: (id: string) => get<ExecutionDetail>(`/api/v1/executions/${id}`),
+  /** "Try this step": a test run of one step of a saved routine, with the values of its last run. */
+  testStep: (routineId: string, action: ActionDefinition) => send<ExecutionDetail>('POST', '/api/v1/routines/test-step', { routineId, action }),
   /** "Retry from here": a failed run goes on from its failed step. */
   resume: (id: string) => send<ExecutionDetail>('POST', `/api/v1/executions/${id}/resume`),
   executionStats: (hours = 24) => get<ExecutionStats>(`/api/v1/executions/stats?hours=${hours}`),

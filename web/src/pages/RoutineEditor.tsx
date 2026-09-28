@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ACTION_FORMS, GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, type ParamField } from '../action-forms.ts';
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
+import { shortValue, TRYABLE_TYPES, TryStep } from '../components/try-step.tsx';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
@@ -397,6 +398,36 @@ export function RoutineEditor({ id }: { id?: string }) {
     void loadExisting();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Example values for the reference pills: what the last real run produced, updated by "Try this step"
+  const [examples, setExamples] = useState<Record<string, unknown>>({});
+  const rememberOutputs = useCallback(
+    (key: string, output: Record<string, unknown>) =>
+      setExamples((current) => ({ ...current, ...Object.fromEntries(Object.entries(output).map(([field, value]) => [`{{actions.${key}.${field}}}`, value])) })),
+    [],
+  );
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      const [last] = await api.routineExecutions(id, 1).catch(() => []);
+      if (!last) return;
+      const run = await api.execution(last.id).catch(() => undefined);
+      if (cancelled || !run) return;
+      for (const action of run.actions) if (action.status === 'COMPLETED' && action.output && !action.parentId) rememberOutputs(action.key, action.output);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, rememberOutputs]);
+  /** The step as a definition, for a test run – null while its fields can't be read. */
+  const definitionOf = (action: DraftAction) => {
+    try {
+      return toInput(draft).actions.find((candidate) => candidate.key === action.key.trim()) ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   // "Edit step" on a failed run lands here with ?step=<key>: unfold that step and put the cursor in it
   const [stepParam] = useRouteParam('step');
@@ -953,12 +984,16 @@ export function RoutineEditor({ id }: { id?: string }) {
                                       .map(([output, name]) => ({ candidate, name, reference: `{{actions.${candidate.key}.${output}}}` })));
                                   // three If steps all offer "Result" – the step ID tells them apart
                                   const repeated = (name: string) => chips.filter((chip) => chip.name === name).length > 1;
-                                  return chips.map(({ candidate, name, reference }) => (
-                                    <button key={reference} type="button" className="ref-chip" title={reference}
-                                      onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
-                                      <ActionGlyph type={candidate.type} size={16} /> {name}{repeated(name) ? ` (${candidate.key})` : ''}
-                                    </button>
-                                  ));
+                                  return chips.map(({ candidate, name, reference }) => {
+                                    const example = examples[reference];
+                                    return (
+                                      <button key={reference} type="button" className="ref-chip" title={example === undefined ? reference : `${reference} · e.g. ${shortValue(example, 120)}`}
+                                        onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
+                                        <ActionGlyph type={candidate.type} size={16} /> {name}{repeated(name) ? ` (${candidate.key})` : ''}
+                                        {example !== undefined && <span className="ref-example">{shortValue(example, 18)}</span>}
+                                      </button>
+                                    );
+                                  });
                                 })()}
                                 {variablesBefore(action).map((name) => (
                                   <button key={name} type="button" className="ref-chip" title={`{{vars.${name}}}`}
@@ -977,6 +1012,11 @@ export function RoutineEditor({ id }: { id?: string }) {
 
                               <FlowControls action={action} earlier={earlier} variables={variablesBefore(action)} invalid={invalid.get(fieldId(action.uid, 'runIf'))}
                                 onChange={(patch) => updateAction(action.uid, patch)} />
+
+                              {/* a saved routine can try steps that only read or compute – nothing is sent or created */}
+                              {id && TRYABLE_TYPES.has(action.type) && (
+                                <TryStep routineId={id} action={definitionOf(action)} types={types} onOutput={rememberOutputs} />
+                              )}
 
                               {/* Shown whenever there is something to be parallel *with*, so the
                                   control survives its own toggle: merging into step 1 would
