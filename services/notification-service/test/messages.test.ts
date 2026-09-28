@@ -88,3 +88,21 @@ describe('failure notifications and resume', () => {
     assert.ok(!NOTIFYING_EVENTS.has('ExecutionWaitingForYou'), 'future execution events are ignored, not dead-lettered');
   });
 });
+
+describe('routine health', () => {
+  it('turns RoutineUnhealthy into one high-priority notification per streak, linked to the failed run', () => {
+    const unhealthy = createEnvelope({
+      type: 'RoutineUnhealthy',
+      version: 1,
+      source: 'routine-service',
+      data: { routineId: base.routineId, ownerId: base.ownerId, routineName: 'Backup', consecutiveFailures: 3, lastErrorCode: 'NOT_FOUND', executionId: base.executionId },
+    });
+    assert.deepEqual(contractErrors('routine-unhealthy.v1.schema.json', unhealthy), []);
+    assert.ok(NOTIFYING_EVENTS.has('RoutineUnhealthy'));
+    const draft = readExecutionEvent(unhealthy, 'tolerant');
+    assert.equal(draft.title, '"Backup" failed 3 times in a row');
+    assert.equal(draft.priority, 'high');
+    assert.equal(draft.executionId, base.executionId);
+    assert.equal(draft.sourceKey, `routine:${base.routineId}:unhealthy:${base.executionId}`);
+  });
+});

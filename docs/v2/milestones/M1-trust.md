@@ -54,7 +54,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - `web/src/lib/diff.ts` ([07 §8](../07-web.md)) with `node --test` fixtures. Route
     `#/routines/:id/history`. *History* in the routine `…` menu. Run detail links *version 7*.
 
-- [ ] **M1-08 · Routine health (engine + API)**
+- [x] **M1-08 · Routine health (engine + API)**
   - Migration: health columns and `alert_after_failures` ([06 §13](../06-engine.md)). Engine updates
     counters. Nightly refresh job with advisory lock. `RoutineUnhealthy` event (schema,
     contract test). `health` in the routine DTO.

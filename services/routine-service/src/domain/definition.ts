@@ -39,6 +39,8 @@ export interface RoutineInput extends Appearance {
   description?: string;
   trigger: { type: 'manual' } | { type: 'schedule'; cron: string; timezone?: string } | { type: 'webhook' };
   actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string }>;
+  /** Tell the owner after this many failures in a row; null = never; omitted = unchanged (2 for a new routine). */
+  alertAfterFailures?: number | null;
 }
 
 export interface RoutineDefinition extends Appearance {
@@ -46,6 +48,8 @@ export interface RoutineDefinition extends Appearance {
   description: string;
   trigger: TriggerDefinition;
   actions: ActionDefinition[];
+  /** undefined = leave as it is (on create: 2). */
+  alertAfterFailures?: number | null;
 }
 
 export class DefinitionError extends Error {
@@ -177,6 +181,19 @@ export function validateRoutine(input: RoutineInput): RoutineDefinition {
     trigger = { type: 'webhook' };
   }
 
+  const alert = input.alertAfterFailures;
+  if (alert !== undefined && alert !== null && (!Number.isInteger(alert) || alert < 1 || alert > 10)) {
+    issues.push('alertAfterFailures must be a whole number from 1 to 10, or null for never');
+  }
+
   if (issues.length > 0) throw new DefinitionError(issues);
-  return { name, description: input.description?.trim() ?? '', trigger, actions, icon: input.icon, color: input.color };
+  return {
+    name,
+    description: input.description?.trim() ?? '',
+    trigger,
+    actions,
+    icon: input.icon,
+    color: input.color,
+    ...(alert !== undefined && { alertAfterFailures: alert }),
+  };
 }

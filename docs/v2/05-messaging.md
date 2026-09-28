@@ -111,7 +111,7 @@ The domain closes the item (task → `CANCELLED`, question → `EXPIRED`) and se
 | `ExecutionWaitingForYou` v1 | `execution.waitingForYou` | `executionId, routineId, ownerId, routineName, awaiting: [{actionKey, kind, refId, title, dueAt}]` | delivery-service (push) |
 | `RoutineSaved` v1 | `routine.saved` | `routineId, ownerId, version, active, name, trigger` (full trigger definition), `areaId` | trigger-service |
 | `RoutineDeleted` v1 | `routine.deleted` | `routineId, ownerId` | trigger-service |
-| `RoutineUnhealthy` v1 | `routine.unhealthy` | `routineId, ownerId, routineName, consecutiveFailures, lastErrorCode` | notification-service |
+| `RoutineUnhealthy` v1 | `routine.unhealthy` | `routineId, ownerId, routineName, consecutiveFailures, lastErrorCode, executionId` (the run that crossed the threshold) | notification-service |
 
 `RoutineSaved` is emitted on create, update, activate, deactivate and restore (event-carried
 state: consumers never call back).

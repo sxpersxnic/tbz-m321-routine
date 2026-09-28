@@ -63,7 +63,7 @@ channels:
   routineEvents:
     address: routine.events
     title: Domain events of the routine service
-    description: 'Topic exchange. Routing keys: routine.triggered, execution.completed, execution.failed, execution.resumed'
+    description: 'Topic exchange. Routing keys: routine.triggered, execution.completed, execution.failed, execution.resumed, routine.unhealthy'
     bindings:
       amqp:
         is: routingKey
@@ -74,6 +74,7 @@ channels:
       ExecutionCompletedV2: { $ref: '#/components/messages/ExecutionCompletedV2' }
       ExecutionFailed: { $ref: '#/components/messages/ExecutionFailed' }
       ExecutionResumed: { $ref: '#/components/messages/ExecutionResumed' }
+      RoutineUnhealthy: { $ref: '#/components/messages/RoutineUnhealthy' }
 
 operations:
   # ---- routine-service
@@ -109,6 +110,7 @@ operations:
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionResumed' }
+      - { $ref: '#/channels/routineEvents/messages/RoutineUnhealthy' }
 
   # ---- workers
   executeActions:
@@ -129,8 +131,9 @@ operations:
   notifyOnExecutionEvents:
     action: receive
     channel: { $ref: '#/channels/routineEvents' }
-    summary: notification-service – queue notification-service.execution-events (execution.#); other execution events are acknowledged and ignored
+    summary: notification-service – queue notification-service.execution-events (execution.#, routine.unhealthy); other events are acknowledged and ignored
     messages:
+      - { $ref: '#/channels/routineEvents/messages/RoutineUnhealthy' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV1' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
@@ -180,3 +183,8 @@ components:
       title: ExecutionResumed v1
       summary: 'A failed execution goes on from its failed step: { executionId, routineId, ownerId, fromActionKey, resumedBy, resumeCount }'
       payload: { $ref: '../schemas/execution-resumed.v1.schema.json' }
+    RoutineUnhealthy:
+      name: RoutineUnhealthy
+      title: RoutineUnhealthy v1
+      summary: 'Failures in a row reached the routine''s alert threshold (once per streak): { routineId, ownerId, routineName, consecutiveFailures, lastErrorCode, executionId }'
+      payload: { $ref: '../schemas/routine-unhealthy.v1.schema.json' }

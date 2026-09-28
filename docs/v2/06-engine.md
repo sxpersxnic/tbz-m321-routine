@@ -258,9 +258,12 @@ Domain **`routines`** (owned by routine-service):
 ## 10. Health counters
 
 Columns on `routines`: `consecutive_failures int`, `last_success_at`, `last_failure_at`,
-`runs_30d`, `failures_30d` (the last two refreshed by a nightly job). Updated in the
-`complete` / `fail` branches. When `consecutive_failures` reaches `alert_after_failures`,
-enqueue `RoutineUnhealthy` once (reset on the next success).
+`runs_30d`, `failures_30d`. Updated in the `complete` / `fail` branches (the 30-day counts
+count up there too, so a new routine shows its runs at once) and recomputed by a nightly job so
+old runs drop out (after 03:00 UTC, once per day: `pg_try_advisory_xact_lock` + `job_runs`).
+When `consecutive_failures` reaches `alert_after_failures`, enqueue `RoutineUnhealthy` once
+(reset on the next success). `alertAfterFailures` in a routine input: 1–10, `null` = never,
+omitted on update = unchanged (2 for a new routine).
 
 ## 11. Today cards from routine-service
 

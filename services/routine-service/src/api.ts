@@ -83,6 +83,7 @@ const routineBodySchema = {
     trigger: triggerSchema,
     actions: { type: 'array', minItems: 1, maxItems: 20, items: actionSchema },
     ...appearanceProperties,
+    alertAfterFailures: { type: ['integer', 'null'], minimum: 1, maximum: 10 },
     version: { type: 'integer', minimum: 1, description: 'Optimistic locking: expected current version' },
   },
 } as const;

@@ -21,6 +21,7 @@ import { ExecutionEngine } from './engine.ts';
 import { parseActionResult, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
 import { registerRoutes } from './api.ts';
 import { Scheduler } from './scheduler.ts';
+import { refreshHealthIfDue } from './store.ts';
 
 const SERVICE = 'routine-service';
 const logger = createLogger(SERVICE);
@@ -80,6 +81,8 @@ let housekeepingRuns = 0;
 const housekeepingLoop = startLoop('housekeeping', 2_000, logger, async () => {
   await engine.markStaleExecutions();
   if (housekeepingRuns++ % 1_800 === 0) await relay.purgePublished();
+  // nightly 30-day health counts: tried every minute, done once a day by one replica
+  if (housekeepingRuns % 30 === 0 && (await refreshHealthIfDue(pool))) logger.info('routine health refreshed');
 });
 
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });

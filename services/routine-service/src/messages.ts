@@ -200,6 +200,36 @@ export function executionFailed(input: {
   };
 }
 
+/** A routine failed `consecutiveFailures` times in a row – its alert threshold (06-engine §10). */
+export function routineUnhealthy(input: {
+  routineId: string;
+  ownerId: string;
+  routineName: string;
+  consecutiveFailures: number;
+  lastErrorCode: ErrorCode | null;
+  executionId: string;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'routine.unhealthy',
+    envelope: createEnvelope({
+      type: 'RoutineUnhealthy',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        routineName: input.routineName,
+        consecutiveFailures: input.consecutiveFailures,
+        lastErrorCode: input.lastErrorCode,
+        executionId: input.executionId,
+      },
+    }),
+  };
+}
+
 /** A failed run was resumed from its failed step (06-engine §6). */
 export function executionResumed(input: {
   executionId: string;

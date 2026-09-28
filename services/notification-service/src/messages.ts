@@ -79,6 +79,20 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   if (!executionId || !ownerId) throw new PermanentError(`${envelope.type} is missing executionId/ownerId`);
   const routineName = text(data.routineName) ?? 'Routine';
 
+  if (envelope.type === 'RoutineUnhealthy') {
+    // one per streak: the run that crossed the threshold names it, and is what "open" leads to
+    const failures = typeof data.consecutiveFailures === 'number' ? data.consecutiveFailures : 2;
+    return {
+      ownerId,
+      executionId,
+      title: `"${routineName}" failed ${failures} times in a row`,
+      body: '',
+      priority: 'high',
+      category: 'execution',
+      sourceKey: `routine:${text(data.routineId) ?? 'unknown'}:unhealthy:${executionId}`,
+    };
+  }
+
   if (envelope.type === 'ExecutionFailed') {
     // one notification per failure: a resumed run that fails again is news again
     const resumes = typeof data.resumeCount === 'number' && data.resumeCount > 0 ? data.resumeCount : 0;
@@ -111,8 +125,8 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   throw new PermanentError('ExecutionCompleted has neither "notification" nor "message"');
 }
 
-/** The execution events this service acts on; others on `execution.#` are acknowledged and ignored. */
-export const NOTIFYING_EVENTS = new Set(['ExecutionCompleted', 'ExecutionFailed']);
+/** The routine events this service turns into notifications; others it receives are acknowledged and ignored. */
+export const NOTIFYING_EVENTS = new Set(['ExecutionCompleted', 'ExecutionFailed', 'RoutineUnhealthy']);
 
 /** ExecutionResumed: whose failure notifications are resolved now. */
 export function readExecutionResumed(envelope: Envelope): { executionId: string; ownerId: string } {

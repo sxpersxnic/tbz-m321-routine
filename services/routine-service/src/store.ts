@@ -1,4 +1,4 @@
-import type { ErrorCode, Queryable } from '@routine/service-kit';
+import { withTransaction, type ErrorCode, type Pool, type Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, TriggerDefinition } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
@@ -18,6 +18,12 @@ export interface RoutineRow {
   icon: string | null;
   color: string | null;
   version: number;
+  alert_after_failures: number | null;
+  consecutive_failures: number;
+  last_success_at: Date | null;
+  last_failure_at: Date | null;
+  runs_30d: number;
+  failures_30d: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -132,6 +138,7 @@ export function versionDefinition(row: RoutineRow): VersionDefinition {
     actions: row.actions,
     icon: row.icon,
     color: row.color as RoutineColor | null,
+    alertAfterFailures: row.alert_after_failures,
     active: row.active,
   };
 }
@@ -167,8 +174,8 @@ export function versionDto(row: RoutineVersionRow, withDefinition = true) {
 
 export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition, by: string = ownerId): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
-    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token, icon, color)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token, icon, color, alert_after_failures)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $10 THEN $11::int ELSE 2 END) RETURNING *`,
     [
       id,
       ownerId,
@@ -179,6 +186,8 @@ export async function insertRoutine(db: Queryable, id: string, ownerId: string, 
       tokenFor(definition),
       definition.icon ?? null,
       definition.color ?? null,
+      definition.alertAfterFailures !== undefined,
+      definition.alertAfterFailures ?? null,
     ],
   );
   return recordVersion(db, rows[0], 'create', by);
@@ -197,6 +206,7 @@ export async function updateRoutine(
             webhook_token = COALESCE(webhook_token, $7),
             icon = CASE WHEN $8 THEN $9 ELSE icon END,
             color = CASE WHEN $10 THEN $11 ELSE color END,
+            alert_after_failures = CASE WHEN $12 THEN $13::int ELSE alert_after_failures END,
             version = version + 1, updated_at = now()
       WHERE id = $1 RETURNING *`,
     [
@@ -211,6 +221,8 @@ export async function updateRoutine(
       definition.icon ?? null,
       definition.color !== undefined,
       definition.color ?? null,
+      definition.alertAfterFailures !== undefined,
+      definition.alertAfterFailures ?? null,
     ],
   );
   return recordVersion(db, rows[0], change.origin ?? 'edit', change.by);
@@ -609,9 +621,69 @@ export function routineDto(row: RoutineRow) {
     icon: row.icon,
     color: row.color,
     version: row.version,
+    alertAfterFailures: row.alert_after_failures,
+    health: {
+      consecutiveFailures: row.consecutive_failures,
+      lastSuccessAt: row.last_success_at,
+      lastFailureAt: row.last_failure_at,
+      runs30d: row.runs_30d,
+      failures30d: row.failures_30d,
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// ---------------------------------------------------------------- health (06-engine §10)
+
+/**
+ * A run of the routine finished: a success resets the streak, a failure extends it. Returns the
+ * routine's counters after the change (null if the routine is gone).
+ */
+export async function recordRunOutcome(
+  db: Queryable,
+  routineId: string,
+  outcome: 'COMPLETED' | 'FAILED',
+): Promise<Pick<RoutineRow, 'consecutive_failures' | 'alert_after_failures' | 'name'> | null> {
+  const failed = outcome === 'FAILED';
+  const { rows } = await db.query<Pick<RoutineRow, 'consecutive_failures' | 'alert_after_failures' | 'name'>>(
+    `UPDATE routines
+        SET consecutive_failures = CASE WHEN $2 THEN consecutive_failures + 1 ELSE 0 END,
+            last_failure_at = CASE WHEN $2 THEN now() ELSE last_failure_at END,
+            last_success_at = CASE WHEN $2 THEN last_success_at ELSE now() END,
+            runs_30d = runs_30d + 1,
+            failures_30d = failures_30d + CASE WHEN $2 THEN 1 ELSE 0 END
+      WHERE id = $1
+      RETURNING consecutive_failures, alert_after_failures, name`,
+    [routineId, failed],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Recomputes the 30-day counts from the runs (runs older than 30 days drop out). Once per day after
+ * `hourUtc`, on one replica: the advisory lock and job_runs make every other attempt a no-op.
+ * Returns whether this call did the refresh.
+ */
+export async function refreshHealthIfDue(pool: Pool, now = new Date(), hourUtc = 3): Promise<boolean> {
+  if (now.getUTCHours() < hourUtc) return false;
+  return withTransaction(pool, async (client) => {
+    const { rows: lock } = await client.query<{ locked: boolean }>(`SELECT pg_try_advisory_xact_lock(hashtext('health-refresh')) AS locked`);
+    if (!lock[0]?.locked) return false;
+    const { rows: last } = await client.query<{ last_run_at: Date }>(`SELECT last_run_at FROM job_runs WHERE name = 'health-refresh'`);
+    if (last[0] && last[0].last_run_at.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)) return false;
+    await client.query(
+      `UPDATE routines r SET
+         runs_30d = (SELECT count(*) FROM executions e WHERE e.routine_id = r.id AND e.status IN ('COMPLETED', 'FAILED') AND e.created_at > $1::timestamptz - interval '30 days'),
+         failures_30d = (SELECT count(*) FROM executions e WHERE e.routine_id = r.id AND e.status = 'FAILED' AND e.created_at > $1::timestamptz - interval '30 days')`,
+      [now],
+    );
+    await client.query(
+      `INSERT INTO job_runs (name, last_run_at) VALUES ('health-refresh', $1) ON CONFLICT (name) DO UPDATE SET last_run_at = $1`,
+      [now],
+    );
+    return true;
+  });
 }
 
 export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], log?: ExecutionLogRow[]) {

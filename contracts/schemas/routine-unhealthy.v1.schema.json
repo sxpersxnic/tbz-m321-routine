@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/routine-unhealthy.v1.schema.json",
+  "title": "RoutineUnhealthy v1",
+  "description": "A routine failed consecutiveFailures times in a row – its alert threshold (docs/v2/06-engine.md §10). Published once per streak. Routing key: routine.unhealthy",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "RoutineUnhealthy"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "routineId",
+        "ownerId",
+        "routineName",
+        "consecutiveFailures",
+        "lastErrorCode"
+      ],
+      "properties": {
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineName": {
+          "type": "string"
+        },
+        "consecutiveFailures": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lastErrorCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "error code of the failure that crossed the threshold (docs/v2/05-messaging.md §6)"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "the failed run that crossed the threshold – for a \"Fix\" link"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

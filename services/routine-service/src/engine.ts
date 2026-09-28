@@ -9,6 +9,7 @@ import {
   executionCompleted,
   executionFailed,
   executionResumed,
+  routineUnhealthy,
   routineTriggered,
   subRoutineResult,
   type ActionResult,
@@ -24,6 +25,7 @@ import {
   listExecutionActions,
   lockExecution,
   markExecutionResumed,
+  recordRunOutcome,
   resetForResume,
   markActionCompleted,
   markActionDispatched,
@@ -412,6 +414,7 @@ export class ExecutionEngine {
 
         case 'complete': {
           await updateExecutionStatus(client, execution.id, 'COMPLETED');
+          await recordRunOutcome(client, execution.routine_id, 'COMPLETED');
           await appendLog(client, execution.id, 'COMPLETED', 'All actions completed successfully');
           const durationMs = Date.now() - (execution.started_at ?? execution.created_at).getTime();
           await enqueue(
@@ -454,6 +457,23 @@ export class ExecutionEngine {
               correlationId: execution.correlation_id,
             }),
           );
+          // health: once per streak, when the failures in a row reach the routine's threshold
+          const health = await recordRunOutcome(client, execution.routine_id, 'FAILED');
+          if (health && health.alert_after_failures !== null && health.consecutive_failures === health.alert_after_failures) {
+            await enqueue(
+              client,
+              routineUnhealthy({
+                routineId: execution.routine_id,
+                ownerId: execution.owner_id,
+                routineName: health.name,
+                consecutiveFailures: health.consecutive_failures,
+                lastErrorCode: failed?.error_code ?? null,
+                executionId: execution.id,
+                correlationId: execution.correlation_id,
+              }),
+            );
+            this.#logger.warn({ routineId: execution.routine_id, consecutiveFailures: health.consecutive_failures }, 'routine unhealthy');
+          }
           // a failure that came up from a deeper call already names its routine – pass it on as it is
           const error = failed?.type === 'routine.run' && failed.error ? failed.error : `Routine "${execution.routine_name}": ${failed?.error ?? 'unknown error'}`;
           await this.#reportToCaller(client, execution, { ok: false, error });

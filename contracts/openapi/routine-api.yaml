@@ -424,6 +424,7 @@ components:
         actions: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ActionInput' } }
         icon: { $ref: '#/components/schemas/RoutineIcon' }
         color: { $ref: '#/components/schemas/RoutineColor' }
+        alertAfterFailures: { type: [integer, 'null'], minimum: 1, maximum: 10, description: 'notify after this many failures in a row; null = never; omitted = unchanged (2 for a new routine)' }
 
     RoutineIcon:
       type: [string, 'null']
@@ -466,6 +467,16 @@ components:
         icon: { type: [string, 'null'], description: 'chosen symbol; null = derived from the first action' }
         color: { type: [string, 'null'], description: 'chosen colour; null = derived from the first action' }
         version: { type: integer }
+        alertAfterFailures: { type: [integer, 'null'], description: 'RoutineUnhealthy after this many failures in a row; null = never' }
+        health:
+          type: object
+          description: 'counters updated when a run finishes; the 30-day ones also recomputed nightly'
+          properties:
+            consecutiveFailures: { type: integer }
+            lastSuccessAt: { type: [string, 'null'], format: date-time }
+            lastFailureAt: { type: [string, 'null'], format: date-time }
+            runs30d: { type: integer }
+            failures30d: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
