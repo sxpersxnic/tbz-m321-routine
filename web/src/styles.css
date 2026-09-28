@@ -282,7 +282,8 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent-fill); }
 .btn.ghost:hover { background: var(--accent-soft); filter: none; }
 .btn.plain { background: transparent; color: var(--text); }
 .btn.plain:hover { background: var(--surface-3); filter: none; }
-.btn.danger { color: var(--err); }
+/* a shade darker than --err in light mode: on the grey button fill, #d70015 reaches only 4.4:1 */
+.btn.danger { color: light-dark(#c00013, #ff6961); }
 .btn.danger.ghost:hover { background: var(--err-soft); }
 .btn.small { padding: 4px 12px; min-height: 30px; font-size: 13px; }
 .btn.large { padding: 12px 24px; min-height: 48px; font-size: 17px; font-weight: 600; }
@@ -618,6 +619,11 @@ button.story-block:hover { box-shadow: var(--shadow-hover); }
 .tile.paused .tile-state { background: var(--surface-2); color: var(--muted); }
 .tile.paused .play { background: var(--surface-2); color: var(--muted); }
 .tile.paused .tile-when { color: var(--muted); opacity: 1; }
+/* health: quiet while it works; a white pill with dark red text once runs keep failing (red on the tint would fail contrast) */
+.tile-health { font-size: 12.5px; opacity: 0.9; align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
+.tile-health.failing { opacity: 1; background: #fff; color: #b0000f; font-weight: 600; border-radius: 99px; padding: 2px 9px 2px 7px; }
+.tile.paused .tile-health { color: var(--muted); opacity: 1; }
+.tile.paused .tile-health.failing { background: var(--err-soft); color: var(--err); }
 .tile.paused .glyph { box-shadow: none; }
 .tile-new {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 148px;
@@ -862,6 +868,9 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--err-fill);
 .template-pick .glyph { border-radius: 50% !important; }
 
 .save-card { display: flex; flex-direction: column; gap: 14px; }
+.alert-setting { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.alert-setting select { flex: 1; min-width: 0; color: var(--text); }
+.tone-err-text { color: var(--err); font-weight: 600; }
 .unsaved { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--warn); }
 .unsaved::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn-fill); }
 

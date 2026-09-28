@@ -50,8 +50,20 @@ export interface Routine {
   icon: string | null;
   color: string | null;
   version: number;
+  /** Notify after this many failures in a row; null = never. */
+  alertAfterFailures: number | null;
+  health: RoutineHealth;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RoutineHealth {
+  consecutiveFailures: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  /** Finished runs in the last 30 days. */
+  runs30d: number;
+  failures30d: number;
 }
 
 export interface RoutineInput {
@@ -62,6 +74,8 @@ export interface RoutineInput {
   /** Omitted = unchanged, null = taken from the first action. */
   icon?: string | null;
   color?: string | null;
+  /** Omitted = unchanged (2 for a new routine), null = never. */
+  alertAfterFailures?: number | null;
   version?: number;
 }
 
@@ -76,6 +90,7 @@ export interface VersionDefinition {
   actions: ActionDefinition[];
   icon: string | null;
   color: string | null;
+  alertAfterFailures?: number | null;
   active: boolean;
 }
 

@@ -61,7 +61,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - notification-service consumes `routine.unhealthy` → high-priority notification.
   - Tests: counter transitions, event once per streak.
 
-- [ ] **M1-09 · Routine health (web)**
+- [x] **M1-09 · Routine health (web)**
   - Tile health line, detail *Health* row, setting *Tell me after N failures in a row* on the
     settings page ([02 §4, §5](../02-experience.md)).
 

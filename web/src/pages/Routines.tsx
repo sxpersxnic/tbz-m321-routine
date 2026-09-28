@@ -6,6 +6,7 @@ import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Menu, Sec
 import { ActionFlow, AppearanceDialog, routineLook, RunHistory, StatusIcon, type Appearance } from '../components/visual.tsx';
 import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, useNow, usePolling } from '../hooks.ts';
+import { healthLine } from '../lib/health.ts';
 import type { Routine } from '../types.ts';
 import { ExecutionRow } from './Executions.tsx';
 
@@ -76,6 +77,7 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
   const run = useRunRoutine();
   const { set, active } = useSetActive(routine, onChanged);
   const look = routineLook(routine);
+  const health = healthLine(routine.health);
   return (
     <article className={`tile tint-${look.tint} ${active ? '' : 'paused'}`}>
       <a className="tile-link" href={`#/routines/${routine.id}`}>
@@ -88,6 +90,7 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
           <Icon name={TRIGGER_ICONS[routine.trigger.type]} size={13} />
           <span className="ellipsis">{whenText(routine)}</span>
         </span>
+        {health && <span className={`tile-health ${health.failing ? 'failing' : ''}`}>{health.failing && <Icon name="warning" size={12} />}{health.text}</span>}
       </a>
       <div className="tile-foot">
         {active ? (
@@ -222,8 +225,8 @@ export function RoutineDetail({ id }: { id: string }) {
   const r = routine.data;
   const runs = executions.data ?? [];
   const last = runs[0];
-  const finished = runs.filter((execution) => execution.status === 'COMPLETED' || execution.status === 'FAILED');
-  const ok = finished.filter((execution) => execution.status === 'COMPLETED').length;
+  // the last 30 days, kept by the server – not just the runs loaded here
+  const detailHealth = healthLine(routine.data?.health);
   const look = routineLook(r);
 
   async function saveAppearance(next: Appearance) {
@@ -362,7 +365,7 @@ export function RoutineDetail({ id }: { id: string }) {
           <span>
             <span className="fact-label">Last run</span>
             <span className="fact-value">{last ? relative(last.createdAt, now) : 'Never'}</span>
-            {finished.length > 0 && <span className="fact-sub">{ok} of {finished.length} succeeded</span>}
+            {detailHealth && <span className={`fact-sub ${detailHealth.failing ? 'tone-err-text' : ''}`}>{detailHealth.text}</span>}
           </span>
         </div>
       </div>

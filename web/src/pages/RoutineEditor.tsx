@@ -8,6 +8,7 @@ import { previewCron, runTime, usesSeconds } from '../cron.ts';
 import { CRON_PRESETS, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, usePolling, useRouteParam, useUnsavedGuard } from '../hooks.ts';
 import { FREQUENCIES, parseSchedule, toCron, WEEKDAYS, withFrequency, type Frequency } from '../schedule.ts';
+import { ALERT_CHOICES } from '../lib/health.ts';
 import { TEMPLATES } from '../templates.ts';
 import type { ActionDefinition, RoutineInput, Trigger, TriggerType } from '../types.ts';
 
@@ -37,6 +38,8 @@ interface Draft {
   cron: string;
   timezone: string;
   actions: DraftAction[];
+  /** "Tell me after N failures in a row" – null = never. */
+  alertAfterFailures: number | null;
 }
 
 const RAW_FIELD: ParamField = { name: '__raw', label: 'Parameters (JSON)', kind: 'json' };
@@ -131,6 +134,7 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
     triggerType: routine.trigger.type,
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
+    alertAfterFailures: routine.alertAfterFailures === undefined ? 2 : routine.alertAfterFailures,
     actions: routine.actions.map((action) => ({
       uid: uids.get(action.key) ?? uid(),
       key: action.key,
@@ -174,6 +178,7 @@ function toInput(draft: Draft): RoutineInput {
     actions,
     icon: draft.icon,
     color: draft.color,
+    alertAfterFailures: draft.alertAfterFailures,
   };
 }
 
@@ -296,7 +301,9 @@ const TIMEZONES: string[] = (() => {
   }
 })();
 
-const EMPTY: Draft = { name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [] };
+const EMPTY: Draft = {
+  name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [], alertAfterFailures: 2,
+};
 
 // ---------------------------------------------------------------- component
 
@@ -1051,6 +1058,13 @@ export function RoutineEditor({ id }: { id?: string }) {
               <input type="checkbox" checked={draft.active} onChange={(event) => update({ active: event.target.checked })} />
               <span className="switch-track" />
               <span className="switch-label">Active</span>
+            </label>
+            <label className="alert-setting">
+              <span>Tell me</span>
+              <select className="compact-select" value={draft.alertAfterFailures ?? 'never'}
+                onChange={(event) => update({ alertAfterFailures: event.target.value === 'never' ? null : Number(event.target.value) })}>
+                {ALERT_CHOICES.map((choice) => <option key={choice.label} value={choice.value ?? 'never'}>{choice.label}</option>)}
+              </select>
             </label>
             <button type="button" className="btn primary large block" disabled={saving} onClick={save}>
               {saving ? <><span className="spinner" /> Saving</> : editing ? 'Save' : 'Create'}

@@ -118,6 +118,13 @@ describe('plain-language version diff (07-web §8)', () => {
     assert.deepEqual(describeChanges(base(), base(), 'edit'), ['Saved without changes']);
   });
 
+  it('names a changed alert setting', () => {
+    const with2 = { ...base(), alertAfterFailures: 2 };
+    assert.deepEqual(describeChanges(with2, { ...with2, alertAfterFailures: 5 }, 'edit'), ['Tells you after 5 failures in a row']);
+    assert.deepEqual(describeChanges(with2, { ...with2, alertAfterFailures: null }, 'edit'), ['No longer tells you when it keeps failing']);
+    assert.deepEqual(describeChanges(base(), with2, 'edit'), ['Saved without changes'], 'history from before the setting');
+  });
+
   it('finds the version a restore brought back', () => {
     const v1 = base();
     const v2 = { ...base(), name: 'Changed' };

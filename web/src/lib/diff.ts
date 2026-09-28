@@ -25,6 +25,11 @@ export function describeChanges(before: VersionDefinition | null, after: Version
   const icon = (name: string | null) => (name ? (ICON_CHOICES.find((choice) => choice.name === name)?.label ?? name) : 'automatic');
   if (before.color !== after.color) changes.push(`Colour changed to ${color(after.color)}`);
   if (before.icon !== after.icon) changes.push(`Symbol changed to ${icon(after.icon)}`);
+  // versions from before the setting existed have no value – nothing changed for them
+  if (before.alertAfterFailures !== undefined && after.alertAfterFailures !== undefined && before.alertAfterFailures !== after.alertAfterFailures) {
+    const threshold = after.alertAfterFailures;
+    changes.push(threshold === null ? 'No longer tells you when it keeps failing' : `Tells you after ${threshold === 1 ? '1 failure' : `${threshold} failures in a row`}`);
+  }
 
   if (changes.length === 0 && origin !== 'activate' && origin !== 'deactivate') changes.push('Saved without changes');
   return changes;
