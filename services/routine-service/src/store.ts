@@ -46,6 +46,8 @@ export interface ExecutionRow {
   error: string | null;
   resume_count: number;
   routine_version: number | null;
+  /** `test` = a "Try this step" run: not listed, counted or announced. */
+  kind: 'live' | 'test';
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -304,12 +306,13 @@ export async function insertExecution(
     traceId: string | null;
     /** Set when a `routine.run` step started this execution. */
     parent?: { actionId: string; executionId: string; depth: number };
+    kind?: 'live' | 'test';
   },
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
     `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload,
-                             parent_action_id, parent_execution_id, call_depth, routine_version)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14)
+                             parent_action_id, parent_execution_id, call_depth, routine_version, kind)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14, $15)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -327,6 +330,7 @@ export async function insertExecution(
       execution.parent?.executionId ?? null,
       execution.parent?.depth ?? 0,
       execution.routine.version,
+      execution.kind ?? 'live',
     ],
   );
   return rows[0] ?? null;
@@ -407,7 +411,7 @@ export async function listExecutions(
               WHERE a.execution_id = e.id AND a.status = 'FAILED'
               ORDER BY a.finished_at DESC NULLS LAST LIMIT 1) AS error_code
        FROM executions e
-      WHERE e.owner_id = $1
+      WHERE e.owner_id = $1 AND e.kind = 'live'
         AND ($2::uuid IS NULL OR e.routine_id = $2)
         AND ($3::text IS NULL OR e.status = $3)
       ORDER BY e.created_at DESC
@@ -428,7 +432,7 @@ export async function executionStats(
   const { rows } = await db.query<{ status: ExecutionStatus; recent: number; total: number }>(
     `SELECT status, count(*) FILTER (WHERE created_at >= $2)::int AS recent, count(*)::int AS total
        FROM executions
-      WHERE owner_id = $1 AND (created_at >= $2 OR status = ANY($3))
+      WHERE owner_id = $1 AND kind = 'live' AND (created_at >= $2 OR status = ANY($3))
       GROUP BY status`,
     [ownerId, since, IN_FLIGHT_STATUSES],
   );
@@ -506,6 +510,37 @@ export async function markActionRetrying(db: Queryable, id: string, attempt: num
       WHERE id = $1`,
     [id, attempt + 1, error, processedBy],
   );
+}
+
+// ---------------------------------------------------------------- test runs (06-engine §12)
+
+/**
+ * The completed steps of a sample run, copied as COMPLETED rows into a test run – so the step being
+ * tried resolves `{{actions.…}}`, `{{vars.…}}` and loop items to real values. The tried step's own
+ * key (and its loop children) is left out: the test run adds it as the one PENDING step.
+ */
+export async function copySampleActions(db: Queryable, testExecutionId: string, sampleExecutionId: string, triedKey: string): Promise<void> {
+  const sample = (await listExecutionActions(db, sampleExecutionId)).filter((action) => action.status === 'COMPLETED');
+  const tried = new Set(sample.filter((action) => action.key === triedKey).map((action) => action.id));
+  const ids = new Map(sample.map((action) => [action.id, randomUUID()]));
+  for (const action of sample) {
+    if (tried.has(action.id) || (action.parent_id && tried.has(action.parent_id))) continue;
+    if (action.parent_id && !ids.has(action.parent_id)) continue; // a child of a step that didn't complete
+    await db.query(
+      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, resolved_params, status, output, for_each,
+                                      parent_id, loop_item, loop_index, processed_by, finished_at)
+       SELECT $1, $2, key, type, step, position, params, resolved_params, 'COMPLETED', output, for_each,
+              $3, loop_item, loop_index, processed_by, finished_at
+         FROM execution_actions WHERE id = $4`,
+      [ids.get(action.id), testExecutionId, action.parent_id ? ids.get(action.parent_id) : null, action.id],
+    );
+  }
+}
+
+/** Test runs are scratch paper: gone after `ttlMs`. Returns how many were deleted. */
+export async function deleteExpiredTestRuns(db: Queryable, ttlMs: number): Promise<number> {
+  const { rowCount } = await db.query(`DELETE FROM executions WHERE kind = 'test' AND created_at < now() - make_interval(secs => $1)`, [ttlMs / 1000]);
+  return rowCount ?? 0;
 }
 
 /** A step as the routine defines it now – resume runs reset steps with their current settings. */
@@ -674,8 +709,8 @@ export async function refreshHealthIfDue(pool: Pool, now = new Date(), hourUtc =
     if (last[0] && last[0].last_run_at.toISOString().slice(0, 10) === now.toISOString().slice(0, 10)) return false;
     await client.query(
       `UPDATE routines r SET
-         runs_30d = (SELECT count(*) FROM executions e WHERE e.routine_id = r.id AND e.status IN ('COMPLETED', 'FAILED') AND e.created_at > $1::timestamptz - interval '30 days'),
-         failures_30d = (SELECT count(*) FROM executions e WHERE e.routine_id = r.id AND e.status = 'FAILED' AND e.created_at > $1::timestamptz - interval '30 days')`,
+         runs_30d = (SELECT count(*) FROM executions e WHERE e.routine_id = r.id AND e.kind = 'live' AND e.status IN ('COMPLETED', 'FAILED') AND e.created_at > $1::timestamptz - interval '30 days'),
+         failures_30d = (SELECT count(*) FROM executions e WHERE e.routine_id = r.id AND e.kind = 'live' AND e.status = 'FAILED' AND e.created_at > $1::timestamptz - interval '30 days')`,
       [now],
     );
     await client.query(
@@ -707,6 +742,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     calledBy: row.parent_execution_id,
     resumeCount: row.resume_count,
     routineVersion: row.routine_version,
+    kind: row.kind,
     ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({

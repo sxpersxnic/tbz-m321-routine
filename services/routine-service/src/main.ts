@@ -21,7 +21,7 @@ import { ExecutionEngine } from './engine.ts';
 import { parseActionResult, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
 import { registerRoutes } from './api.ts';
 import { Scheduler } from './scheduler.ts';
-import { refreshHealthIfDue } from './store.ts';
+import { deleteExpiredTestRuns, refreshHealthIfDue } from './store.ts';
 
 const SERVICE = 'routine-service';
 const logger = createLogger(SERVICE);
@@ -78,11 +78,17 @@ const relayLoop = relay.start();
 const scheduler = new Scheduler(pool, engine, logger);
 const schedulerLoop = startLoop('scheduler', envInt('SCHEDULER_INTERVAL_MS', 1_000), logger, () => scheduler.tick());
 let housekeepingRuns = 0;
+const testRunTtlMs = envInt('TEST_RUN_TTL_MS', 3_600_000);
 const housekeepingLoop = startLoop('housekeeping', 2_000, logger, async () => {
   await engine.markStaleExecutions();
   if (housekeepingRuns++ % 1_800 === 0) await relay.purgePublished();
-  // nightly 30-day health counts: tried every minute, done once a day by one replica
-  if (housekeepingRuns % 30 === 0 && (await refreshHealthIfDue(pool))) logger.info('routine health refreshed');
+  if (housekeepingRuns % 30 === 0) {
+    // nightly 30-day health counts: tried every minute, done once a day by one replica
+    if (await refreshHealthIfDue(pool)) logger.info('routine health refreshed');
+    // test runs ("Try this step") are gone after an hour; deleting twice is harmless
+    const deleted = await deleteExpiredTestRuns(pool, testRunTtlMs);
+    if (deleted > 0) logger.info({ deleted }, 'expired test runs deleted');
+  }
 });
 
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });

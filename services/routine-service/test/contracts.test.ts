@@ -101,6 +101,18 @@ describe('v2 additions to the v1 contracts (05-messaging §3)', () => {
     }
   });
 
+  it('ActionRequested as produced, with its context', () => {
+    const message = actionRequested({
+      ...ids,
+      actionId: randomUUID(),
+      actionKey: 'weather',
+      actionType: 'weather.get',
+      params: { city: 'Bern' },
+      context: { mode: 'test', routineName: 'Morning', stepIndex: 1, stepCount: 2, depth: 0 },
+    });
+    assert.deepEqual(contractErrors('action-requested.v1.schema.json', message.envelope), []);
+  });
+
   it('ActionRequested carries an optional context', () => {
     const message = requested('budget.recordTransaction');
     message.data.context = { mode: 'test', timezone: 'Europe/Zurich', currency: 'CHF', routineName: 'Lunch log', stepIndex: 2, stepCount: 4, depth: 0, areaId: null };

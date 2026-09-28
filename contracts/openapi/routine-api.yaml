@@ -294,6 +294,33 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/InvalidRoutine' }
 
+  /api/v1/routines/test-step:
+    post:
+      summary: '"Try this step": a test run of one step of a saved routine'
+      description: |
+        Creates an execution with kind = test holding the step (it may be unsaved). References
+        resolve against a sample run – `sampleExecutionId`, else the routine's last run – whose
+        completed steps are copied into the test run. Only side-effect-free steps really run
+        (scripting, weather.get, summary.generate); others are SKIPPED with skipReason test.
+        Poll GET /api/v1/executions/{id}. Test runs are not listed, counted or announced, and are
+        deleted after TEST_RUN_TTL_MS (1 h).
+      operationId: testStep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [routineId, action]
+              properties:
+                routineId: { type: string, format: uuid }
+                action: { $ref: '#/components/schemas/ActionInput' }
+                sampleExecutionId: { type: string, format: uuid }
+      responses:
+        '201': { description: the test run, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+
   /api/v1/executions/{executionId}/resume:
     parameters:
       - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -512,6 +539,7 @@ components:
         calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
         resumeCount: { type: integer, minimum: 0, description: 'how often the execution was resumed ("Retry from here")' }
         routineVersion: { type: [integer, 'null'], description: 'the routine version the run used; null for runs before v2' }
+        kind: { enum: [live, test], description: 'test = a "Try this step" run (only returned by GET /executions/{id})' }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: shared ID in all logs and messages of this execution }
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }

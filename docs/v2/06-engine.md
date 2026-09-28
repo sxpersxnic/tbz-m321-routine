@@ -277,9 +277,13 @@ Cards are removed when the condition ends.
 
 ## 12. Test runs
 
-`POST /api/v1/routines/test-step` `{ action, sampleExecutionId? }` creates an execution with
-`kind = 'test'` and one action. The template scope comes from `sampleExecutionId` (the last
-run by default), so references resolve to real values. The client polls
+`POST /api/v1/routines/test-step` `{ routineId, action, sampleExecutionId? }` creates an
+execution with `kind = 'test'` and one action (a run needs its routine, so only saved routines
+can try a step – the step itself may be unsaved). The template scope comes from
+`sampleExecutionId` (the routine's last run by default): its completed steps are copied into
+the test run as `COMPLETED` rows, so references, variables and loop items resolve to real
+values through the normal scope. In M1 only engine scripting steps and `weather.get` /
+`summary.generate` run; others are `SKIPPED` (`test`). The client polls
 `GET /api/v1/executions/:id` (≤ 10 s). Test executions are excluded from lists, stats, health
 and events, and deleted after 1 hour.
 

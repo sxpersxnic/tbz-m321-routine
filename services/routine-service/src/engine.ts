@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, enqueue, withTransaction, type ErrorCode, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
-import type { ExecutionTrigger } from './domain/definition.ts';
+import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import {
   actionRequested,
@@ -19,11 +19,12 @@ import {
   appendLog,
   findExecutionByIdempotencyKey,
   getRoutine,
-  insertExecution,
   insertExecutionActions,
   insertLoopActions,
   listExecutionActions,
   lockExecution,
+  copySampleActions,
+  insertExecution,
   markExecutionResumed,
   recordRunOutcome,
   resetForResume,
@@ -70,6 +71,13 @@ function subRoutineOutput(actions: ExecutionActionRow[]): Record<string, unknown
   const vars = variablesOf(actions);
   return { result: vars.result ?? null, vars };
 }
+
+/**
+ * What a test run may really do in M1 (06-engine §12): the engine's own scripting steps and the
+ * integration-worker steps without side effects. Everything else is skipped (`test`). M2 takes
+ * this from the manifests (`sideEffects: false`, `preview`).
+ */
+const TEST_SAFE_TYPES: ReadonlySet<string> = new Set([...CONTROL_ACTION_TYPES, 'weather.get', 'summary.generate']);
 
 /** `processed_by` of what the engine did itself (scripting actions, loop expansion). */
 const ENGINE = 'routine-engine';
@@ -235,6 +243,35 @@ export class ExecutionEngine {
   }
 
   /**
+   * "Try this step" (06-engine §12): a test run of one step. References resolve against `sample`
+   * (normally the routine's last run), whose completed steps are copied into the test run. Only
+   * test-safe steps really run; the client polls the returned execution.
+   */
+  async createTestRun(routine: RoutineRow, action: ActionDefinition, sample: ExecutionRow | null): Promise<string> {
+    const id = await withTransaction(this.#pool, async (client) => {
+      const execution = await insertExecution(client, {
+        id: randomUUID(),
+        routine,
+        trigger: sample?.trigger_type ?? 'manual',
+        scheduledFor: null,
+        idempotencyKey: null,
+        payload: sample?.trigger_payload ?? null,
+        correlationId: currentContext().correlationId ?? randomUUID(),
+        traceId: currentTraceId(),
+        kind: 'test',
+      });
+      if (!execution) throw new Error('test run could not be created');
+      if (sample) await copySampleActions(client, execution.id, sample.id, action.key);
+      await insertExecutionActions(client, execution.id, [{ ...action, id: randomUUID() }]);
+      await appendLog(client, execution.id, 'TRIGGERED', `Test of step "${action.key}"${sample ? ` with the values of run ${sample.id}` : ''}`);
+      return execution.id;
+    });
+    await this.start(id);
+    this.#logger.info({ executionId: id, routineId: routine.id, actionType: action.type }, 'test run started');
+    return id;
+  }
+
+  /**
    * "Retry from here" (06-engine §6): a FAILED run goes on from its failed step. Completed steps keep
    * their results; the failed step and the steps skipped because of it run again, with the routine's
    * current settings for them. `not_failed` when the run isn't FAILED (any more).
@@ -334,6 +371,14 @@ export class ExecutionEngine {
               continue;
             }
 
+            // a test run tries only what can't change anything
+            if (execution.kind === 'test' && !TEST_SAFE_TYPES.has(action.type)) {
+              await markActionSkipped(client, action.id, 'test');
+              await appendLog(client, execution.id, 'ACTION_SKIPPED', `Skipped – ${action.type} doesn't run in a test`, action.key);
+              Object.assign(action, { status: 'SKIPPED', skip_reason: 'test' });
+              continue;
+            }
+
             let params: Record<string, unknown>;
             try {
               params = resolveTemplates(action.params, scope) as Record<string, unknown>;
@@ -400,6 +445,13 @@ export class ExecutionEngine {
                 actionKey: action.key,
                 actionType: action.type,
                 params,
+                context: {
+                  mode: execution.kind,
+                  routineName: execution.routine_name,
+                  stepIndex: action.step,
+                  stepCount: Math.max(...actions.map((candidate) => candidate.step)),
+                  depth: 0,
+                },
                 correlationId: execution.correlation_id,
               }),
             );
@@ -414,8 +466,10 @@ export class ExecutionEngine {
 
         case 'complete': {
           await updateExecutionStatus(client, execution.id, 'COMPLETED');
-          await recordRunOutcome(client, execution.routine_id, 'COMPLETED');
           await appendLog(client, execution.id, 'COMPLETED', 'All actions completed successfully');
+          // a test run is scratch paper: no health, no events
+          if (execution.kind === 'test') return;
+          await recordRunOutcome(client, execution.routine_id, 'COMPLETED');
           const durationMs = Date.now() - (execution.started_at ?? execution.created_at).getTime();
           await enqueue(
             client,
@@ -442,6 +496,7 @@ export class ExecutionEngine {
           await skipPendingActions(client, execution.id);
           await updateExecutionStatus(client, execution.id, 'FAILED', { error: reason });
           await appendLog(client, execution.id, 'FAILED', reason);
+          if (execution.kind === 'test') return;
           await enqueue(
             client,
             executionFailed({

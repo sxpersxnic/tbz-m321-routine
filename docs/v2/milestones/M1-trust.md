@@ -65,7 +65,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - Tile health line, detail *Health* row, setting *Tell me after N failures in a row* on the
     settings page ([02 §4, §5](../02-experience.md)).
 
-- [ ] **M1-10 · Test a step (engine + API)**
+- [x] **M1-10 · Test a step (engine + API)**
   - `executions.kind`, `POST /api/v1/routines/test-step`, test-run exclusion from lists, stats,
     health, events. Cleanup job. In M1 only **engine** capabilities and values that the
     **integration-worker** marks side-effect-free (`weather.get`, `summary.generate`) run.

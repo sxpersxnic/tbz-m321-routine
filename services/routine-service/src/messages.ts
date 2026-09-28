@@ -93,6 +93,8 @@ export function actionRequested(input: {
   actionKey: string;
   actionType: string;
   params: Record<string, unknown>;
+  /** How the step runs (04-domain-platform §3.1): mode live | test, routine name, position, event depth. */
+  context?: { mode: 'live' | 'test'; routineName: string; stepIndex: number; stepCount: number; depth: number };
   correlationId: string;
   causationId?: string;
 }): OutgoingMessage {
@@ -113,6 +115,7 @@ export function actionRequested(input: {
         actionKey: input.actionKey,
         actionType: input.actionType,
         params: input.params,
+        ...(input.context && { context: input.context }),
       },
     }),
   };

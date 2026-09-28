@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { conflict, HttpError, notFound, requireUser, withContext, withTransaction, type Pool } from '@routine/service-kit';
-import { ACTION_TYPES } from './domain/action-catalog.ts';
+import { ACTION_TYPES, KNOWN_ACTION_TYPES } from './domain/action-catalog.ts';
 import { DefinitionError, ROUTINE_COLORS, validateRoutine, type Appearance, type RoutineDefinition, type RoutineInput } from './domain/definition.ts';
 import { nextRun } from './domain/schedule.ts';
 import type { ExecutionEngine } from './engine.ts';
@@ -379,6 +379,42 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
       if (!execution) throw notFound('Execution');
       const [actions, log] = await Promise.all([listExecutionActions(pool, execution.id), listLog(pool, execution.id)]);
       return executionDto(execution, actions, log);
+    },
+  );
+
+  // "Try this step" (06-engine §12): a test run of one (possibly unsaved) step of a saved routine
+  app.post<{ Body: { routineId: string; action: { key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: { action: string; is: boolean }; forEach?: string }; sampleExecutionId?: string } }>(
+    '/api/v1/routines/test-step',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['routineId', 'action'],
+          additionalProperties: false,
+          properties: { routineId: { type: 'string', format: 'uuid' }, action: actionSchema, sampleExecutionId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const user = requireUser(request);
+      const routine = await getRoutine(pool, user.id, request.body.routineId);
+      if (!routine) throw notFound('Routine');
+      const { action } = request.body;
+      if (!KNOWN_ACTION_TYPES.has(action.type)) throw new HttpError(422, 'invalid_routine', `unknown action type "${action.type}"`);
+      // the values to resolve references with: the given run of this routine, else its last one
+      const sample = request.body.sampleExecutionId
+        ? await getExecution(pool, user.id, request.body.sampleExecutionId)
+        : ((await listExecutions(pool, user.id, { routineId: routine.id, limit: 1 }))[0] ?? null);
+      if (request.body.sampleExecutionId && sample?.routine_id !== routine.id) throw notFound('Sample run');
+      const executionId = await engine.createTestRun(
+        routine,
+        { key: action.key, type: action.type, step: action.step ?? 1, params: action.params ?? {}, ...(action.runIf && { runIf: action.runIf }), ...(action.forEach && { forEach: action.forEach }) },
+        sample,
+      );
+      const execution = await getExecution(pool, user.id, executionId);
+      if (!execution) throw notFound('Execution');
+      const [actions, log] = await Promise.all([listExecutionActions(pool, executionId), listLog(pool, executionId)]);
+      return reply.status(201).header('location', `/api/v1/executions/${executionId}`).send(executionDto(execution, actions, log));
     },
   );
 
