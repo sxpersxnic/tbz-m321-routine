@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Routine Messaging
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Asynchronous contracts between the Routine services (RabbitMQ, AMQP 0-9-1).
 
@@ -142,6 +142,7 @@ components:
     ActionRequested:
       name: ActionRequested
       title: ActionRequested v1
+      summary: 'v1.1 (additive): actionType `<prefix>.<name>` (camelCase name), optional `context` { mode, timezone, currency, routineName, stepIndex, stepCount, depth, areaId }'
       payload: { $ref: '../schemas/action-requested.v1.schema.json' }
     ActionCompleted:
       name: ActionCompleted
@@ -150,6 +151,7 @@ components:
     ActionFailed:
       name: ActionFailed
       title: ActionFailed v1
+      summary: 'v1.1 (additive): error.code is one of the codes of docs/v2/05-messaging.md §6; v1 class names stay accepted'
       payload: { $ref: '../schemas/action-failed.v1.schema.json' }
     ActionRetryScheduled:
       name: ActionRetryScheduled
@@ -168,4 +170,5 @@ components:
     ExecutionFailed:
       name: ExecutionFailed
       title: ExecutionFailed v1
+      summary: 'v1.1 (additive): optional errorCode and failedActionType of the failed action'
       payload: { $ref: '../schemas/execution-failed.v1.schema.json' }

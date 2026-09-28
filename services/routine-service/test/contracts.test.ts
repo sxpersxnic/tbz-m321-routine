@@ -70,6 +70,52 @@ describe('routine-service produces valid messages', () => {
   });
 });
 
+describe('v2 additions to the v1 contracts (05-messaging §3)', () => {
+  const requested = (actionType: string) =>
+    actionRequested({ ...ids, actionId: randomUUID(), actionKey: 'step', actionType, params: {} }).envelope as { data: Record<string, unknown> };
+
+  it('ActionRequested accepts every v1 type and <prefix>.<camelCaseName>', () => {
+    const types = ['task.create', 'notification.send', 'weather.get', 'http.request', 'summary.generate', 'email.send', 'routine.run'];
+    for (const type of [...types, 'budget.recordTransaction', 'health2.logEntry']) {
+      assert.deepEqual(contractErrors('action-requested.v1.schema.json', requested(type)), [], type);
+    }
+  });
+
+  it('ActionRequested rejects three segments, upper-case prefixes and upper-case names', () => {
+    for (const type of ['budget.transaction.record', 'Budget.record', 'budget.RecordTransaction', 'budget.', '1x.run']) {
+      assert.notDeepEqual(contractErrors('action-requested.v1.schema.json', requested(type)), [], type);
+    }
+  });
+
+  it('ActionRequested carries an optional context', () => {
+    const message = requested('budget.recordTransaction');
+    message.data.context = { mode: 'test', timezone: 'Europe/Zurich', currency: 'CHF', routineName: 'Lunch log', stepIndex: 2, stepCount: 4, depth: 0, areaId: null };
+    assert.deepEqual(contractErrors('action-requested.v1.schema.json', message), []);
+    message.data.context = { mode: 'dry-run' };
+    assert.notDeepEqual(contractErrors('action-requested.v1.schema.json', message), []);
+  });
+
+  it('ActionFailed accepts the error codes and the v1 class names, nothing else', () => {
+    const failed = (code: string) =>
+      createEnvelope({
+        type: 'ActionFailed',
+        version: 1,
+        source: 'test',
+        data: { actionId: randomUUID(), executionId: randomUUID(), actionType: 'http.request', error: { code, message: 'x' }, attempts: 1, processedBy: 'w1' },
+      });
+    for (const code of ['NOT_FOUND', 'TIMEOUT', 'INVALID_PARAMS', 'INTERNAL', 'PermanentError', 'TransientError', 'Error', 'SubRoutineFailed']) {
+      assert.deepEqual(contractErrors('action-failed.v1.schema.json', failed(code)), [], code);
+    }
+    assert.notDeepEqual(contractErrors('action-failed.v1.schema.json', failed('TypeError')), []);
+  });
+
+  it('ExecutionFailed carries the failed action\'s error code and type', () => {
+    const message = executionFailed({ ...ids, routineName: 'X', reason: 'boom', failedActionKey: 'a' }).envelope as { data: Record<string, unknown> };
+    Object.assign(message.data, { errorCode: 'NOT_FOUND', failedActionType: 'http.request' });
+    assert.deepEqual(contractErrors('execution-failed.v1.schema.json', message), []);
+  });
+});
+
 describe('routine-service reads results tolerantly', () => {
   it('ignores unknown fields in ActionCompleted', () => {
     const envelope = createEnvelope({

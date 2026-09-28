@@ -48,6 +48,19 @@
             "string",
             "null"
           ]
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "error.code of the failed action (docs/v2/05-messaging.md §6), null when no action failed"
+        },
+        "failedActionType": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": true
