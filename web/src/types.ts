@@ -65,6 +65,27 @@ export interface RoutineInput {
   version?: number;
 }
 
+/** The kind of write that produced a version (docs/v2/06-engine.md §7). */
+export type VersionOrigin = 'create' | 'edit' | 'appearance' | 'activate' | 'deactivate' | 'webhook' | 'restore' | 'backfill';
+
+/** A routine as its history keeps it. */
+export interface VersionDefinition {
+  name: string;
+  description: string;
+  trigger: Trigger;
+  actions: ActionDefinition[];
+  icon: string | null;
+  color: string | null;
+  active: boolean;
+}
+
+export interface RoutineVersion {
+  version: number;
+  createdAt: string;
+  origin: VersionOrigin;
+  definition: VersionDefinition;
+}
+
 export interface ActionType {
   type: string;
   description: string;
@@ -83,6 +104,8 @@ export interface Execution {
   calledBy?: string | null;
   /** How often "Retry from here" was used on this run. */
   resumeCount: number;
+  /** The routine version the run used – null for runs before v2. */
+  routineVersion: number | null;
   scheduledFor: string | null;
   correlationId: string;
   traceId: string | null;

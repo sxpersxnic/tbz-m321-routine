@@ -315,6 +315,7 @@ export function RoutineDetail({ id }: { id: string }) {
           )}
           <Menu label="More actions" buttonClassName="btn on-tint-soft icon-only" items={[
             { label: 'Settings', icon: 'sliders', onSelect: () => navigate(`/routines/${r.id}/settings`) },
+            { label: 'History', icon: 'history', onSelect: () => navigate(`/routines/${r.id}/history`) },
             { label: 'Duplicate', icon: 'copy', onSelect: () => void duplicate(), disabled: duplicating },
           ]} />
         </div>

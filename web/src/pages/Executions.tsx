@@ -312,6 +312,7 @@ export function ExecutionDetail({ id }: { id: string }) {
               <h3>Tracing</h3>
               <dl className="kv">
                 <dt>Execution</dt><dd><code>{e.id}</code> <CopyButton value={e.id} what="execution ID" /></dd>
+                {e.routineVersion !== null && <><dt>Routine</dt><dd><a href={`#/routines/${e.routineId}/history?version=${e.routineVersion}`}>version {e.routineVersion}</a></dd></>}
                 <dt>Correlation</dt><dd><code>{e.correlationId}</code> <CopyButton value={e.correlationId} what="correlation ID" /></dd>
                 <dt>Trace</dt><dd>{e.traceId ? <><code>{e.traceId}</code> <CopyButton value={e.traceId} what="trace ID" /></> : '–'}</dd>
               </dl>

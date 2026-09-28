@@ -50,7 +50,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - Endpoints: list, get, restore ([services/routine-service.md §3](../services/routine-service.md)).
   - Tests: restore creates version n+1 equal to the old definition. Runs record their version.
 
-- [ ] **M1-07 · History page and diff (web)**
+- [x] **M1-07 · History page and diff (web)**
   - `web/src/lib/diff.ts` ([07 §8](../07-web.md)) with `node --test` fixtures. Route
     `#/routines/:id/history`. *History* in the routine `…` menu. Run detail links *version 7*.
 

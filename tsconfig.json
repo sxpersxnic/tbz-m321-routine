@@ -18,7 +18,6 @@
     "libs/*/src/**/*.ts",
     "libs/*/test/**/*.ts",
     "services/*/src/**/*.ts",
-    "services/*/test/**/*.ts",
-    "web/src/**/*.test.ts"
+    "services/*/test/**/*.ts"
   ]
 }

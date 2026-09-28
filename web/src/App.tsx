@@ -5,6 +5,7 @@ import { Icon, ThemeToggle } from './components/ui.tsx';
 import { matchRoute, useReachable, useRoute, usePolling, useSession } from './hooks.ts';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { ExecutionDetail, Executions } from './pages/Executions.tsx';
+import { History } from './pages/History.tsx';
 import { Notifications } from './pages/Inbox.tsx';
 import { Login } from './pages/Login.tsx';
 import { RoutineDetail, Routines } from './pages/Routines.tsx';
@@ -45,6 +46,7 @@ const NAV = NAV_GROUPS.flatMap((group) => group.items);
 function pageTitle(path: string): string {
   if (path === '/routines/new') return 'New routine';
   if (path.endsWith('/settings')) return 'Routine settings';
+  if (path.endsWith('/history')) return 'History';
   const item = NAV.slice(1).find((candidate) => path.startsWith(candidate.path));
   return item?.label ?? 'Overview';
 }
@@ -63,6 +65,7 @@ function Page({ path, refreshUnread }: { path: string; refreshUnread: () => void
   if ((params = matchRoute('/routines/:id/settings', path))) return <RoutineEditor key={params.id} id={params.id} />;
   // the old editor address – kept working for bookmarks and the docs
   if ((params = matchRoute('/routines/:id/edit', path))) return <Redirect to={`/routines/${params.id}/settings`} />;
+  if ((params = matchRoute('/routines/:id/history', path))) return <History key={params.id} id={params.id} />;
   if ((params = matchRoute('/routines/:id', path))) return <RoutineDetail key={params.id} id={params.id} />;
   if (path === '/executions') return <Executions />;
   if ((params = matchRoute('/executions/:id', path))) return <ExecutionDetail key={params.id} id={params.id} />;

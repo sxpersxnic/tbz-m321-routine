@@ -74,6 +74,7 @@ const ICONS: Record<string, ReactNode> = {
   sparkles: <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />,
   pause: <path d="M9 5v14M15 5v14" />,
   retry: <path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" />,
+  history: <path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5M12 8v4l3 2" />,
   inbox: <path d="M3 13l3-8h12l3 8v6H3zM3 13h5l1.5 2.5h5L16 13h5" />,
   flag: <path d="M5 21V4M5 4h11l-2 4 2 4H5" />,
   stack: <path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" />,

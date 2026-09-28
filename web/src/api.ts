@@ -7,6 +7,7 @@ import type {
   Notification,
   Routine,
   RoutineInput,
+  RoutineVersion,
   SystemStatus,
   Task,
   TaskList,
@@ -145,6 +146,9 @@ export const api = {
 
   routines: async () => (await get<{ items: Routine[] }>('/api/v1/routines')).items,
   routine: (id: string) => get<Routine>(`/api/v1/routines/${id}`),
+  routineVersions: async (id: string) => (await get<{ items: RoutineVersion[] }>(`/api/v1/routines/${id}/versions`)).items,
+  /** Saves an old version as the next one. */
+  restoreVersion: (id: string, version: number) => send<Routine>('POST', `/api/v1/routines/${id}/versions/${version}/restore`),
   createRoutine: (input: RoutineInput) => send<Routine>('POST', '/api/v1/routines', input),
   updateRoutine: (id: string, input: RoutineInput) => send<Routine>('PUT', `/api/v1/routines/${id}`, input),
   setAppearance: (id: string, appearance: { icon?: string | null; color?: string | null }) =>
