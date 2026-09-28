@@ -42,7 +42,7 @@
   - Update `contracts/asyncapi/routine-messaging.yaml`.
   - Done when: existing contract tests pass, new tests for widened pattern.
 
-- [ ] **M0-05 · Error codes in workers**
+- [x] **M0-05 · Error codes in workers**
   - Add `code` to service-kit `PermanentError`/`TransientError` (constructor option, default
     `INTERNAL`). Workers set codes: integration-worker maps HTTP status as in [05 §6](../05-messaging.md),
     SSRF → `FORBIDDEN_HOST`, timeouts → `TIMEOUT`, network → `UNREACHABLE`. task-service and

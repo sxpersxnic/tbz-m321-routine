@@ -35,6 +35,13 @@ describe('task-service messages', () => {
     assert.throws(() => parseCreateTask(request({ title: 'x' }, 'weather.get')), PermanentError);
   });
 
+  it('codes invalid params INVALID_PARAMS and foreign types NOT_AVAILABLE', () => {
+    assert.throws(() => parseCreateTask(request({})), { code: 'INVALID_PARAMS' });
+    assert.throws(() => parseCreateTask(request({ title: 'x', dueInDays: -1 })), { code: 'INVALID_PARAMS' });
+    assert.throws(() => parseCreateTask(request({ title: 'x', listId: 'groceries' })), { code: 'INVALID_PARAMS' });
+    assert.throws(() => parseCreateTask(request({ title: 'x' }, 'weather.get')), { code: 'NOT_AVAILABLE' });
+  });
+
   it('produces results that match the contracts', () => {
     const command = parseCreateTask(request({ title: 'Review' }));
     const error = new Error('db down');

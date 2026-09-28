@@ -1,8 +1,10 @@
 /** Translation between the message contracts and the task service's own model. */
-import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
+import { createEnvelope, errorCodeOf, PermanentError, type Envelope } from '@routine/service-kit';
 
 export const SOURCE = 'task-service';
 export const RESULTS_EXCHANGE = 'routine.action-results';
+
+const INVALID_PARAMS = { code: 'INVALID_PARAMS' } as const;
 
 export type Priority = 'low' | 'normal' | 'high';
 
@@ -39,20 +41,20 @@ export function parseCreateTask(envelope: Envelope): CreateTaskCommand {
   const ref = actionRef(envelope);
   const { ownerId, actionType, params } = envelope.data as { ownerId?: unknown; actionType?: unknown; params?: Record<string, unknown> };
   if (!ref || typeof ownerId !== 'string') throw new PermanentError('ActionRequested is missing ids');
-  if (actionType !== 'task.create') throw new PermanentError(`task-service cannot handle action type ${String(actionType)}`);
+  if (actionType !== 'task.create') throw new PermanentError(`task-service cannot handle action type ${String(actionType)}`, { code: 'NOT_AVAILABLE' });
 
   const title = params?.title;
-  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required');
+  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required', INVALID_PARAMS);
   const priority = params?.priority ?? 'normal';
-  if (priority !== 'low' && priority !== 'normal' && priority !== 'high') throw new PermanentError('param "priority" must be low, normal or high');
+  if (priority !== 'low' && priority !== 'normal' && priority !== 'high') throw new PermanentError('param "priority" must be low, normal or high', INVALID_PARAMS);
   const dueInDays = params?.dueInDays;
   if (dueInDays !== undefined && (!Number.isInteger(dueInDays) || (dueInDays as number) < 0)) {
-    throw new PermanentError('param "dueInDays" must be a non-negative integer');
+    throw new PermanentError('param "dueInDays" must be a non-negative integer', INVALID_PARAMS);
   }
 
   const listId = params?.listId;
   if (listId !== undefined && listId !== '' && (typeof listId !== 'string' || !UUID.test(listId))) {
-    throw new PermanentError('param "listId" must be a list id');
+    throw new PermanentError('param "listId" must be a list id', INVALID_PARAMS);
   }
 
   return {
@@ -80,7 +82,7 @@ export function actionFailed(ref: ActionRef, error: Error, attempts: number, pro
     type: 'ActionFailed',
     version: 1,
     source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempts, processedBy },
+    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempts, processedBy },
   });
 }
 
@@ -89,6 +91,6 @@ export function actionRetryScheduled(ref: ActionRef, error: Error, attempt: numb
     type: 'ActionRetryScheduled',
     version: 1,
     source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempt, nextAttemptInMs, processedBy },
+    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempt, nextAttemptInMs, processedBy },
   });
 }

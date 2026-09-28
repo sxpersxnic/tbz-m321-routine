@@ -1,5 +1,5 @@
 /** Translation between the message contracts and the notification service's own model. */
-import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
+import { createEnvelope, errorCodeOf, PermanentError, type Envelope } from '@routine/service-kit';
 
 export const SOURCE = 'notification-service';
 export const RESULTS_EXCHANGE = 'routine.action-results';
@@ -44,9 +44,9 @@ export function parseSendNotification(envelope: Envelope): { ref: ActionRef; dra
   const ref = actionRef(envelope);
   const { ownerId, actionType, params } = envelope.data as { ownerId?: unknown; actionType?: unknown; params?: Record<string, unknown> };
   if (!ref || typeof ownerId !== 'string') throw new PermanentError('ActionRequested is missing ids');
-  if (actionType !== 'notification.send') throw new PermanentError(`notification-service cannot handle action type ${String(actionType)}`);
+  if (actionType !== 'notification.send') throw new PermanentError(`notification-service cannot handle action type ${String(actionType)}`, { code: 'NOT_AVAILABLE' });
   const title = text(params?.title);
-  if (!title) throw new PermanentError('param "title" is required');
+  if (!title) throw new PermanentError('param "title" is required', { code: 'INVALID_PARAMS' });
   return {
     ref,
     draft: {
@@ -125,7 +125,7 @@ export function actionFailed(ref: ActionRef, error: Error, attempts: number, pro
     type: 'ActionFailed',
     version: 1,
     source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempts, processedBy },
+    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempts, processedBy },
   });
 }
 
@@ -134,6 +134,6 @@ export function actionRetryScheduled(ref: ActionRef, error: Error, attempt: numb
     type: 'ActionRetryScheduled',
     version: 1,
     source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempt, nextAttemptInMs, processedBy },
+    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempt, nextAttemptInMs, processedBy },
   });
 }

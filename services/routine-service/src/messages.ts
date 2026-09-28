@@ -2,7 +2,7 @@
  * Translation between this service's internal model and the message contracts
  * in contracts/schemas. Nothing outside this file knows the wire format.
  */
-import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
+import { createEnvelope, PermanentError, toErrorCode, type Envelope, type ErrorCode } from '@routine/service-kit';
 import type { ExecutionTrigger } from './domain/definition.ts';
 
 export const SOURCE = 'routine-service';
@@ -80,7 +80,7 @@ export function subRoutineResult(input: {
           version: 1,
           source: SOURCE,
           correlationId: input.correlationId,
-          data: { ...ref, error: { code: 'SubRoutineFailed', message: input.outcome.error }, attempts: 1 },
+          data: { ...ref, error: { code: 'SUBROUTINE_FAILED', message: input.outcome.error }, attempts: 1 },
         }),
       };
 }
@@ -171,6 +171,8 @@ export function executionFailed(input: {
   routineName: string;
   reason: string;
   failedActionKey: string | null;
+  failedActionType?: string | null;
+  errorCode?: ErrorCode | null;
   correlationId: string;
 }): OutgoingMessage {
   return {
@@ -188,6 +190,8 @@ export function executionFailed(input: {
         routineName: input.routineName,
         reason: input.reason,
         failedActionKey: input.failedActionKey,
+        failedActionType: input.failedActionType ?? null,
+        errorCode: input.errorCode ?? null,
       },
     }),
   };
@@ -197,7 +201,7 @@ export function executionFailed(input: {
 
 export type ActionResult =
   | { kind: 'completed'; actionId: string; executionId: string; output: Record<string, unknown>; processedBy: string; duplicate: boolean }
-  | { kind: 'failed'; actionId: string; executionId: string; error: string; attempts: number; processedBy: string }
+  | { kind: 'failed'; actionId: string; executionId: string; error: string; code: ErrorCode; attempts: number; processedBy: string }
   | { kind: 'retry'; actionId: string; executionId: string; attempt: number; nextAttemptInMs: number; error: string; processedBy: string };
 
 function requireString(data: Record<string, unknown>, field: string): string {
@@ -228,7 +232,15 @@ export function parseActionResult(envelope: Envelope): ActionResult {
         duplicate: data.duplicate === true,
       };
     case 'ActionFailed':
-      return { kind: 'failed', actionId, executionId, processedBy, error: errorText(data.error), attempts: Number(data.attempts ?? 1) };
+      return {
+        kind: 'failed',
+        actionId,
+        executionId,
+        processedBy,
+        error: errorText(data.error),
+        code: toErrorCode(data.error && typeof data.error === 'object' ? (data.error as { code?: unknown }).code : undefined),
+        attempts: Number(data.attempts ?? 1),
+      };
     case 'ActionRetryScheduled':
       return {
         kind: 'retry',

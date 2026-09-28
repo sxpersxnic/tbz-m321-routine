@@ -56,6 +56,7 @@ describe('notification.send', () => {
 
   it('rejects a missing title permanently (no retries)', () => {
     assert.throws(() => parseSendNotification(request({ body: 'x' })), PermanentError);
+    assert.throws(() => parseSendNotification(request({ body: 'x' })), { code: 'INVALID_PARAMS' });
   });
 
   it('produces a valid ActionCompleted', () => {

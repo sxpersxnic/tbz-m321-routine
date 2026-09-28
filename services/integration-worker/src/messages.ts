@@ -1,5 +1,5 @@
 /** Translation between the message contracts and the worker's own model. */
-import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
+import { createEnvelope, errorCodeOf, PermanentError, type Envelope } from '@routine/service-kit';
 
 export const SOURCE = 'integration-worker';
 export const RESULTS_EXCHANGE = 'routine.action-results';
@@ -42,7 +42,7 @@ export function actionFailed(ref: ActionRef, error: Error, attempts: number, pro
     type: 'ActionFailed',
     version: 1,
     source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempts, processedBy },
+    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempts, processedBy },
   });
 }
 
@@ -51,6 +51,6 @@ export function actionRetryScheduled(ref: ActionRef, error: Error, attempt: numb
     type: 'ActionRetryScheduled',
     version: 1,
     source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempt, nextAttemptInMs, processedBy },
+    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempt, nextAttemptInMs, processedBy },
   });
 }

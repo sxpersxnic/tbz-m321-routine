@@ -1,4 +1,4 @@
-import type { Queryable } from '@routine/service-kit';
+import type { ErrorCode, Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineDefinition, RunIf, TriggerDefinition } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
@@ -55,6 +55,7 @@ export interface ExecutionActionRow {
   attempts: number;
   output: Record<string, unknown> | null;
   error: string | null;
+  error_code: ErrorCode | null;
   processed_by: string | null;
   dispatched_at: Date | null;
   finished_at: Date | null;
@@ -396,13 +397,19 @@ export async function markActionCompleted(db: Queryable, id: string, output: Rec
   );
 }
 
-export async function markActionFailed(db: Queryable, id: string, error: string, processedBy: string | null, attempts?: number): Promise<void> {
+export async function markActionFailed(
+  db: Queryable,
+  id: string,
+  failure: { error: string; code: ErrorCode },
+  processedBy: string | null,
+  attempts?: number,
+): Promise<void> {
   await db.query(
     `UPDATE execution_actions
-        SET status = 'FAILED', error = $2, processed_by = COALESCE($3, processed_by),
-            attempts = COALESCE($4, attempts), finished_at = now(), updated_at = now()
+        SET status = 'FAILED', error = $2, error_code = $3, processed_by = COALESCE($4, processed_by),
+            attempts = COALESCE($5, attempts), finished_at = now(), updated_at = now()
       WHERE id = $1`,
-    [id, error, processedBy, attempts ?? null],
+    [id, failure.error, failure.code, processedBy, attempts ?? null],
   );
 }
 

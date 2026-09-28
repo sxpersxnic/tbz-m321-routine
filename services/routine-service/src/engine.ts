@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { currentContext, currentTraceId, enqueue, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
+import { currentContext, currentTraceId, enqueue, withTransaction, type ErrorCode, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
 import type { ExecutionTrigger } from './domain/definition.ts';
@@ -204,9 +204,9 @@ export class ExecutionEngine {
           this.#logger.info({ actionKey: action.key, processedBy: result.processedBy }, 'action completed');
           break;
         case 'failed':
-          await markActionFailed(client, action.id, result.error, result.processedBy, result.attempts);
+          await markActionFailed(client, action.id, { error: result.error, code: result.code }, result.processedBy, result.attempts);
           await appendLog(client, execution.id, 'ACTION_FAILED', `Failed after ${result.attempts} attempt(s): ${result.error}`, action.key);
-          Object.assign(action, { status: 'FAILED', error: result.error });
+          Object.assign(action, { status: 'FAILED', error: result.error, error_code: result.code });
           this.#logger.warn({ actionKey: action.key, err: result.error }, 'action failed');
           break;
         case 'retry':
@@ -245,10 +245,10 @@ export class ExecutionEngine {
         case 'dispatch': {
           const batch = actions.filter((action) => decision.keys.includes(action.key));
           const toSend: Array<{ action: ExecutionActionRow; params: Record<string, unknown> }> = [];
-          const fail = async (action: ExecutionActionRow, message: string) => {
-            await markActionFailed(client, action.id, message, null);
+          const fail = async (action: ExecutionActionRow, message: string, code: ErrorCode) => {
+            await markActionFailed(client, action.id, { error: message, code }, null);
             await appendLog(client, execution.id, 'ACTION_FAILED', message, action.key);
-            Object.assign(action, { status: 'FAILED', error: message });
+            Object.assign(action, { status: 'FAILED', error: message, error_code: code });
           };
 
           for (const action of batch) {
@@ -271,15 +271,15 @@ export class ExecutionEngine {
                 list = resolveTemplates(action.for_each, scope);
               } catch (error) {
                 if (!(error instanceof TemplateError)) throw error;
-                await fail(action, error.message);
+                await fail(action, error.message, 'TEMPLATE_ERROR');
                 continue;
               }
               if (!Array.isArray(list)) {
-                await fail(action, `"repeat for each" needs a list, ${action.for_each} is ${list === null ? 'null' : typeof list}`);
+                await fail(action, `"repeat for each" needs a list, ${action.for_each} is ${list === null ? 'null' : typeof list}`, 'INVALID_PARAMS');
                 continue;
               }
               if (list.length > MAX_LOOP_ITEMS) {
-                await fail(action, `"repeat for each" is limited to ${MAX_LOOP_ITEMS} items, the list has ${list.length}`);
+                await fail(action, `"repeat for each" is limited to ${MAX_LOOP_ITEMS} items, the list has ${list.length}`, 'INPUT_TOO_LARGE');
                 continue;
               }
               actions.push(...(await insertLoopActions(client, action, list)));
@@ -296,7 +296,7 @@ export class ExecutionEngine {
               params = resolveTemplates(action.params, scope) as Record<string, unknown>;
             } catch (error) {
               if (!(error instanceof TemplateError)) throw error;
-              await fail(action, error.message);
+              await fail(action, error.message, 'TEMPLATE_ERROR');
               continue;
             }
 
@@ -305,11 +305,11 @@ export class ExecutionEngine {
               const targetId = typeof params.routineId === 'string' && UUID.test(params.routineId) ? params.routineId : null;
               const target = targetId ? await getRoutine(client, execution.owner_id, targetId) : null;
               if (!target) {
-                await fail(action, 'the routine to run does not exist (any more)');
+                await fail(action, 'the routine to run does not exist (any more)', 'REFERENCE_GONE');
                 continue;
               }
               if (execution.call_depth >= MAX_CALL_DEPTH) {
-                await fail(action, `routines can call each other at most ${MAX_CALL_DEPTH} levels deep`);
+                await fail(action, `routines can call each other at most ${MAX_CALL_DEPTH} levels deep`, 'SUBROUTINE_FAILED');
                 continue;
               }
               await markActionDispatched(client, action.id, params);
@@ -331,7 +331,7 @@ export class ExecutionEngine {
                 output = evaluateControlAction(action.type, params);
               } catch (error) {
                 if (!(error instanceof ControlError)) throw error;
-                await fail(action, error.message);
+                await fail(action, error.message, 'INVALID_PARAMS');
                 continue;
               }
               await markActionCompleted(client, action.id, output, ENGINE);
@@ -407,6 +407,8 @@ export class ExecutionEngine {
               routineName: execution.routine_name,
               reason,
               failedActionKey: decision.failedKey,
+              failedActionType: failed?.type ?? null,
+              errorCode: failed?.error_code ?? null,
               correlationId: execution.correlation_id,
             }),
           );
