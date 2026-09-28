@@ -30,4 +30,10 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npx biome lint libs
       - run: npx tsc -p libs/service-kit/tsconfig.json
+      - name: Test database (the domain kit's tests use Postgres)
+        run: |
+          docker run -d --name test-db -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:17-alpine
+          for attempt in $(seq 1 30); do docker exec test-db pg_isready -U postgres -h 127.0.0.1 && break; sleep 1; done
       - run: node --test --disable-warning=ExperimentalWarning "libs/service-kit/test/**/*.test.ts"
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres

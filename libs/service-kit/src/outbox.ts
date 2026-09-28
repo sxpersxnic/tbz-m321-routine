@@ -58,11 +58,11 @@ export interface OutboxRelayOptions {
  */
 export class OutboxRelay {
   #pool: Pool;
-  #broker: Broker;
+  #broker: Pick<Broker, 'publish'>;
   #logger: Logger;
   #options: OutboxRelayOptions;
 
-  constructor(pool: Pool, broker: Broker, logger: Logger, options: OutboxRelayOptions) {
+  constructor(pool: Pool, broker: Pick<Broker, 'publish'>, logger: Logger, options: OutboxRelayOptions) {
     this.#pool = pool;
     this.#broker = broker;
     this.#logger = logger;

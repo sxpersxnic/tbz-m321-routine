@@ -58,6 +58,7 @@ channels:
     messages:
       ActionCompleted: { $ref: '#/components/messages/ActionCompleted' }
       ActionFailed: { $ref: '#/components/messages/ActionFailed' }
+      ActionAwaitingUser: { $ref: '#/components/messages/ActionAwaitingUser' }
       ActionRetryScheduled: { $ref: '#/components/messages/ActionRetryScheduled' }
 
   routineEvents:
@@ -180,6 +181,11 @@ components:
       title: ActionFailed v1
       summary: 'v1.1 (additive): error.code is one of the codes of docs/v2/05-messaging.md §6; v1 class names stay accepted'
       payload: { $ref: '../schemas/action-failed.v1.schema.json' }
+    ActionAwaitingUser:
+      name: ActionAwaitingUser
+      title: ActionAwaitingUser v1
+      summary: 'A human step waits for a person: { actionId, executionId, actionType, awaiting: { kind, refId, title, dueAt? }, processedBy } – from M3'
+      payload: { $ref: '../schemas/action-awaiting-user.v1.schema.json' }
     ActionRetryScheduled:
       name: ActionRetryScheduled
       title: ActionRetryScheduled v1

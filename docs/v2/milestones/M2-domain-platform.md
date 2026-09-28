@@ -29,7 +29,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - Until the profile projection exists (M5), every domain counts as enabled.
   - Tests: existing definition tests pass unchanged with the built-in + v1 manifests loaded.
 
-- [ ] **M2-03 · Domain kit: `startDomain`**
+- [x] **M2-03 · Domain kit: `startDomain`**
   - `libs/service-kit/src/domain.ts`, `events.ts`, `today.ts` (card helpers used from M5) per
     [04 §6](../04-domain-platform.md). Kit migration `processed_actions`. Topology declaration.
     Registration + heartbeat. Handler protocol incl. `awaiting` results (sent as

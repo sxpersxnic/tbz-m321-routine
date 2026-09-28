@@ -81,6 +81,7 @@ export async function runMigrations(pool: pg.Pool, directory: string, logger: Lo
 /** Tables the kit's own modules need, and the table each migration creates. */
 const KIT_MIGRATIONS = {
   outbox: { table: 'outbox' },
+  processed_actions: { table: 'processed_actions' },
 } as const;
 
 export type KitMigration = keyof typeof KIT_MIGRATIONS;
