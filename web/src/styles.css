@@ -821,7 +821,7 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--err-fill);
 
 .palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
 .palette-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 8px; text-align: left; font-weight: 500;
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 8px; text-align: left;
   border: 0; border-radius: var(--radius); background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer;
   transition: background 0.15s var(--ease), transform 0.1s var(--ease);
 }
@@ -938,7 +938,7 @@ button.notice-main { cursor: pointer; }
 .notice-time { font-size: 13px; color: var(--muted); white-space: nowrap; }
 .notice-title { display: block; font-weight: 600; min-width: 0; }
 .notice.read .notice-title { font-weight: 500; }
-.notice-body { display: block; white-space: pre-wrap; margin-top: 2px; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.notice-body { white-space: pre-wrap; margin-top: 2px; color: var(--text); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .notice-side { display: flex; align-items: flex-start; }
 .notice-detail-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13.5px; color: var(--muted); margin-bottom: 12px; }
 .notice-detail-body { white-space: pre-wrap; color: var(--text); overflow-wrap: anywhere; }
