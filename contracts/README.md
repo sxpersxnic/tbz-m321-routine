@@ -11,6 +11,7 @@ messages into its own internal model in its own `src/messages.ts`.
 | `openapi/notification-api.yaml` | Inbox (synchronous) |
 | `asyncapi/routine-messaging.yaml` | Exchanges, routing keys, producers/consumers (asynchronous) |
 | `schemas/*.schema.json` | JSON Schemas of all messages, including the envelope and both versions of `ExecutionCompleted` |
+| `schemas/domain-manifest.v1.schema.json` | The domain manifest (v2). The kit ships an identical copy for runtime validation (`libs/service-kit/src/`), kept in step by a kit test |
 | `validate.ts` | Helper for contract tests (tests only, never at runtime) |
 
 ## Identity

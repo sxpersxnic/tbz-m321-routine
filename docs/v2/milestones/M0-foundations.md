@@ -25,7 +25,7 @@
     it.
   - Done when: behaviour unchanged, `npm test` green, `scripts/demo.sh all` green.
 
-- [ ] **M0-03 · Manifest types**
+- [x] **M0-03 · Manifest types**
   - `libs/service-kit/src/manifest.ts`: the types of [04 §2](../04-domain-platform.md),
     `validateManifest` (ajv against the schema), `manifestDigest` (SHA-256 of canonical
     JSON, keys sorted recursively).

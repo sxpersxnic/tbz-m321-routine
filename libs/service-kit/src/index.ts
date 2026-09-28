@@ -8,5 +8,6 @@ export * from './errors.ts';
 export * from './http.ts';
 export * from './lifecycle.ts';
 export * from './logger.ts';
+export * from './manifest.ts';
 export * from './outbox.ts';
 export * from './trace-propagation.ts';
