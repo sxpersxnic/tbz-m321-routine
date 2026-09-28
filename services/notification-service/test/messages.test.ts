@@ -102,6 +102,7 @@ describe('routine health', () => {
     const draft = readExecutionEvent(unhealthy, 'tolerant');
     assert.equal(draft.title, '"Backup" failed 3 times in a row');
     assert.equal(draft.priority, 'high');
+    assert.equal(draft.category, 'action', 'shown on the Notifications page, unlike run outcomes');
     assert.equal(draft.executionId, base.executionId);
     assert.equal(draft.sourceKey, `routine:${base.routineId}:unhealthy:${base.executionId}`);
   });

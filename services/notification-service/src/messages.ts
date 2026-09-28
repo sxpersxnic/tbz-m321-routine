@@ -80,7 +80,8 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   const routineName = text(data.routineName) ?? 'Routine';
 
   if (envelope.type === 'RoutineUnhealthy') {
-    // one per streak: the run that crossed the threshold names it, and is what "open" leads to
+    // one per streak. Not a run outcome but news about the routine: category `action`, so it shows on
+    // the Notifications page (services/notification-service.md §4) – outcomes stay off it (c854565)
     const failures = typeof data.consecutiveFailures === 'number' ? data.consecutiveFailures : 2;
     return {
       ownerId,
@@ -88,7 +89,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
       title: `"${routineName}" failed ${failures} times in a row`,
       body: '',
       priority: 'high',
-      category: 'execution',
+      category: 'action',
       sourceKey: `routine:${text(data.routineId) ?? 'unknown'}:unhealthy:${executionId}`,
     };
   }
