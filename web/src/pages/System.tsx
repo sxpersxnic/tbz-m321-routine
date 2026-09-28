@@ -1,8 +1,11 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api.ts';
+import { useCreateRoutine } from '../components/onboarding.tsx';
+import { useToast } from '../components/toast.tsx';
 import { Sparkline, Topology } from '../components/topology.tsx';
 import { ErrorNote, Icon, StatusBadge } from '../components/ui.tsx';
-import { StatusIcon } from '../components/visual.tsx';
+import { ActionGlyph, StatusIcon } from '../components/visual.tsx';
+import { DEMO_SCENARIOS, type DemoScenario } from '../demo-scenarios.ts';
 import { JAEGER_URL, RABBITMQ_URL } from '../format.ts';
 import { usePolling } from '../hooks.ts';
 import type { QueueStatus } from '../types.ts';
@@ -37,6 +40,42 @@ function queueKind(name: string): 'dlq' | 'retry' | 'work' | 'other' {
   if (name.includes('.retry.')) return 'retry';
   if (name.includes('unrouted')) return 'other';
   return 'work';
+}
+
+/**
+ * The v1 demo routines, next to the topology they animate. Creating one stays on this page –
+ * the point is to watch the queues and replicas while it runs – and links to its run.
+ */
+function DemoScenarios() {
+  const toast = useToast();
+  const { busy, create } = useCreateRoutine();
+  const [runs, setRuns] = useState<Record<string, string>>({});
+
+  async function start(scenario: DemoScenario) {
+    const created = await create(scenario.id, scenario.routine, true);
+    if (!created?.executionId) return;
+    const executionId = created.executionId;
+    setRuns((current) => ({ ...current, [scenario.id]: executionId }));
+    toast(`"${created.routine.name}" is running`);
+  }
+
+  return (
+    <div className="card">
+      <div className="card-head"><h2 id="demo-scenarios">Demo scenarios</h2></div>
+      <ul className="service-list" aria-labelledby="demo-scenarios">
+        {DEMO_SCENARIOS.map((scenario) => (
+          <li key={scenario.id}>
+            <ActionGlyph type={scenario.routine.actions[0].type} size={30} />
+            <span className="grow"><strong>{scenario.label}</strong><span className="muted small block">{scenario.demonstrates}</span></span>
+            {runs[scenario.id] && <a className="see-all" href={`#/executions/${runs[scenario.id]}`}>Run <Icon name="chevron" size={14} /></a>}
+            <button type="button" className="btn small" disabled={Boolean(busy)} onClick={() => void start(scenario)}>
+              {busy === scenario.id ? <><span className="spinner" /> Starting</> : <><Icon name="play" size={14} /> Create &amp; run</>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export function System() {
@@ -201,6 +240,7 @@ export function System() {
             )}
             <p className="muted small" style={{ marginTop: 10 }}>Replay after a fix: <code>scripts/replay-dlq.sh &lt;queue&gt;</code></p>
           </div>
+          <DemoScenarios />
         </div>
       </div>
     </div>

@@ -13,7 +13,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
 
 ---
 
-- [ ] **M1-01 · Demo scenarios leave the gallery**
+- [x] **M1-01 · Demo scenarios leave the gallery**
   - Move *Flaky Webhook, Heartbeat, Load Test, Broken Endpoint* from `web/src/templates.ts`
     to `web/src/demo-scenarios.ts`. Render them on `System.tsx` under *Demo scenarios* with
     *Create & run* and a one-line "demonstrates …". Update `docs/demo.md` references if the

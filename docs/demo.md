@@ -37,8 +37,9 @@ Every scenario can be shown in the terminal (`scripts/demo.sh <scenario>`) or in
 3. **Infrastructure** shows the live topology. For the resilience demo, run `docker compose stop integration-worker` in the terminal
    and start a routine → the edge to the worker turns red (0 consumers), 1 message waits, and after 10 s the run becomes `WAITING`;
    `docker compose start integration-worker` → the edge turns green, the run becomes `COMPLETED`.
-4. The "Load Test" template together with `docker compose up -d --scale integration-worker=4` shows the distribution across replicas
-   (run page → Under the hood → worker instances). "Flaky Webhook" shows retries, "Broken Endpoint" a permanent error.
+4. **Infrastructure → Demo scenarios**: *Create & run* on "Load Test" together with `docker compose up -d --scale integration-worker=4`
+   shows the distribution across replicas (run page → Under the hood → worker instances). "Flaky Webhook" shows retries,
+   "Broken Endpoint" a permanent error, "Heartbeat" the scheduler. The page stays on the topology while they run.
 5. The "Webhook Inbox" template shows an external trigger: *Try it* sends a test event through the routine's own URL.
    The routine page shows the URL; *Technical details* has a ready-to-paste `curl` command, and *Run again* on a run
    replays the same webhook data.
