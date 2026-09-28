@@ -1,8 +1,7 @@
 /** Translation between the message contracts and the notification service's own model. */
-import { createEnvelope, errorCodeOf, PermanentError, type Envelope } from '@routine/service-kit';
+import { PermanentError, type Envelope } from '@routine/service-kit';
 
 export const SOURCE = 'notification-service';
-export const RESULTS_EXCHANGE = 'routine.action-results';
 
 export type Priority = 'low' | 'normal' | 'high';
 
@@ -15,13 +14,10 @@ export interface NotificationDraft {
   category: 'action' | 'execution';
   sourceKey: string;
   executionId: string | null;
+  /** For the notification.created event (not stored until M3). */
+  routineId?: string | null;
 }
 
-export interface ActionRef {
-  actionId: string;
-  executionId: string;
-  actionType: string;
-}
 
 function asPriority(value: unknown): Priority {
   return value === 'low' || value === 'high' ? value : 'normal';
@@ -31,33 +27,22 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined;
 }
 
-// ---------------------------------------------------------------- ActionRequested (notification.send)
+// ---------------------------------------------------------------- notification.send
 
-export function actionRef(envelope: Envelope): ActionRef | null {
-  const { actionId, executionId, actionType } = envelope.data;
-  if (typeof actionId !== 'string' || typeof executionId !== 'string') return null;
-  return { actionId, executionId, actionType: typeof actionType === 'string' ? actionType : 'unknown' };
-}
-
-export function parseSendNotification(envelope: Envelope): { ref: ActionRef; draft: NotificationDraft } {
-  if (envelope.type !== 'ActionRequested') throw new PermanentError(`unsupported message type ${envelope.type}`);
-  const ref = actionRef(envelope);
-  const { ownerId, actionType, params } = envelope.data as { ownerId?: unknown; actionType?: unknown; params?: Record<string, unknown> };
-  if (!ref || typeof ownerId !== 'string') throw new PermanentError('ActionRequested is missing ids');
-  if (actionType !== 'notification.send') throw new PermanentError(`notification-service cannot handle action type ${String(actionType)}`, { code: 'NOT_AVAILABLE' });
-  const title = text(params?.title);
+/** notification.send – a routine step's notification, once per actionId (source key). */
+export function sendDraft(command: { actionId: string; executionId: string; routineId: string | null; ownerId: string; params: Record<string, unknown> }): NotificationDraft {
+  const { params } = command;
+  const title = text(params.title);
   if (!title) throw new PermanentError('param "title" is required', { code: 'INVALID_PARAMS' });
   return {
-    ref,
-    draft: {
-      ownerId,
-      title: title.slice(0, 200),
-      body: typeof params?.body === 'string' ? params.body : params?.body === undefined ? '' : JSON.stringify(params.body),
-      priority: asPriority(params?.priority),
-      category: 'action',
-      sourceKey: `action:${ref.actionId}`,
-      executionId: ref.executionId,
-    },
+    ownerId: command.ownerId,
+    title: title.slice(0, 200),
+    body: typeof params.body === 'string' ? params.body : params.body === undefined ? '' : JSON.stringify(params.body),
+    priority: asPriority(params.priority),
+    category: 'action',
+    sourceKey: `action:${command.actionId}`,
+    executionId: command.executionId,
+    routineId: command.routineId,
   };
 }
 
@@ -78,6 +63,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   const ownerId = text(data.ownerId);
   if (!executionId || !ownerId) throw new PermanentError(`${envelope.type} is missing executionId/ownerId`);
   const routineName = text(data.routineName) ?? 'Routine';
+  const routineId = text(data.routineId) ?? null;
 
   if (envelope.type === 'RoutineUnhealthy') {
     // one per streak. Not a run outcome but news about the routine: category `action`, so it shows on
@@ -86,6 +72,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
     return {
       ownerId,
       executionId,
+      routineId,
       title: `"${routineName}" failed ${failures} times in a row`,
       body: '',
       priority: 'high',
@@ -100,6 +87,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
     return {
       ownerId,
       executionId,
+      routineId,
       title: `Routine "${routineName}" failed`,
       body: text(data.reason) ?? '',
       priority: 'high',
@@ -109,7 +97,7 @@ export function readExecutionEvent(envelope: Envelope, mode: CompletionReaderMod
   }
   if (envelope.type !== 'ExecutionCompleted') throw new PermanentError(`unsupported event type ${envelope.type}`);
 
-  const base = { ownerId, executionId, category: 'execution' as const, sourceKey: `execution:${executionId}:completed` };
+  const base = { ownerId, executionId, routineId, category: 'execution' as const, sourceKey: `execution:${executionId}:completed` };
   const legacyMessage = text(data.message);
 
   if (mode === 'legacy') {
@@ -137,31 +125,3 @@ export function readExecutionResumed(envelope: Envelope): { executionId: string;
   return { executionId, ownerId };
 }
 
-// ---------------------------------------------------------------- results
-
-export function actionCompleted(ref: ActionRef, output: Record<string, unknown>, processedBy: string, duplicate: boolean) {
-  return createEnvelope({
-    type: 'ActionCompleted',
-    version: 1,
-    source: SOURCE,
-    data: { ...ref, output, processedBy, completedAt: new Date().toISOString(), duplicate },
-  });
-}
-
-export function actionFailed(ref: ActionRef, error: Error, attempts: number, processedBy: string) {
-  return createEnvelope({
-    type: 'ActionFailed',
-    version: 1,
-    source: SOURCE,
-    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempts, processedBy },
-  });
-}
-
-export function actionRetryScheduled(ref: ActionRef, error: Error, attempt: number, nextAttemptInMs: number, processedBy: string) {
-  return createEnvelope({
-    type: 'ActionRetryScheduled',
-    version: 1,
-    source: SOURCE,
-    data: { ...ref, error: { code: errorCodeOf(error), message: error.message }, attempt, nextAttemptInMs, processedBy },
-  });
-}

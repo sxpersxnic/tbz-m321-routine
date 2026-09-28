@@ -48,7 +48,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - Tests: conformance checklist items for tasks. Events in the same transaction (kill between
     insert and publish → event still published after restart).
 
-- [ ] **M2-05 · notification-service becomes domain `notifications`**
+- [x] **M2-05 · notification-service becomes domain `notifications`**
   - Manifest with `notification.send` (and `notification.ask` declared from M3). Outbox,
     `notification.created` event.
 

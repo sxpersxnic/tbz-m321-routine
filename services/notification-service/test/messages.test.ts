@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { createEnvelope, PermanentError } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionCompleted, NOTIFYING_EVENTS, parseSendNotification, readExecutionEvent, readExecutionResumed } from '../src/messages.ts';
+import { NOTIFYING_EVENTS, readExecutionEvent, readExecutionResumed, sendDraft } from '../src/messages.ts';
 
 const base = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), routineName: 'Weekly Review' };
 const v2Fields = { notification: { title: 'Routine completed', body: 'All done' }, priority: 'high' };
@@ -46,22 +46,25 @@ describe('ExecutionCompleted reader – every phase of expand and contract', () 
 });
 
 describe('notification.send', () => {
-  const request = (params: Record<string, unknown>) =>
-    createEnvelope({
-      type: 'ActionRequested',
-      version: 1,
-      source: 'routine-service',
-      data: { actionId: randomUUID(), executionId: base.executionId, routineId: base.routineId, ownerId: base.ownerId, actionKey: 'n', actionType: 'notification.send', params },
-    });
+  const command = (params: Record<string, unknown>) => ({ actionId: randomUUID(), executionId: base.executionId, routineId: base.routineId, ownerId: base.ownerId, params });
 
   it('rejects a missing title permanently (no retries)', () => {
-    assert.throws(() => parseSendNotification(request({ body: 'x' })), PermanentError);
-    assert.throws(() => parseSendNotification(request({ body: 'x' })), { code: 'INVALID_PARAMS' });
+    assert.throws(() => sendDraft(command({ body: 'x' })), PermanentError);
+    assert.throws(() => sendDraft(command({ body: 'x' })), { code: 'INVALID_PARAMS' });
   });
 
-  it('produces a valid ActionCompleted', () => {
-    const { ref } = parseSendNotification(request({ title: 'Hallo' }));
-    assert.deepEqual(contractErrors('action-completed.v1.schema.json', actionCompleted(ref, { notificationId: randomUUID() }, 'n@1', false)), []);
+  it('keys the notification on the action, so a duplicate delivers nothing twice', () => {
+    const cmd = command({ title: 'Hallo', body: { a: 1 }, priority: 'high' });
+    assert.deepEqual(sendDraft(cmd), {
+      ownerId: base.ownerId,
+      title: 'Hallo',
+      body: '{"a":1}',
+      priority: 'high',
+      category: 'action',
+      sourceKey: `action:${cmd.actionId}`,
+      executionId: base.executionId,
+      routineId: base.routineId,
+    });
   });
 });
 
