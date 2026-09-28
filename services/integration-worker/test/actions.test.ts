@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
-import { PermanentError, TransientError } from '@routine/service-kit';
+import { PermanentError, TransientError, validateManifest } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
 import { executeAction, statusErrorCode, type ActionEnvironment } from '../src/actions.ts';
 import { actionCompleted, actionFailed } from '../src/messages.ts';
+import { CONNECTIONS_MANIFEST } from '../src/manifest.ts';
 
 let server: Server;
 let baseUrl: string;
@@ -139,5 +140,16 @@ describe('integration-worker actions', () => {
   it('summary.generate renders sections', async () => {
     const output = await executeAction('summary.generate', { title: 'Week 37', sections: { Weather: 'sunny' }, lines: ['End'] }, environment());
     assert.equal(output.text, 'Week 37\n• Weather: sunny\n• End');
+  });
+});
+
+describe('connections manifest (04 §7)', () => {
+  it('validates, and the worker executes every capability it declares', async () => {
+    const result = validateManifest(CONNECTIONS_MANIFEST);
+    assert.equal(result.valid, true, result.valid ? '' : result.errors.join('; '));
+    for (const capability of CONNECTIONS_MANIFEST.capabilities) {
+      // empty params: every declared type is known – it fails on its params, never as NOT_AVAILABLE
+      await assert.rejects(executeAction(capability.type, {}, environment()), (error: PermanentError) => error.code === 'INVALID_PARAMS', capability.type);
+    }
   });
 });

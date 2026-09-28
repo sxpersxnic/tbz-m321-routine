@@ -52,7 +52,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - Manifest with `notification.send` (and `notification.ask` declared from M3). Outbox,
     `notification.created` event.
 
-- [ ] **M2-06 · integration-worker becomes domain `connections`**
+- [x] **M2-06 · integration-worker becomes domain `connections`**
   - Manifest per [services/integration-worker.md §5](../services/integration-worker.md) (v1 types only).
     Keeps its own claim/lease logic. Uses the kit only for topology and registration
     (`startDomain` option `dispatch: false` + manual consume).
