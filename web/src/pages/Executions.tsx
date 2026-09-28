@@ -134,6 +134,7 @@ export function ExecutionDetail({ id }: { id: string }) {
   const toast = useToast();
   const now = useNow(500);
   const [rerunning, setRerunning] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [finished, setFinished] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const execution = usePolling(
@@ -183,6 +184,23 @@ export function ExecutionDetail({ id }: { id: string }) {
     }
   }
 
+  // "Retry from here": shown as running at once, then the server's answer replaces the guess
+  async function resume() {
+    setResuming(true);
+    execution.mutate((current) => ({ ...current, status: 'RUNNING', error: null, errorCode: null, finishedAt: null, resumeCount: current.resumeCount + 1 }));
+    try {
+      const resumed = await api.resume(e.id);
+      execution.mutate(() => resumed);
+      // polling starts again only now: a poll before the server resumed would see FAILED and stop it
+      setFinished(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      execution.reload();
+    } finally {
+      setResuming(false);
+    }
+  }
+
   const action = e.actions.find((candidate) => candidate.key === selected) ?? null;
   const workers = [...new Set(e.actions.map((candidate) => candidate.processedBy).filter(Boolean))];
   const done = e.actions.filter((candidate) => TERMINAL_ACTION.has(candidate.status)).length;
@@ -203,6 +221,7 @@ export function ExecutionDetail({ id }: { id: string }) {
           <h1 aria-live="polite">{HEADLINE[e.status]}</h1>
           <p>
             {e.calledBy ? <a href={`#/executions/${e.calledBy}`}>{started}</a> : started} · {dateTime(e.createdAt)} · <span className="tabular">{between(e.startedAt ?? e.createdAt, e.finishedAt, now)}</span>
+            {e.resumeCount > 0 && <> · Resumed {e.resumeCount}×</>}
           </p>
         </div>
         {!running && routine?.active && (
@@ -221,7 +240,7 @@ export function ExecutionDetail({ id }: { id: string }) {
         </div>
       )}
 
-      {e.status === 'FAILED' && <FailureCard e={e} />}
+      {e.status === 'FAILED' && <FailureCard e={e} onResume={() => void resume()} resuming={resuming} />}
       <RunOutcome actions={e.actions} status={e.status} />
 
       <Section id="flow-title" title="Steps">
@@ -339,18 +358,27 @@ function calledRun(e: Detail, action: ExecutionAction): string | undefined {
  * Failed at step n of m: the step as a sentence, what happened in plain words, and the one thing
  * to do about it (02-experience §7, §8). Runs from before v2 have no code and keep their raw error.
  */
-function FailureCard({ e }: { e: Detail }) {
+function FailureCard({ e, onResume, resuming }: { e: Detail; onResume: () => void; resuming: boolean }) {
   const failed = failedActions(e).sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
   const copy = failed && failureCopy(failed.errorCode, failed, typesOf(e));
-  if (!failed || !copy) return e.error ? <p className="error-note"><Icon name="warning" size={18} /> {e.error}</p> : null;
+  const retry = (primary: boolean) => (
+    <button type="button" className={`btn ${primary ? 'tinted' : ''}`} disabled={resuming} onClick={onResume}>
+      {resuming ? <span className="spinner" /> : <Icon name="retry" size={16} />} {FAILURE_ACTION_LABELS.retry}
+    </button>
+  );
+  if (!failed || !copy) {
+    return e.error ? <p className="error-note"><Icon name="warning" size={18} /> <span className="grow">{e.error}</span> {retry(false)}</p> : null;
+  }
 
   const steps = Math.max(...e.actions.map((action) => action.step));
   const edit = `#/routines/${e.routineId}/settings?step=${encodeURIComponent(failed.parentId ? (e.actions.find((action) => action.id === failed.parentId)?.key ?? failed.key) : failed.key)}`;
   const called = copy.action === 'openRun' ? calledRun(e, failed) : undefined;
-  // "Retry from here" comes with resuming (M1-05); pages for connections and settings don't exist yet
+  // retrying is always possible (02 §7: Retry from here, then the fix); the explanation decides which
+  // one stands out. Pages for connections and settings don't exist yet, so those point at the step too.
   const link = copy.action === 'openRun' && called
     ? { href: `#/executions/${called}`, label: FAILURE_ACTION_LABELS.openRun }
-    : copy.action === 'retry' ? null : { href: edit, label: FAILURE_ACTION_LABELS.editStep };
+    : { href: edit, label: FAILURE_ACTION_LABELS.editStep };
+  const retryFirst = copy.action === 'retry';
 
   return (
     <section className="failure" aria-labelledby="failure-title">
@@ -361,7 +389,10 @@ function FailureCard({ e }: { e: Detail }) {
           <ActionSentence type={failed.type} params={failed.params} types={typesOf(e)} />
         </div>
         <p>{copy.sentence}</p>
-        {link && <div className="row"><a className="btn tinted" href={link.href}>{link.label}</a></div>}
+        <div className="row">
+          {retry(retryFirst)}
+          <a className={`btn ${retryFirst ? '' : 'tinted'}`} href={link.href}>{link.label}</a>
+        </div>
       </div>
     </section>
   );

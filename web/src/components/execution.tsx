@@ -31,6 +31,7 @@ const KIND_TONE: Record<string, string> = {
   FAILED: 'err',
   ACTION_FAILED: 'err',
   ACTION_RETRY: 'warn',
+  RESUMED: 'info',
   WAITING: 'warn',
   RUNNING: 'info',
   ACTION_DISPATCHED: 'info',
@@ -49,6 +50,7 @@ const KIND_LABELS: Record<string, string> = {
   ACTION_COMPLETED: 'Completed',
   ACTION_FAILED: 'Failed',
   ACTION_RETRY: 'Retry',
+  RESUMED: 'Resumed',
 };
 
 export function Timeline({ log }: { log: ExecutionLogEntry[] }) {

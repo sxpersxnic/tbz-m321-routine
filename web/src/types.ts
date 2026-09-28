@@ -81,6 +81,8 @@ export interface Execution {
   trigger: ExecutionTrigger;
   /** The run whose "Run routine" step started this one. */
   calledBy?: string | null;
+  /** How often "Retry from here" was used on this run. */
+  resumeCount: number;
   scheduledFor: string | null;
   correlationId: string;
   traceId: string | null;

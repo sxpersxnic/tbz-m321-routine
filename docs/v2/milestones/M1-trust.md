@@ -40,7 +40,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - Tests: [services/routine-service.md §10](../services/routine-service.md) resume cases.
     System test: Broken Endpoint-like routine whose URL is fixed via mock-external, then resumed.
 
-- [ ] **M1-05 · Resume (web)**
+- [x] **M1-05 · Resume (web)**
   - Run detail: failure card with *Retry from here* and *Edit step* ([02 §7](../02-experience.md)).
     *Resumed N×* marker. Optimistic status → Running.
 

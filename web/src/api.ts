@@ -174,6 +174,8 @@ export const api = {
   routineExecutions: async (id: string, limit = 20) =>
     (await get<{ items: Execution[] }>(`/api/v1/routines/${id}/executions?limit=${limit}`)).items,
   execution: (id: string) => get<ExecutionDetail>(`/api/v1/executions/${id}`),
+  /** "Retry from here": a failed run goes on from its failed step. */
+  resume: (id: string) => send<ExecutionDetail>('POST', `/api/v1/executions/${id}/resume`),
   executionStats: (hours = 24) => get<ExecutionStats>(`/api/v1/executions/stats?hours=${hours}`),
 
   tasks: async (status?: Task['status']) => (await get<{ items: Task[] }>(`/api/v1/tasks${status ? `?status=${status}` : ''}`)).items,
