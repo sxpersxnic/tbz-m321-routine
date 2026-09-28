@@ -10,9 +10,10 @@
  */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { createPool, runKitMigrations, runMigrations, withTransaction, type ErrorCode, type Pool } from '@routine/service-kit';
+import { createHttpServer, createPool, runKitMigrations, runMigrations, withTransaction, type ErrorCode, type Pool } from '@routine/service-kit';
 import pg from 'pg';
 import pino from 'pino';
+import { registerRoutes } from '../../src/api.ts';
 import { validateRoutine, type RoutineInput } from '../../src/domain/definition.ts';
 import { ExecutionEngine, type TriggerRequest } from '../../src/engine.ts';
 import { getExecution, insertRoutine, listExecutionActions, listLog, setRoutineActive, type ExecutionActionRow, type RoutineRow } from '../../src/store.ts';
@@ -56,7 +57,7 @@ export async function engineHarness() {
     async routine(input: Partial<RoutineInput> & Pick<RoutineInput, 'actions'>): Promise<RoutineRow> {
       const definition = validateRoutine({ name: 'Test', trigger: { type: 'manual' }, ...input });
       const routine = await insertRoutine(pool, randomUUID(), ownerId, definition);
-      return setRoutineActive(pool, routine.id, true, null);
+      return setRoutineActive(pool, routine.id, true, null, ownerId);
     },
 
     /** Creates an execution and starts it, as RoutineTriggered would. Returns its id. */
@@ -98,6 +99,18 @@ export async function engineHarness() {
 
     fail: (executionId: string, actionId: string, error: string, code: ErrorCode = 'INTERNAL') =>
       engine.applyResult({ kind: 'failed', actionId, executionId, error, code, attempts: 1, processedBy: 'test-worker' }),
+
+    /** The real HTTP routes, signed in as the harness owner – call with `app.inject(…)`. */
+    async api() {
+      const app = createHttpServer({ service: 'routine-service-test', logger });
+      app.decorateRequest('user', null);
+      app.addHook('preHandler', async (request) => {
+        request.user = { id: ownerId, email: 'test@routine.local', roles: ['user'] };
+      });
+      registerRoutes(app, { pool, engine });
+      await app.ready();
+      return app;
+    },
 
     async close(): Promise<void> {
       await pool.end();

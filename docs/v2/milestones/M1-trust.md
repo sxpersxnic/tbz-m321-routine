@@ -44,7 +44,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - Run detail: failure card with *Retry from here* and *Edit step* ([02 §7](../02-experience.md)).
     *Resumed N×* marker. Optimistic status → Running.
 
-- [ ] **M1-06 · Versions (engine + API)**
+- [x] **M1-06 · Versions (engine + API)**
   - Migration: `routine_versions` + backfill, `executions.routine_version`. Every
     version-bumping store function inserts a version row in the same transaction.
   - Endpoints: list, get, restore ([services/routine-service.md §3](../services/routine-service.md)).

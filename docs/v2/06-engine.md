@@ -203,6 +203,12 @@ execution). Resume is allowed any number of times, and the run page shows *"Resu
 - Table `routine_versions (routine_id, version, definition jsonb, created_at, created_by, origin)`,
   PK `(routine_id, version)`. Every write that bumps `routines.version` inserts a row in the
   same transaction. Migration backfills the current version of every routine.
+- `definition` = name, description, trigger, actions, icon, color and `active` (never the
+  webhook token). `origin` = the kind of write: `create`, `edit`, `appearance`, `activate`,
+  `deactivate`, `webhook` (URL rotated), `restore`, `backfill`. Activation and URL rotation bump
+  the version (it is the optimistic lock), so they appear in the history too.
+- `GET …/versions` returns the definitions as well, so the History page can diff neighbours
+  without one request per version.
 - `executions.routine_version` records the version a run used (set in `createExecution`).
 - Restore = a normal update whose definition is the old version's (new version number).
 

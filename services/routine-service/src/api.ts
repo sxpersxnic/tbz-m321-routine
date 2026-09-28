@@ -11,6 +11,9 @@ import {
   executionStats,
   getExecution,
   getRoutine,
+  getVersion,
+  listVersions,
+  versionDto,
   insertRoutine,
   listExecutionActions,
   listExecutions,
@@ -90,6 +93,12 @@ const routineParams = {
   properties: { routineId: { type: 'string', format: 'uuid' } },
 } as const;
 
+const versionParams = {
+  type: 'object',
+  required: ['routineId', 'version'],
+  properties: { routineId: { type: 'string', format: 'uuid' }, version: { type: 'integer', minimum: 1 } },
+} as const;
+
 const executionParams = {
   type: 'object',
   required: ['executionId'],
@@ -156,7 +165,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
   app.post<{ Body: RoutineBody }>('/api/v1/routines', { schema: { body: routineBodySchema } }, async (request, reply) => {
     const user = requireUser(request);
     const definition = validate(request.body);
-    const routine = await insertRoutine(pool, randomUUID(), user.id, definition);
+    const routine = await withTransaction(pool, (client) => insertRoutine(client, randomUUID(), user.id, definition, user.id));
     request.log.info({ routineId: routine.id, name: routine.name }, 'routine created');
     return reply.status(201).header('location', `/api/v1/routines/${routine.id}`).send(routineDto(routine));
   });
@@ -180,7 +189,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
         if (request.body.version !== undefined && request.body.version !== routine.version) {
           throw conflict(`Routine was modified concurrently (expected version ${request.body.version}, current ${routine.version})`);
         }
-        return updateRoutine(client, routine, definition, firstRun(definition, routine.active));
+        return updateRoutine(client, routine, definition, firstRun(definition, routine.active), { by: user.id });
       });
       return routineDto(updated);
     },
@@ -194,7 +203,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
       const updated = await withTransaction(pool, async (client) => {
         const routine = await getRoutine(client, user.id, request.params.routineId, true);
         if (!routine) throw notFound('Routine');
-        return updateAppearance(client, routine.id, request.body);
+        return updateAppearance(client, routine.id, request.body, user.id);
       });
       return routineDto(updated);
     },
@@ -222,7 +231,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
         const updated = await withTransaction(pool, async (client) => {
           const routine = await getRoutine(client, user.id, request.params.routineId, true);
           if (!routine) throw notFound('Routine');
-          return setRoutineActive(client, routine.id, active, firstRun(routine, active));
+          return setRoutineActive(client, routine.id, active, firstRun(routine, active), user.id);
         });
         request.log.info({ routineId: updated.id, active }, active ? 'routine activated' : 'routine deactivated');
         return routineDto(updated);
@@ -239,10 +248,53 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
         const routine = await getRoutine(client, user.id, request.params.routineId, true);
         if (!routine) throw notFound('Routine');
         if (routine.trigger.type !== 'webhook') throw conflict('Routine is not triggered by a webhook');
-        return rotateWebhookToken(client, routine.id);
+        return rotateWebhookToken(client, routine.id, user.id);
       });
       request.log.info({ routineId: updated.id }, 'webhook token rotated');
       return routineDto(updated);
+    },
+  );
+
+  // ------------------------------------------------------------ versions (06-engine §7)
+
+  app.get<{ Params: { routineId: string } }>('/api/v1/routines/:routineId/versions', { schema: { params: routineParams } }, async (request) => {
+    const user = requireUser(request);
+    const routine = await getRoutine(pool, user.id, request.params.routineId);
+    if (!routine) throw notFound('Routine');
+    // with definitions: the history page diffs neighbouring versions (≤ 30 steps each, so it stays small)
+    return { items: (await listVersions(pool, routine.id)).map((version) => versionDto(version)) };
+  });
+
+  app.get<{ Params: { routineId: string; version: number } }>(
+    '/api/v1/routines/:routineId/versions/:version',
+    { schema: { params: versionParams } },
+    async (request) => {
+      const user = requireUser(request);
+      const routine = await getRoutine(pool, user.id, request.params.routineId);
+      if (!routine) throw notFound('Routine');
+      const version = await getVersion(pool, routine.id, request.params.version);
+      if (!version) throw notFound('Version');
+      return versionDto(version);
+    },
+  );
+
+  // Restore never rewrites history: the old definition becomes the next version.
+  app.post<{ Params: { routineId: string; version: number } }>(
+    '/api/v1/routines/:routineId/versions/:version/restore',
+    { schema: { params: versionParams } },
+    async (request) => {
+      const user = requireUser(request);
+      const restored = await withTransaction(pool, async (client) => {
+        const routine = await getRoutine(client, user.id, request.params.routineId, true);
+        if (!routine) throw notFound('Routine');
+        const version = await getVersion(client, routine.id, request.params.version);
+        if (!version) throw notFound('Version');
+        const { active: _active, ...old } = version.definition;
+        const definition = validate(old);
+        return updateRoutine(client, routine, definition, firstRun(definition, routine.active), { by: user.id, origin: 'restore' });
+      });
+      request.log.info({ routineId: restored.id, from: request.params.version, version: restored.version }, 'routine version restored');
+      return routineDto(restored);
     },
   );
 

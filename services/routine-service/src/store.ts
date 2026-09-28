@@ -1,6 +1,6 @@
 import type { ErrorCode, Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineDefinition, RunIf, TriggerDefinition } from './domain/definition.ts';
+import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, TriggerDefinition } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 
 // ---------------------------------------------------------------- rows
@@ -39,6 +39,7 @@ export interface ExecutionRow {
   call_depth: number;
   error: string | null;
   resume_count: number;
+  routine_version: number | null;
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -104,7 +105,67 @@ export async function getRoutine(db: Queryable, ownerId: string, id: string, for
   return rows[0] ?? null;
 }
 
-export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition): Promise<RoutineRow> {
+// ---------------------------------------------------------------- versions (06-engine §7)
+
+/** What changed in a version: the kind of write that produced it. */
+export type VersionOrigin = 'create' | 'edit' | 'appearance' | 'activate' | 'deactivate' | 'webhook' | 'restore' | 'backfill';
+
+/** A routine as its history keeps it – no ids, no webhook token. */
+export interface VersionDefinition extends RoutineDefinition {
+  active: boolean;
+}
+
+export interface RoutineVersionRow {
+  routine_id: string;
+  version: number;
+  definition: VersionDefinition;
+  created_at: Date;
+  created_by: string;
+  origin: VersionOrigin;
+}
+
+export function versionDefinition(row: RoutineRow): VersionDefinition {
+  return {
+    name: row.name,
+    description: row.description,
+    trigger: row.trigger,
+    actions: row.actions,
+    icon: row.icon,
+    color: row.color as RoutineColor | null,
+    active: row.active,
+  };
+}
+
+/** Stores the version a write just produced – call it in that write's transaction. Returns the row for chaining. */
+async function recordVersion(db: Queryable, row: RoutineRow, origin: VersionOrigin, by: string): Promise<RoutineRow> {
+  await db.query(
+    `INSERT INTO routine_versions (routine_id, version, definition, created_by, origin) VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (routine_id, version) DO NOTHING`,
+    [row.id, row.version, JSON.stringify(versionDefinition(row)), by, origin],
+  );
+  return row;
+}
+
+export async function listVersions(db: Queryable, routineId: string): Promise<RoutineVersionRow[]> {
+  const { rows } = await db.query<RoutineVersionRow>('SELECT * FROM routine_versions WHERE routine_id = $1 ORDER BY version DESC', [routineId]);
+  return rows;
+}
+
+export async function getVersion(db: Queryable, routineId: string, version: number): Promise<RoutineVersionRow | null> {
+  const { rows } = await db.query<RoutineVersionRow>('SELECT * FROM routine_versions WHERE routine_id = $1 AND version = $2', [routineId, version]);
+  return rows[0] ?? null;
+}
+
+export function versionDto(row: RoutineVersionRow, withDefinition = true) {
+  return {
+    version: row.version,
+    createdAt: row.created_at,
+    origin: row.origin,
+    ...(withDefinition && { definition: row.definition }),
+  };
+}
+
+export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition, by: string = ownerId): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
     `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token, icon, color)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
@@ -120,7 +181,7 @@ export async function insertRoutine(db: Queryable, id: string, ownerId: string, 
       definition.color ?? null,
     ],
   );
-  return rows[0];
+  return recordVersion(db, rows[0], 'create', by);
 }
 
 export async function updateRoutine(
@@ -128,6 +189,7 @@ export async function updateRoutine(
   routine: RoutineRow,
   definition: RoutineDefinition,
   nextRunAt: Date | null,
+  change: { by: string; origin?: VersionOrigin } = { by: routine.owner_id },
 ): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
     `UPDATE routines
@@ -151,11 +213,11 @@ export async function updateRoutine(
       definition.color ?? null,
     ],
   );
-  return rows[0];
+  return recordVersion(db, rows[0], change.origin ?? 'edit', change.by);
 }
 
 /** Icon and colour only – the definition, schedule and webhook stay untouched. */
-export async function updateAppearance(db: Queryable, id: string, appearance: Appearance): Promise<RoutineRow> {
+export async function updateAppearance(db: Queryable, id: string, appearance: Appearance, by: string): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
     `UPDATE routines
         SET icon = CASE WHEN $2 THEN $3 ELSE icon END,
@@ -164,15 +226,15 @@ export async function updateAppearance(db: Queryable, id: string, appearance: Ap
       WHERE id = $1 RETURNING *`,
     [id, appearance.icon !== undefined, appearance.icon ?? null, appearance.color !== undefined, appearance.color ?? null],
   );
-  return rows[0];
+  return recordVersion(db, rows[0], 'appearance', by);
 }
 
-export async function setRoutineActive(db: Queryable, id: string, active: boolean, nextRunAt: Date | null): Promise<RoutineRow> {
+export async function setRoutineActive(db: Queryable, id: string, active: boolean, nextRunAt: Date | null, by: string): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
     'UPDATE routines SET active = $2, next_run_at = $3, version = version + 1, updated_at = now() WHERE id = $1 RETURNING *',
     [id, active, nextRunAt],
   );
-  return rows[0];
+  return recordVersion(db, rows[0], active ? 'activate' : 'deactivate', by);
 }
 
 /** The routine behind a webhook URL – regardless of owner, the token is the credential. Locked for the trigger. */
@@ -185,12 +247,12 @@ export async function getRoutineByWebhookToken(db: Queryable, token: string): Pr
 }
 
 /** Invalidates the old URL at once – for a leaked link. */
-export async function rotateWebhookToken(db: Queryable, id: string): Promise<RoutineRow> {
+export async function rotateWebhookToken(db: Queryable, id: string, by: string): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
     'UPDATE routines SET webhook_token = $2, version = version + 1, updated_at = now() WHERE id = $1 RETURNING *',
     [id, newWebhookToken()],
   );
-  return rows[0];
+  return recordVersion(db, rows[0], 'webhook', by);
 }
 
 export async function deleteRoutine(db: Queryable, ownerId: string, id: string): Promise<boolean> {
@@ -234,8 +296,8 @@ export async function insertExecution(
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
     `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload,
-                             parent_action_id, parent_execution_id, call_depth)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13)
+                             parent_action_id, parent_execution_id, call_depth, routine_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -252,6 +314,7 @@ export async function insertExecution(
       execution.parent?.actionId ?? null,
       execution.parent?.executionId ?? null,
       execution.parent?.depth ?? 0,
+      execution.routine.version,
     ],
   );
   return rows[0] ?? null;
@@ -571,6 +634,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     finishedAt: row.finished_at,
     calledBy: row.parent_execution_id,
     resumeCount: row.resume_count,
+    routineVersion: row.routine_version,
     ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({

@@ -260,6 +260,40 @@ paths:
         '200': { description: execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /api/v1/routines/{routineId}/versions:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    get:
+      summary: Version history, newest first – every write that bumped the routine's version
+      operationId: listRoutineVersions
+      responses:
+        '200':
+          description: versions with their definitions (the web diffs neighbouring ones)
+          content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/RoutineVersion' } } } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/versions/{version}:
+    parameters:
+      - { $ref: '#/components/parameters/RoutineId' }
+      - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      summary: One version with its full definition
+      operationId: getRoutineVersion
+      responses:
+        '200': { description: version, content: { application/json: { schema: { $ref: '#/components/schemas/RoutineVersion' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/versions/{version}/restore:
+    parameters:
+      - { $ref: '#/components/parameters/RoutineId' }
+      - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      summary: Restore an old version – saved as a new version equal to it (history is never rewritten)
+      operationId: restoreRoutineVersion
+      responses:
+        '200': { description: the routine at its new version, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+
   /api/v1/executions/{executionId}/resume:
     parameters:
       - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -446,6 +480,16 @@ components:
       description: Why an action failed (docs/v2/05-messaging.md §6, contracts/schemas/action-failed.v1.schema.json).
       enum: [NOT_FOUND, UNAUTHORIZED, FORBIDDEN_HOST, TIMEOUT, UNREACHABLE, RATE_LIMITED, INVALID_PARAMS, TEMPLATE_ERROR, NOT_AVAILABLE, REFERENCE_GONE, SUBROUTINE_FAILED, AWAIT_EXPIRED, QUOTA_EXCEEDED, AI_REFUSED, INPUT_TOO_LARGE, CONFLICT, CANCELLED, INTERNAL]
 
+    RoutineVersion:
+      type: object
+      properties:
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        origin: { enum: [create, edit, appearance, activate, deactivate, webhook, restore, backfill], description: 'the kind of write that produced this version (backfill = the version current when history started)' }
+        definition:
+          type: object
+          description: 'name, description, trigger, actions, icon, color, active – no webhook token'
+
     Execution:
       type: object
       properties:
@@ -456,6 +500,7 @@ components:
         trigger: { enum: [manual, schedule, webhook, routine], description: 'routine = called by a routine.run step of another routine' }
         calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
         resumeCount: { type: integer, minimum: 0, description: 'how often the execution was resumed ("Retry from here")' }
+        routineVersion: { type: [integer, 'null'], description: 'the routine version the run used; null for runs before v2' }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: shared ID in all logs and messages of this execution }
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }
