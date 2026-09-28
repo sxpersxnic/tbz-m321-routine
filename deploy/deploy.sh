@@ -29,7 +29,7 @@ SECRETS=${SECRETS:-${INVENTORY%.env}.secrets.env}
 GENERATED=deploy/.generated
 STACK=${STACK:-routine}
 NODES=(1 2 3)
-IMAGES=(gateway identity-service routine-service task-service notification-service integration-worker mock-external web)
+IMAGES=(gateway keycloak routine-service task-service notification-service integration-worker mock-external web)
 
 bold=$'\033[1m'; green=$'\033[32m'; red=$'\033[31m'; dim=$'\033[2m'; reset=$'\033[0m'
 step() { printf "\n%s▶ %s%s\n" "$bold" "$*" "$reset"; }
@@ -61,8 +61,8 @@ default_tag() { # commit of the image inputs; uncommitted changes add a hash of 
 TAG=${TAG:-$(default_tag)}
 
 # ------------------------------------------------------------------ secrets
-SECRET_NAMES=(RABBITMQ_PASSWORD RABBITMQ_ERLANG_COOKIE
-  IDENTITY_DB_PASSWORD ROUTINE_DB_PASSWORD TASK_DB_PASSWORD NOTIFICATION_DB_PASSWORD INTEGRATION_DB_PASSWORD)
+SECRET_NAMES=(RABBITMQ_PASSWORD RABBITMQ_ERLANG_COOKIE KEYCLOAK_ADMIN_PASSWORD
+  KEYCLOAK_DB_PASSWORD ROUTINE_DB_PASSWORD TASK_DB_PASSWORD NOTIFICATION_DB_PASSWORD INTEGRATION_DB_PASSWORD)
 
 load_secrets() { # generate what is missing (first run, or a secret added later), then export all
   touch "$SECRETS" && chmod 600 "$SECRETS"
@@ -153,11 +153,19 @@ config_version() { # content hash: swarm configs are immutable, a changed file n
 }
 
 wait_converged() { # every service of the stack runs its desired number of healthy tasks
-  local deadline=$((SECONDS + ${1:-600})) pending
+  # Swarm starts everything at once; a service whose dependency is not up yet (Keycloak without its
+  # database) crash-loops for a while and can look complete between two restarts – so the full count
+  # has to hold for several checks in a row.
+  local deadline=$((SECONDS + ${1:-600})) pending stable=0
   while ((SECONDS < deadline)); do
     pending=$(on 1 service ls --filter "label=com.docker.stack.namespace=$STACK" --format '{{.Name}} {{.Replicas}}' |
       awk '{ split($2, r, "/"); if (r[1] != r[2] + 0) print $1 " " $2 }')
-    [[ -z $pending ]] && return 0
+    if [[ -z $pending ]]; then
+      ((++stable >= 5)) && return 0
+      pending="(checking stability $stable/5)"
+    else
+      stable=0
+    fi
     printf "\r  %swaiting for: %s%s\033[K" "$dim" "$(echo "$pending" | tr '\n' ' ' | cut -c1-110)" "$reset"
     sleep 3
   done
@@ -185,8 +193,9 @@ cmd_stack() {
   step "Stack \"$STACK\" (images $TAG)"
   load_secrets
   render_config
-  export TAG CONFIG_VERSION
+  export TAG CONFIG_VERSION PUBLIC_URL
   CONFIG_VERSION=$(config_version)
+  PUBLIC_URL=$(public_url) # Keycloak's hostname: users must open the platform at exactly this URL
   on 1 stack deploy --detach=true --prune --resolve-image never -c deploy/stack.yml "$STACK" >/dev/null
   ok "deployed – swarm rolls the services one replica at a time"
   wait_converged 900
@@ -205,6 +214,13 @@ cmd_verify() {
     ((SECONDS < deadline)) || fail "$(public_url) not reachable – firewall? (see docs/deployment.md)"
     sleep 2
   done
+  # what users need first: the sign-in (Keycloak, through the edge) – it is the slowest to start
+  deadline=$((SECONDS + 300))
+  until curl -sf "$(public_url)/auth/realms/routine/.well-known/openid-configuration" >/dev/null; do
+    ((SECONDS < deadline)) || fail "Keycloak does not answer at $(public_url)/auth – docker service logs routine_keycloak"
+    sleep 3
+  done
+  ok "sign-in (Keycloak) answers"
   load_secrets
   GATEWAY=$(public_url) RABBIT=${RABBIT_URL:-http://$(addr 1):15672} RABBIT_AUTH=$(rabbit_auth) bash scripts/demo.sh main
   [[ -n ${PUBLIC_URL:-} ]] && return # behind a load balancer / port mapping: only that one URL is reachable
@@ -233,7 +249,11 @@ cmd_destroy() {
 }
 
 case "${1:-all}" in
-  all) cmd_bootstrap; cmd_swarm; cmd_images; cmd_stack; cmd_verify; printf "\n%sRoutine runs on 3 VMs: %s%s\n" "$bold" "$(public_url)" "$reset" ;;
+  all)
+    cmd_bootstrap; cmd_swarm; cmd_images; cmd_stack; cmd_verify
+    printf "\n%sRoutine runs on 3 VMs: %s%s\n" "$bold" "$(public_url)" "$reset"
+    note "Keycloak admin console: $(public_url)/auth/admin – user admin, password KEYCLOAK_ADMIN_PASSWORD in $SECRETS"
+    ;;
   bootstrap) cmd_bootstrap ;;
   swarm) cmd_swarm ;;
   images) cmd_images ;;

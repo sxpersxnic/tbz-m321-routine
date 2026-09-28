@@ -18,12 +18,12 @@ flowchart TB
 
     subgraph VM1[vm1 · manager · routine.data]
       E1[edge] ~~~ R1((rabbitmq-1))
-      S1[gateway · identity · routine<br/>task · notification · web<br/>integration-worker]
-      DB[(identity-db · routine-db · task-db<br/>notification-db · integration-db)]
+      S1[gateway · keycloak · routine<br/>task · notification · web<br/>integration-worker]
+      DB[(keycloak-db · routine-db · task-db<br/>notification-db · integration-db)]
     end
     subgraph VM2[vm2 · manager]
       E2[edge] ~~~ R2((rabbitmq-2))
-      S2[gateway · identity · routine<br/>task · notification · web<br/>integration-worker]
+      S2[gateway · keycloak · routine<br/>task · notification · web<br/>integration-worker]
     end
     subgraph VM3[vm3 · manager]
       E3[edge] ~~~ R3((rabbitmq-3))
@@ -42,9 +42,9 @@ on different VMs and moves them when a VM fails.*
 | Swarm managers | all 3 VMs | The swarm's own control plane (Raft) tolerates the loss of one VM |
 | `edge` (nginx) | every VM (`mode: global`), port **8080** | Each VM can take requests; a load balancer / DNS in front spreads them |
 | `rabbitmq-1..3` | one per VM (label `routine.rabbitmq=N`) | 3 replicas per quorum queue, one per VM – one VM can fail |
-| gateway, identity, routine, task, notification, web | 2 replicas each, `max_replicas_per_node: 1` | Never both replicas on the same VM |
+| gateway, keycloak, routine, task, notification, web | 2 replicas each, `max_replicas_per_node: 1` | Never both replicas on the same VM; the two Keycloak replicas form one cluster across the VMs (discovery through keycloak-db, cluster traffic bound to the overlay interface) |
 | integration-worker | 3 replicas, anywhere | Competing consumers, scale freely |
-| 5 PostgreSQL databases | vm1 (label `routine.data=true`) | A volume lives on one VM; pinning keeps the data where the database runs |
+| 5 PostgreSQL databases (keycloak, routine, task, notification, integration) | vm1 (label `routine.data=true`) | A volume lives on one VM; pinning keeps the data where the database runs |
 | jaeger, mock-external | anywhere, 1 replica | Not in the critical path; rescheduled on VM failure (Jaeger loses its in-memory traces) |
 
 ## 2. Why Docker Swarm
@@ -99,7 +99,13 @@ between the VMs). Not enabled by default because it is untested in this setup.
 | 5 | `deploy.sh verify` | Runs the main workflow (`scripts/demo.sh main`) against the deployed system and checks that every VM answers on :8080 |
 
 Afterwards: UI on `http://<any VM>:8080` (`demo@routine.local` / `demo12345`), RabbitMQ on `http://<VM>:15672`
-(user `routine`, password `RABBITMQ_PASSWORD` from the secrets file), Jaeger on `http://<any VM>:16686`.
+(user `routine`, password `RABBITMQ_PASSWORD` from the secrets file), Jaeger on `http://<any VM>:16686`,
+Keycloak's admin console on `<PUBLIC_URL>/auth/admin`.
+
+**Open the platform at exactly `PUBLIC_URL`** (default `http://<vm1>:8080`; set it in the inventory when a load
+balancer or DNS name sits in front). Keycloak puts this URL into every token as issuer, and only redirects back
+to it after sign-in – opening the UI through another VM's address ends with "Invalid redirect uri". The other
+VMs' `:8080` still serve API calls and are the load balancer's targets.
 
 ### Secrets
 
@@ -111,7 +117,8 @@ the inventory – mode 600, in `.gitignore` – and the stack refuses to deploy 
 | --- | --- |
 | `RABBITMQ_PASSWORD` | broker user `routine` (services, management UI); written into a local copy of the broker definitions (`deploy/.generated/`, also ignored) |
 | `RABBITMQ_ERLANG_COOKIE` | shared secret of the broker nodes – whoever has it controls the cluster |
-| `<SERVICE>_DB_PASSWORD` (5×) | one password per database |
+| `<SERVICE>_DB_PASSWORD` (5×) | one password per database, Keycloak's included |
+| `KEYCLOAK_ADMIN_PASSWORD` | Keycloak admin console (`<PUBLIC_URL>/auth/admin`, user `admin`) – only on the first start: Keycloak creates the admin once |
 
 **Keep the secrets file** (e.g. in your password manager): PostgreSQL sets a password only when it creates the
 database, so a regenerated file locks the services out of the existing data. The secrets reach the containers
@@ -196,11 +203,17 @@ On three simulated VMs (`deploy/local-vms.sh`, Docker-in-Docker), 2026-09-25:
 | vm2 powered off under load | 150/150 requests OK, none slower than 1 s; main workflow `COMPLETED` right after |
 | vm3 powered off (it led every queue), watched for 3 min | broker 2/3 nodes throughout; 179 of 180 requests OK (the failed one came seconds after the test host woke from sleep); main workflow `COMPLETED` |
 | vm3 powered on again | broker back to 3/3 within 60 s, all 29 queues with 3 replicas online, main workflow `COMPLETED` |
+| With Keycloak (2026-09-28): the two replicas on different VMs | one cluster of 2 members, both bound to overlay addresses |
+| Browser sign-in through the load balancer (Playwright) | 11/11 checks: PKCE redirect, pre-filled e-mail, sign-in, reload, sign-out, deep link, registration |
+| vm2 powered off (it ran a Keycloak replica) | 8/8 refreshes of a session opened before, 3/3 new sign-ins, main workflow `COMPLETED`; Swarm restarted the replica on vm3 |
 
 Two findings from these tests are built into the deployment:
 
 * A VM that fails *right after* the deployment must not take queues with it that have not yet got all their replicas.
   `deploy.sh stack` therefore waits until every quorum queue has a replica on every VM.
+* Swarm starts everything at once. Keycloak exits when its database is not reachable yet and restarts until it is,
+  and between two restarts the service can look complete. `deploy.sh` therefore requires the full replica count
+  in five checks in a row, and `verify` waits until the sign-in answers through the edge.
 * Swarm lists a task in service DNS only once it is healthy, but a RabbitMQ node only finishes booting once it
   has found its peers by DNS. With the full readiness check as healthcheck, the three nodes waited for each other
   forever. The stack uses `rabbitmq-diagnostics ping` instead (see the comment in `deploy/stack.yml`).

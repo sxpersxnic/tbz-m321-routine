@@ -6,7 +6,7 @@
 #   vm1        routine.data=true → the five PostgreSQL databases (their volumes live on that VM)
 #   rabbitmq-N routine.rabbitmq=N → one broker node per VM
 #
-# Variables (exported by deploy.sh): TAG, CONFIG_VERSION, SERVICE_REPLICAS, INTEGRATION_WORKER_REPLICAS and the
+# Variables (exported by deploy.sh): TAG, CONFIG_VERSION, PUBLIC_URL, SERVICE_REPLICAS, INTEGRATION_WORKER_REPLICAS and the
 # secrets from deploy/<inventory>.secrets.env – generated once per deployment, never committed. A missing
 # secret stops the deploy (${VAR:?}) instead of falling back to a well-known default.
 version: "3.9"
@@ -14,7 +14,8 @@ version: "3.9"
 x-common-env: &common-env
   LOG_LEVEL: ${LOG_LEVEL:-info}
   AMQP_URL: amqp://routine:${RABBITMQ_PASSWORD:?}@rabbitmq-1:5672,amqp://routine:${RABBITMQ_PASSWORD:?}@rabbitmq-2:5672,amqp://routine:${RABBITMQ_PASSWORD:?}@rabbitmq-3:5672
-  JWKS_URL: http://identity-service:3000/.well-known/jwks.json
+  JWKS_URL: http://keycloak:8080/auth/realms/routine/protocol/openid-connect/certs
+  JWT_ISSUER: ${PUBLIC_URL:?}/auth/realms/routine
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   OTEL_TRACES_EXPORTER: otlp
   OTEL_METRICS_EXPORTER: none
@@ -128,10 +129,10 @@ services:
       restart_policy: { condition: any, delay: 2s }
 
   # ------------------------------------------------------------ databases (vm1)
-  identity-db:
+  keycloak-db:
     <<: *postgres
-    environment: { POSTGRES_USER: identity, POSTGRES_PASSWORD: "${IDENTITY_DB_PASSWORD:?}", POSTGRES_DB: identity }
-    volumes: [identity-db-data:/var/lib/postgresql/data]
+    environment: { POSTGRES_USER: keycloak, POSTGRES_PASSWORD: "${KEYCLOAK_DB_PASSWORD:?}", POSTGRES_DB: keycloak }
+    volumes: [keycloak-db-data:/var/lib/postgresql/data]
   routine-db:
     <<: *postgres
     environment: { POSTGRES_USER: routine, POSTGRES_PASSWORD: "${ROUTINE_DB_PASSWORD:?}", POSTGRES_DB: routine }
@@ -166,7 +167,6 @@ services:
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: gateway
-      IDENTITY_URL: http://identity-service:3000
       ROUTINE_URL: http://routine-service:3000
       TASK_URL: http://task-service:3000
       NOTIFICATION_URL: http://notification-service:3000
@@ -179,16 +179,27 @@ services:
       <<: *replicated
       endpoint_mode: dnsrr # the edge gets every gateway task and fails over per request (like in compose)
 
-  identity-service:
-    image: routine/identity-service:${TAG:-latest}
-    init: true
-    healthcheck: *node-healthcheck
+  # identity provider – two replicas on different VMs form one cluster (discovery through keycloak-db)
+  keycloak:
+    image: routine/keycloak:${TAG:-latest}
     environment:
-      <<: *common-env
-      OTEL_SERVICE_NAME: identity-service
-      DATABASE_URL: postgres://identity:${IDENTITY_DB_PASSWORD:?}@identity-db:5432/identity
-      DEMO_USER_EMAIL: demo@routine.local
-      DEMO_USER_PASSWORD: demo12345
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?}
+      KC_HOSTNAME: ${PUBLIC_URL:?}/auth # the URL users open – all tokens carry it as issuer
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+      # a task has the overlay (eth0) and a VM-local bridge – cluster traffic must use the overlay
+      KC_CACHE_EMBEDDED_NETWORK_BIND_ADDRESS: match-interface:eth0
+      ROUTINE_PUBLIC_URL: ${PUBLIC_URL:?}
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 60s
     deploy: *replicated
 
   routine-service:
@@ -277,7 +288,7 @@ configs:
 # local to the VM a task is pinned to (databases → vm1, rabbitmq-N → its VM)
 volumes:
   rabbitmq-data:
-  identity-db-data:
+  keycloak-db-data:
   routine-db-data:
   task-db-data:
   notification-db-data:
