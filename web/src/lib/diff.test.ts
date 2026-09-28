@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import type { VersionDefinition } from '../types.ts';
+import { setGeneratedForms } from '../action-forms.ts';
+import { formsFromCatalog } from '../forms/generate.ts';
+import type { CatalogDomain, VersionDefinition } from '../types.ts';
 import { describeChanges, restoredFrom } from './diff.ts';
+
+// step forms come from the catalog – the live one, recorded (forms/catalog.fixture.json)
+setGeneratedForms(formsFromCatalog(JSON.parse(readFileSync(new URL('../forms/catalog.fixture.json', import.meta.url), 'utf8')) as CatalogDomain[]));
 
 const base = (): VersionDefinition => ({
   name: 'Morning',

@@ -1,13 +1,14 @@
-// Form description per action type. The API catalog (GET /action-types) tells
-// which types exist; this file decides how they look and how their params are
-// edited. Unknown types fall back to a raw JSON editor and a neutral look.
+// How steps look and how their params are edited. Every step's form is generated from its manifest
+// (forms/generate.ts, docs/v2/07-web.md §5); this file keeps only the hand-made overrides – where a
+// form made by hand is better – and the helpers everyone uses. Resolution: override → generated →
+// nothing (a raw JSON editor and a neutral look, as for unknown types).
 
 /**
  * `tasklist` = a select filled with the user's task lists.
  * `value` = free text that becomes a number, list or object when it reads as JSON (`42`, `["a","b"]`).
  * `routine` = a select of the user's routines; stores `routineId` and, for display, `routineName`.
  */
-export type FieldKind = 'text' | 'textarea' | 'number' | 'select' | 'json' | 'keyvalue' | 'tasklist' | 'value' | 'routine';
+export type FieldKind = 'text' | 'textarea' | 'number' | 'boolean' | 'date' | 'time' | 'select' | 'json' | 'keyvalue' | 'tasklist' | 'value' | 'routine';
 
 export interface ParamField {
   name: string;
@@ -19,6 +20,12 @@ export interface ParamField {
   optionLabels?: Record<string, string>;
   placeholder?: string;
   hint?: string;
+  /** Lower bound of a number field. */
+  min?: number;
+  /** Whole numbers only. */
+  integer?: boolean;
+  /** Shown under "More options". */
+  advanced?: boolean;
 }
 
 /** The colour family of an action. Colour is a second cue only – the label always says it too. */
@@ -37,12 +44,9 @@ export interface ActionForm {
   defaults: Record<string, unknown>;
   /** Shortcuts' "Scripting" group: evaluated by the routine engine, no service call. */
   scripting?: boolean;
+  /** The manifest's sentence, `{param}` placeholders – how a generated step reads. */
+  sentence?: string;
 }
-
-const PRIORITY: Pick<ParamField, 'options' | 'optionLabels'> = {
-  options: ['low', 'normal', 'high'],
-  optionLabels: { low: 'Low', normal: 'Normal', high: 'High' },
-};
 
 const CONDITION: Pick<ParamField, 'options' | 'optionLabels'> = {
   options: ['equals', 'notEquals', 'contains', 'notContains', 'greaterThan', 'lessThan', 'isEmpty', 'isNotEmpty'],
@@ -57,16 +61,8 @@ const MATH: Pick<ParamField, 'options' | 'optionLabels'> = {
   optionLabels: { '+': '+', '-': '−', '*': '×', '/': '÷', '%': 'modulo', min: 'min', max: 'max', round: 'round to digits' },
 };
 
-export const ACTION_FORMS: Record<string, ActionForm> = {
-  'weather.get': {
-    label: 'Get weather',
-    blurb: 'Fetches the current weather for a city.',
-    glyph: 'cloud',
-    tint: 'sky',
-    fields: [{ name: 'city', label: 'City', kind: 'text', required: true, placeholder: 'Zurich' }],
-    outputs: { summary: 'Forecast', temperatureC: 'Temperature', condition: 'Conditions' },
-    defaults: { city: 'Zurich' },
-  },
+/** Hand-made forms that beat the generated ones (07 §5.3). */
+const OVERRIDES: Record<string, ActionForm> = {
   'http.request': {
     label: 'Call webhook',
     blurb: 'Sends a request to another service.',
@@ -76,6 +72,7 @@ export const ACTION_FORMS: Record<string, ActionForm> = {
       { name: 'method', label: 'Method', kind: 'select', options: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
       { name: 'url', label: 'URL', kind: 'text', required: true, placeholder: 'http://mock-external:8090/webhooks/demo', hint: 'mock-external only' },
       { name: 'body', label: 'Body (JSON)', kind: 'json', placeholder: '{ "hello": "world" }' },
+      { name: 'headers', label: 'Headers', kind: 'keyvalue', advanced: true },
     ],
     outputs: { status: 'HTTP status', body: 'Response' },
     defaults: { method: 'POST', url: 'http://mock-external:8090/webhooks/demo', body: { routine: '{{routine.name}}' } },
@@ -91,60 +88,6 @@ export const ACTION_FORMS: Record<string, ActionForm> = {
     ],
     outputs: { text: 'Text', title: 'Title' },
     defaults: { title: 'Summary', sections: {} },
-  },
-  'task.create': {
-    label: 'Create task',
-    blurb: 'Puts a task on your list.',
-    glyph: 'checklist',
-    tint: 'green',
-    fields: [
-      { name: 'title', label: 'Title', kind: 'text', required: true },
-      { name: 'description', label: 'Notes', kind: 'textarea' },
-      { name: 'priority', label: 'Priority', kind: 'select', ...PRIORITY },
-      { name: 'dueInDays', label: 'Due in days', kind: 'number', hint: '0 = today' },
-      { name: 'listId', label: 'List', kind: 'tasklist' },
-    ],
-    outputs: { title: 'Task', dueDate: 'Due date' },
-    defaults: { title: 'New task', priority: 'normal' },
-  },
-  'notification.send': {
-    label: 'Send notification',
-    blurb: 'Sends you a notification in the app.',
-    glyph: 'bell',
-    tint: 'pink',
-    fields: [
-      { name: 'title', label: 'Title', kind: 'text', required: true },
-      { name: 'body', label: 'Message', kind: 'textarea' },
-      { name: 'priority', label: 'Priority', kind: 'select', ...PRIORITY },
-    ],
-    outputs: {},
-    defaults: { title: 'Routine finished', body: '' },
-  },
-  'email.send': {
-    label: 'Send e-mail',
-    blurb: 'Sends an e-mail to one or more addresses.',
-    glyph: 'mail',
-    tint: 'indigo',
-    fields: [
-      { name: 'to', label: 'To', kind: 'text', required: true, placeholder: 'ada@example.com', hint: 'Several: separate with commas' },
-      { name: 'subject', label: 'Subject', kind: 'text', required: true },
-      { name: 'body', label: 'Message', kind: 'textarea' },
-    ],
-    outputs: { messageId: 'Message ID', to: 'Recipients' },
-    defaults: { to: '', subject: '{{routine.name}}', body: '' },
-  },
-  'variable.set': {
-    label: 'Set variable',
-    blurb: 'Keeps a value under a name, for later steps.',
-    glyph: 'variable',
-    tint: 'grey',
-    scripting: true,
-    fields: [
-      { name: 'name', label: 'Name', kind: 'text', required: true, placeholder: 'city' },
-      { name: 'value', label: 'Value', kind: 'value', hint: 'Text, a number, or a list like ["a", "b"]' },
-    ],
-    outputs: { value: 'Value' },
-    defaults: { name: 'value', value: '' },
   },
   'condition.if': {
     label: 'If',
@@ -173,20 +116,6 @@ export const ACTION_FORMS: Record<string, ActionForm> = {
     outputs: { result: 'Result' },
     defaults: {},
   },
-  'math.calculate': {
-    label: 'Calculate',
-    blurb: 'Adds, subtracts, multiplies, … two numbers.',
-    glyph: 'calc',
-    tint: 'grey',
-    scripting: true,
-    fields: [
-      { name: 'a', label: 'Number', kind: 'value', required: true },
-      { name: 'operator', label: 'Operation', kind: 'select', required: true, ...MATH },
-      { name: 'b', label: 'Number', kind: 'value' },
-    ],
-    outputs: { result: 'Result' },
-    defaults: { a: '', operator: '+', b: '' },
-  },
 };
 
 /** What a "repeat for each" step offers to later steps. */
@@ -202,9 +131,19 @@ export const WEBHOOK_REFERENCES: Record<string, string> = {
   '{{trigger.body}}': 'Webhook data',
 };
 
-export const actionLabel = (type: string): string => ACTION_FORMS[type]?.label ?? type;
-export const actionGlyph = (type: string): string => ACTION_FORMS[type]?.glyph ?? 'bolt';
-export const actionTint = (type: string): Tint => ACTION_FORMS[type]?.tint ?? 'grey';
+let generated: Record<string, ActionForm> = {};
+
+/** Called by the catalog store whenever the catalog (re)loads. */
+export function setGeneratedForms(forms: Record<string, ActionForm>): void {
+  generated = forms;
+}
+
+/** A step type's form: the hand-made override, else the one generated from its manifest. */
+export const formOf = (type: string): ActionForm | undefined => OVERRIDES[type] ?? generated[type];
+
+export const actionLabel = (type: string): string => formOf(type)?.label ?? type;
+export const actionGlyph = (type: string): string => formOf(type)?.glyph ?? 'bolt';
+export const actionTint = (type: string): Tint => formOf(type)?.tint ?? 'grey';
 
 /** One-word names, for places that show the shape of a routine rather than its detail. */
 const SHORT: Record<string, string> = {
@@ -270,7 +209,8 @@ export function actionSentence(type: string, params: Record<string, unknown>): S
       return ['Create summary ', tok(str(params.title) || 'untitled'), ...(sections > 1 ? [` · ${sections} sections`] : [])];
     }
     case 'task.create': {
-      const due = dueWords(params.dueInDays);
+      // v1 routines say dueInDays, the M2 form a date
+      const due = dueWords(params.dueInDays) ?? (typeof params.dueDate === 'string' && params.dueDate ? dateWords(params.dueDate) : null);
       return [
         'Create task ', tok(str(params.title) || 'untitled'),
         ...(due ? [', due ', tok(due)] : []),
@@ -295,8 +235,56 @@ export function actionSentence(type: string, params: Record<string, unknown>): S
       return ['Calculate ', tok(valueWords(params.a)), ` ${MATH.optionLabels?.[operator] ?? operator} `, tok(valueWords(params.b))];
     }
     default:
-      return [actionLabel(type)];
+      return templateSentence(type, params);
   }
+}
+
+/** Relative dates in words: `+0d` today, `+1d` tomorrow, `+3d` in 3 days. */
+function dateWords(value: string): string {
+  const relative = /^\+(\d+)d$/.exec(value);
+  return relative ? (dueWords(Number(relative[1])) ?? value) : value;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A param's value in words: a choice's label, "tomorrow" for +1d, yes/no; a picked id by what it is. */
+function paramWords(field: ParamField | undefined, value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  if (typeof value !== 'string') return valueWords(value);
+  if (field?.optionLabels) return field.optionLabels[value] ?? value;
+  // names need the collection; the pickers show them, the sentence says what was picked
+  if (UUID.test(value)) return field?.label.toLowerCase() ?? value;
+  return field?.kind === 'date' ? dateWords(value) : value;
+}
+
+/**
+ * A generated step's sentence (07 §5.2): the manifest's sentence with every `{param}` as a token of its
+ * value in words. An empty required param shows its name; an empty optional one is left out together
+ * with the words leading to it (back to a comma, else one word) – "Create task [Pay rent], due [tomorrow]"
+ * reads "Create task [Pay rent]" without a date.
+ */
+function templateSentence(type: string, params: Record<string, unknown>): SentencePart[] {
+  const form = formOf(type);
+  if (!form?.sentence) return [actionLabel(type)];
+  const parts: SentencePart[] = [];
+  let last = 0;
+  for (const match of form.sentence.matchAll(/\{([a-zA-Z0-9]+)\}/g)) {
+    let before = form.sentence.slice(last, match.index);
+    last = match.index + match[0].length;
+    const field = form.fields.find((candidate) => candidate.name === match[1]);
+    const value = params[match[1]];
+    const empty = value === undefined || value === null || value === '';
+    if (empty && !field?.required) {
+      const comma = before.lastIndexOf(', ');
+      before = comma >= 0 ? before.slice(0, comma) : before.replace(/\s*\S+\s*$/, '');
+      if (before) parts.push(before);
+      continue;
+    }
+    if (before) parts.push(before);
+    parts.push(tok(empty ? (field?.label ?? match[1]).toLowerCase() : paramWords(field, value)));
+  }
+  if (last < form.sentence.length) parts.push(form.sentence.slice(last));
+  return parts;
 }
 
 /**
@@ -343,7 +331,7 @@ export function describeReference(reference: string, types: Record<string, strin
   const [, key, field] = match;
   const type = types[key];
   const [head, ...rest] = field.split('.');
-  const fieldName = (type && ACTION_FORMS[type]?.outputs[head]) ?? LOOP_OUTPUTS[head] ?? head;
+  const fieldName = (type && formOf(type)?.outputs[head]) ?? LOOP_OUTPUTS[head] ?? head;
   const source = type ? actionShort(type) : key;
   return `${fieldName}${rest.length ? ` › ${rest.join(' › ')}` : ''}${withSource ? ` (${source})` : ''}`;
 }

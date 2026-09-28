@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
-import type { ErrorCode } from '../types.ts';
+import { setGeneratedForms } from '../action-forms.ts';
+import { formsFromCatalog } from '../forms/generate.ts';
+import type { CatalogDomain, ErrorCode } from '../types.ts';
 import { ERROR_CODES, FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine, type FailedStep } from './failure-copy.ts';
+
+// step forms come from the catalog – the live one, recorded (forms/catalog.fixture.json)
+setGeneratedForms(formsFromCatalog(JSON.parse(readFileSync(new URL('../forms/catalog.fixture.json', import.meta.url), 'utf8')) as CatalogDomain[]));
 
 /** One failed step per code, as the services report it – the fixture every code is rendered from. */
 const FIXTURES: Record<ErrorCode, { step: FailedStep; sentence: string; action: string }> = {

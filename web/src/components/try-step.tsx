@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ACTION_FORMS } from '../action-forms.ts';
+import { formOf } from '../action-forms.ts';
 import { api } from '../api.ts';
 import { failureCopy } from '../lib/failure-copy.ts';
 import type { ActionDefinition, ExecutionAction, ExecutionDetail } from '../types.ts';
@@ -59,7 +59,7 @@ export function TryStep({ routineId, action, types, onOutput }: {
     }
   }
 
-  const outputs = ACTION_FORMS[action?.type ?? '']?.outputs ?? {};
+  const outputs = formOf(action?.type ?? '')?.outputs ?? {};
   return (
     <div className="try-step">
       <button type="button" className="btn small" disabled={!action || state.kind === 'running'} onClick={() => void run()}

@@ -66,7 +66,7 @@ from manifests (no visible difference for v1 steps, which is the point).
 - [x] **M2-08 · Catalog in the web**
   - `web/src/catalog/` ([07 §4](../07-web.md)). Replace direct `GET /action-types` use.
 
-- [ ] **M2-09 · Generated step forms**
+- [x] **M2-09 · Generated step forms**
   - `web/src/forms/` ([07 §5.1–5.3](../07-web.md)). `action-forms.ts` reduced to overrides.
     `SentenceView` from manifest sentences. Visual regression check: every v1 step type renders
     the same sentence as before (fixture comparison).

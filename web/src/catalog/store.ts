@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { setGeneratedForms } from '../action-forms.ts';
 import { api, sessionStore } from '../api.ts';
+import { formsFromCatalog } from '../forms/generate.ts';
 import type { CatalogDomain } from '../types.ts';
 import { buildCatalog, type Catalog } from './catalog.ts';
 
@@ -16,6 +18,7 @@ interface Cached {
 
 const STORAGE_KEY = 'routine.catalog';
 let state: Cached | null = restore();
+setGeneratedForms(formsFromCatalog(state?.domains ?? []));
 let loading: Promise<void> | undefined;
 const listeners = new Set<() => void>();
 
@@ -30,6 +33,8 @@ function restore(): Cached | null {
 
 function set(next: Cached | null) {
   state = next;
+  // pills, history and the editor read forms by type – they follow the catalog
+  setGeneratedForms(formsFromCatalog(next?.domains ?? []));
   try {
     if (next) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     else localStorage.removeItem(STORAGE_KEY);

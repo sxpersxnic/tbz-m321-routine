@@ -1,4 +1,4 @@
-import { ACTION_FORMS, describeReference } from '../action-forms.ts';
+import { formOf, describeReference } from '../action-forms.ts';
 import type { ErrorCode } from '../types.ts';
 
 /**
@@ -54,7 +54,7 @@ const trimDot = (text: string) => text.trim().replace(/\.$/, '');
 function paramDetail(step: FailedStep): string {
   const raw = trimDot(step.error ?? '');
   const param = /param "([^"]+)"/.exec(raw)?.[1];
-  if (param) return ACTION_FORMS[step.type]?.fields.find((field) => field.name === param)?.label ?? param;
+  if (param) return formOf(step.type)?.fields.find((field) => field.name === param)?.label ?? param;
   return raw || 'a value';
 }
 

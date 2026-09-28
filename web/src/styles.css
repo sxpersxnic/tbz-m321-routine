@@ -816,6 +816,9 @@ a.outcome-card:hover { background: var(--surface-2); }
 .advanced[open] > summary { margin-bottom: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
 .form-grid .span-2 { grid-column: 1 / -1; }
+/* a yes/no param sits level with the inputs beside it */
+.form-grid .field-switch { align-self: end; min-height: 40px; }
+.action-card-body .disclosure .form-grid { margin-top: 12px; }
 
 .action-list { display: flex; flex-direction: column; gap: 0; }
 .lane { position: relative; display: flex; flex-direction: column; gap: 10px; padding-bottom: 26px; }
@@ -1289,3 +1292,8 @@ button.notice-main { cursor: pointer; }
 .palette-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 6px; }
 .run-hero p a { color: var(--accent); }
 .run-hero p a:hover { text-decoration: underline; }
+
+/* a date param: relative days or a date (forms/date-input.tsx) */
+.date-input { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.date-input input { width: auto; min-width: 0; }
+.date-input input[type="number"] { width: 5.5em; }

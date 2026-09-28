@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ACTION_FORMS, actionShort, actionTint } from '../action-forms.ts';
+import { formOf, actionShort, actionTint } from '../action-forms.ts';
 import { api } from '../api.ts';
 import { describeTrigger, TRIGGER_ICONS } from '../format.ts';
 import { navigate } from '../hooks.ts';
@@ -167,7 +167,7 @@ const text = (output: Record<string, unknown> | null, key: string) => {
 function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
   const base = { type: action.type };
   // scripting steps and the head of a loop only steer the run – what they lead to is the result
-  const steering = (ACTION_FORMS[action.type]?.scripting && action.type !== 'routine.run') || (action.forEach && !action.parentId);
+  const steering = (formOf(action.type)?.scripting && action.type !== 'routine.run') || (action.forEach && !action.parentId);
   if (action.status === 'FAILED') {
     return { ...base, text: `${actionShort(action.type)} failed`, detail: action.error ?? undefined, bad: true };
   }

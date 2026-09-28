@@ -1,0 +1,290 @@
+[
+  {
+    "type": "weather.get",
+    "params": {
+      "city": "Bern"
+    },
+    "sentence": [
+      "Get weather for ",
+      {
+        "token": "Bern"
+      }
+    ]
+  },
+  {
+    "type": "weather.get",
+    "params": {},
+    "sentence": [
+      "Get weather for ",
+      {
+        "token": "a city"
+      }
+    ]
+  },
+  {
+    "type": "http.request",
+    "params": {
+      "method": "POST",
+      "url": "http://mock-external:8090/flaky?failTimes=2"
+    },
+    "sentence": [
+      "Call webhook ",
+      {
+        "token": "mock-external/flaky"
+      }
+    ]
+  },
+  {
+    "type": "http.request",
+    "params": {},
+    "sentence": [
+      "Call webhook ",
+      {
+        "token": "without URL"
+      }
+    ]
+  },
+  {
+    "type": "summary.generate",
+    "params": {
+      "title": "Weekly",
+      "sections": {
+        "A": 1,
+        "B": 2
+      }
+    },
+    "sentence": [
+      "Create summary ",
+      {
+        "token": "Weekly"
+      },
+      " · 2 sections"
+    ]
+  },
+  {
+    "type": "summary.generate",
+    "params": {
+      "title": "Weekly",
+      "sections": {
+        "A": 1
+      }
+    },
+    "sentence": [
+      "Create summary ",
+      {
+        "token": "Weekly"
+      }
+    ]
+  },
+  {
+    "type": "task.create",
+    "params": {
+      "title": "Review",
+      "dueInDays": 2,
+      "priority": "high"
+    },
+    "sentence": [
+      "Create task ",
+      {
+        "token": "Review"
+      },
+      ", due ",
+      {
+        "token": "in 2 days"
+      },
+      " · important"
+    ]
+  },
+  {
+    "type": "task.create",
+    "params": {
+      "title": "Review",
+      "dueInDays": 0
+    },
+    "sentence": [
+      "Create task ",
+      {
+        "token": "Review"
+      },
+      ", due ",
+      {
+        "token": "today"
+      }
+    ]
+  },
+  {
+    "type": "task.create",
+    "params": {},
+    "sentence": [
+      "Create task ",
+      {
+        "token": "untitled"
+      }
+    ]
+  },
+  {
+    "type": "notification.send",
+    "params": {
+      "title": "Hi"
+    },
+    "sentence": [
+      "Send notification ",
+      {
+        "token": "Hi"
+      }
+    ]
+  },
+  {
+    "type": "notification.send",
+    "params": {},
+    "sentence": [
+      "Send notification ",
+      {
+        "token": "untitled"
+      }
+    ]
+  },
+  {
+    "type": "email.send",
+    "params": {
+      "subject": "Hi",
+      "to": "ada@example.com"
+    },
+    "sentence": [
+      "Send e-mail ",
+      {
+        "token": "Hi"
+      },
+      " to ",
+      {
+        "token": "ada@example.com"
+      }
+    ]
+  },
+  {
+    "type": "email.send",
+    "params": {},
+    "sentence": [
+      "Send e-mail ",
+      {
+        "token": "untitled"
+      },
+      " to ",
+      {
+        "token": "nobody yet"
+      }
+    ]
+  },
+  {
+    "type": "variable.set",
+    "params": {
+      "name": "team",
+      "value": [
+        "a",
+        "b"
+      ]
+    },
+    "sentence": [
+      "Set ",
+      {
+        "token": "team"
+      },
+      " to ",
+      {
+        "token": "[\"a\",\"b\"]"
+      }
+    ]
+  },
+  {
+    "type": "variable.set",
+    "params": {},
+    "sentence": [
+      "Set ",
+      {
+        "token": "variable"
+      },
+      " to ",
+      {
+        "token": "…"
+      }
+    ]
+  },
+  {
+    "type": "condition.if",
+    "params": {
+      "left": "{{actions.w.temperatureC}}",
+      "operator": "greaterThan",
+      "right": 20
+    },
+    "sentence": [
+      "If ",
+      {
+        "token": "{{actions.w.temperatureC}}"
+      },
+      " is greater than",
+      " ",
+      {
+        "token": "20"
+      }
+    ]
+  },
+  {
+    "type": "condition.if",
+    "params": {
+      "left": "x",
+      "operator": "isEmpty"
+    },
+    "sentence": [
+      "If ",
+      {
+        "token": "x"
+      },
+      " is empty"
+    ]
+  },
+  {
+    "type": "routine.run",
+    "params": {
+      "routineName": "Backup",
+      "input": "x"
+    },
+    "sentence": [
+      "Run routine ",
+      {
+        "token": "Backup"
+      },
+      " with ",
+      {
+        "token": "x"
+      }
+    ]
+  },
+  {
+    "type": "routine.run",
+    "params": {},
+    "sentence": [
+      "Run routine ",
+      {
+        "token": "not chosen"
+      }
+    ]
+  },
+  {
+    "type": "math.calculate",
+    "params": {
+      "a": 2,
+      "operator": "*",
+      "b": 3
+    },
+    "sentence": [
+      "Calculate ",
+      {
+        "token": "2"
+      },
+      " × ",
+      {
+        "token": "3"
+      }
+    ]
+  }
+]

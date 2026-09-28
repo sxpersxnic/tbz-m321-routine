@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ACTION_FORMS, GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, type ParamField } from '../action-forms.ts';
+import { GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, formOf, type ParamField } from '../action-forms.ts';
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
 import { runsInTest } from '../catalog/catalog.ts';
 import { useCatalog } from '../catalog/store.ts';
 import { shortValue, TryStep } from '../components/try-step.tsx';
+import { DateInput } from '../forms/date-input.tsx';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
@@ -53,7 +54,7 @@ const MAX_STEP = 50;
 const uid = () => crypto.randomUUID();
 
 function fieldsFor(type: string): ParamField[] {
-  return ACTION_FORMS[type]?.fields ?? [RAW_FIELD];
+  return formOf(type)?.fields ?? [RAW_FIELD];
 }
 
 function toValues(type: string, params: Record<string, unknown>): Record<string, FieldValue> {
@@ -112,6 +113,8 @@ function toParams(action: DraftAction): Record<string, unknown> {
       }
     } else if (field.kind === 'number') {
       params[field.name] = Number(text);
+    } else if (field.kind === 'boolean') {
+      params[field.name] = text === 'true';
     } else if (field.kind === 'value') {
       params[field.name] = parseValue(text);
     } else if (field.kind === 'routine') {
@@ -467,7 +470,7 @@ export function RoutineEditor({ id }: { id?: string }) {
     for (let n = 2; draft.actions.some((action) => action.key === key); n++) key = `${base}${n}`;
     // the API allows steps 1–50; beyond that a new action joins the last step (runs in parallel)
     const step = Math.min(MAX_STEP, Math.max(0, ...draft.actions.map((action) => action.step)) + 1);
-    const form = ACTION_FORMS[type];
+    const form = formOf(type);
     const action: DraftAction = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}), runIf: null, forEach: '' };
     setDraft((current) => ({ ...current, actions: [...current.actions, action] }));
     toggleExpanded(action.uid, true);
@@ -609,10 +612,8 @@ export function RoutineEditor({ id }: { id?: string }) {
   const leaveHref = editing ? `#/routines/${id}` : '#/routines';
   const timezone = draft.timezone || 'Europe/Zurich';
   const blank = !editing && draft.actions.length === 0 && !draft.name;
-  // the catalog's steps; the v1 list only until the catalog has loaded
-  const steps = catalog.loaded
-    ? catalog.capabilities().map((capability) => ({ type: capability.type, label: ACTION_FORMS[capability.type]?.label ?? capability.label, description: capability.description, scripting: ['scripting', 'routines'].includes(capability.domain.domain) }))
-    : Object.keys(ACTION_FORMS).map((type) => ({ type, label: actionLabel(type), description: '', scripting: ACTION_FORMS[type].scripting === true }));
+  // the catalog's steps – none until it has loaded (from the cache that is at once, after the first visit)
+  const steps = catalog.capabilities().map((capability) => ({ type: capability.type, label: actionLabel(capability.type), description: capability.description, scripting: formOf(capability.type)?.scripting === true }));
 
   /** Literal names of variables set in steps before `action` – what {{vars.…}} can read there. */
   const variablesBefore = (action: DraftAction) => [
@@ -655,6 +656,37 @@ export function RoutineEditor({ id }: { id?: string }) {
     }
     const fid = fieldId(action.uid, field.name);
     const problem = invalid.get(fid);
+    if (field.kind === 'date' || (field.kind === 'select' && (field.options?.length ?? 0) <= 4)) {
+      // a group of buttons, not one control – a heading instead of a <label>
+      const headingId = `${fid}-label`;
+      return (
+        <div key={field.name} className={`field ${field.kind === 'date' ? 'span-2' : ''}`} role="group" aria-labelledby={headingId}>
+          <span id={headingId}>{field.label}</span>
+          {field.kind === 'date' ? (
+            <DateInput id={fid} label={field.label} value={value as string} required={field.required} onChange={apply} />
+          ) : (
+            <div className="segmented" role="radiogroup" aria-labelledby={headingId} id={fid} tabIndex={-1}>
+              {field.options?.map((option) => (
+                <button key={option} type="button" role="radio" aria-checked={value === option} className={value === option ? 'active' : ''} onClick={() => apply(option)}>
+                  {field.optionLabels?.[option] ?? option}
+                </button>
+              ))}
+            </div>
+          )}
+          {problem && <small className="field-error">{problem}</small>}
+          {field.hint && <small className="muted">{field.hint}</small>}
+        </div>
+      );
+    }
+    if (field.kind === 'boolean') {
+      return (
+        <label key={field.name} className="switch field-switch">
+          <input id={fid} type="checkbox" checked={value === 'true'} onChange={(event) => apply(String(event.target.checked))} />
+          <span className="switch-track" />
+          <span className="switch-label">{field.label}</span>
+        </label>
+      );
+    }
     const common = { id: fid, value: value as string, placeholder: field.placeholder, 'aria-invalid': problem ? true : undefined };
     return (
       <label key={field.name} className={`field ${field.kind === 'textarea' || field.kind === 'json' || field.name === 'url' ? 'span-2' : ''}`}>
@@ -686,7 +718,8 @@ export function RoutineEditor({ id }: { id?: string }) {
           <textarea {...common} rows={field.kind === 'json' ? 4 : 3} className={`${field.kind === 'json' ? 'mono' : ''} ${problem ? 'invalid' : ''}`}
             onChange={(event) => apply(event.target.value)} {...trackFocus(apply)} />
         ) : (
-          <input {...common} className={problem ? 'invalid' : ''} type={field.kind === 'number' ? 'number' : 'text'} min={field.kind === 'number' ? 0 : undefined}
+          <input {...common} className={problem ? 'invalid' : ''} type={field.kind === 'number' ? 'number' : field.kind === 'time' ? 'time' : 'text'} min={field.kind === 'number' ? field.min : undefined}
+            inputMode={field.kind === 'number' ? (field.integer ? 'numeric' : 'decimal') : undefined}
             onChange={(event) => apply(event.target.value)} {...(field.kind === 'text' || field.kind === 'value' ? trackFocus(apply) : {})} />
         )}
         {problem && <small className="field-error">{problem}</small>}
@@ -975,7 +1008,12 @@ export function RoutineEditor({ id }: { id?: string }) {
 
                           {open && (
                             <div className="action-card-body" id={bodyId}>
-                              <div className="form-grid">{fieldsFor(action.type).map((field) => renderField(action, field))}</div>
+                              <div className="form-grid">{fieldsFor(action.type).filter((field) => !field.advanced).map((field) => renderField(action, field))}</div>
+                              {fieldsFor(action.type).some((field) => field.advanced) && (
+                                <Disclosure summary="More options">
+                                  <div className="form-grid">{fieldsFor(action.type).filter((field) => field.advanced).map((field) => renderField(action, field))}</div>
+                                </Disclosure>
+                              )}
 
                               <div className="references" role="group" aria-label="Insert value">
                                 <span className="references-label">Insert</span>
@@ -988,7 +1026,7 @@ export function RoutineEditor({ id }: { id?: string }) {
                                 {(() => {
                                   // a repeating step offers what all its runs produced, not one run's fields
                                   const chips = earlier.flatMap((candidate) =>
-                                    Object.entries(candidate.forEach ? LOOP_OUTPUTS : ACTION_FORMS[candidate.type]?.outputs ?? {})
+                                    Object.entries(candidate.forEach ? LOOP_OUTPUTS : formOf(candidate.type)?.outputs ?? {})
                                       .map(([output, name]) => ({ candidate, name, reference: `{{actions.${candidate.key}.${output}}}` })));
                                   // three If steps all offer "Result" – the step ID tells them apart
                                   const repeated = (name: string) => chips.filter((chip) => chip.name === name).length > 1;
@@ -1066,7 +1104,7 @@ export function RoutineEditor({ id }: { id?: string }) {
               <div className="palette">
                 {group.types.map((type) => (
                   <button key={type.type} type="button" className="palette-item" onClick={() => addAction(type.type)}
-                    title={ACTION_FORMS[type.type]?.blurb ?? type.description} disabled={draft.actions.length >= MAX_ACTIONS}>
+                    title={formOf(type.type)?.blurb ?? type.description} disabled={draft.actions.length >= MAX_ACTIONS}>
                     <ActionGlyph type={type.type} size={30} />
                     <span className="grow">{type.label}</span>
                     <Icon name="plus" size={15} />

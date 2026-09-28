@@ -1,4 +1,4 @@
-import { ACTION_FORMS, actionShort, describeReference, sentencePlain } from '../action-forms.ts';
+import { formOf, actionShort, describeReference, sentencePlain } from '../action-forms.ts';
 import { describeTrigger } from '../format.ts';
 import { COLOR_CHOICES, ICON_CHOICES } from '../looks.ts';
 import type { ActionDefinition, VersionDefinition, VersionOrigin } from '../types.ts';
@@ -161,7 +161,7 @@ function paramChanges(
   label: string,
   ambiguous: boolean,
 ): string[] {
-  const fields = ACTION_FORMS[action.type]?.fields ?? [];
+  const fields = formOf(action.type)?.fields ?? [];
   const names = [...new Set([...fields.map((field) => field.name), ...Object.keys(old.params), ...Object.keys(action.params)])];
   const where = ambiguous ? ` in ${label}` : '';
   const changes: string[] = [];
