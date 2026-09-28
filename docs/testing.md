@@ -5,7 +5,7 @@ Everything runs locally with Docker. No external accounts or services are needed
 ## 1. Start the system
 
 ```bash
-docker compose up -d --build --wait    # all 16 containers, waits until healthy
+docker compose up -d --build --wait    # all 25 containers, waits until healthy
 scripts/demo.sh status                 # every service "up"?
 ```
 

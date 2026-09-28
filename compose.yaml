@@ -1,8 +1,8 @@
 # Routine – complete system. Start everything with:
 #   docker compose up -d --build --wait
 #
-# UI / API:        http://localhost:8080   (gateway → web + services)
-# RabbitMQ:        http://localhost:15672   (routine / routine)
+# UI / API:        http://localhost:8080   (edge → gateway replicas → web + services)
+# RabbitMQ:        http://localhost:15672   (routine / routine; nodes 2 and 3 on :15673 / :15674)
 # Jaeger tracing:  http://localhost:16686
 # Mock external:   http://localhost:8090
 
@@ -24,12 +24,35 @@ x-build: &build
 
 x-common-env: &common-env
   LOG_LEVEL: ${LOG_LEVEL:-info}
-  AMQP_URL: amqp://routine:routine@rabbitmq:5672
+  # every broker node – a client moves on to the next node when its node fails
+  AMQP_URL: amqp://routine:routine@rabbitmq-1:5672,amqp://routine:routine@rabbitmq-2:5672,amqp://routine:routine@rabbitmq-3:5672
   JWKS_URL: http://identity-service:3000/.well-known/jwks.json
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   OTEL_TRACES_EXPORTER: otlp
   OTEL_METRICS_EXPORTER: none
   OTEL_LOGS_EXPORTER: none
+
+# Platform services run as two replicas each: losing one container never takes a capability down.
+# All background work is replica-safe (SKIP LOCKED, unique slots, advisory locks) – see docs/availability.md.
+x-replicated: &replicated
+  replicas: ${SERVICE_REPLICAS:-2}
+
+x-broker-ready: &broker-ready
+  rabbitmq-1: { condition: service_healthy }
+  rabbitmq-2: { condition: service_healthy }
+  rabbitmq-3: { condition: service_healthy }
+
+x-rabbitmq: &rabbitmq
+  image: rabbitmq:4.1-management-alpine
+  restart: unless-stopped
+  environment:
+    RABBITMQ_ERLANG_COOKIE: routine-cluster-cookie # shared secret of the cluster nodes
+  healthcheck:
+    test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+    interval: 5s
+    timeout: 10s
+    retries: 30
+    start_period: 10s
 
 x-postgres: &postgres
   image: postgres:17-alpine
@@ -42,23 +65,38 @@ x-postgres: &postgres
 
 services:
   # ------------------------------------------------------------ infrastructure
-  rabbitmq:
-    image: rabbitmq:4.1-management-alpine
-    hostname: rabbitmq # stable node name → durable queues survive container re-creation
-    restart: unless-stopped
+  # three-node cluster: quorum queues keep a replica on every node, so one node can fail
+  # (stable hostnames → stable node names → durable queues survive container re-creation)
+  rabbitmq-1:
+    <<: *rabbitmq
+    hostname: rabbitmq-1
     ports:
       - "15672:15672"
     volumes:
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-routine.conf:ro
       - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
       - ./infra/rabbitmq/advanced.config:/etc/rabbitmq/advanced.config:ro
-      - rabbitmq-data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
-      interval: 5s
-      timeout: 10s
-      retries: 30
-      start_period: 10s
+      - rabbitmq-1-data:/var/lib/rabbitmq
+  rabbitmq-2:
+    <<: *rabbitmq
+    hostname: rabbitmq-2
+    ports:
+      - "15673:15672"
+    volumes:
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-routine.conf:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/advanced.config:/etc/rabbitmq/advanced.config:ro
+      - rabbitmq-2-data:/var/lib/rabbitmq
+  rabbitmq-3:
+    <<: *rabbitmq
+    hostname: rabbitmq-3
+    ports:
+      - "15674:15672"
+    volumes:
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/20-routine.conf:ro
+      - ./infra/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./infra/rabbitmq/advanced.config:/etc/rabbitmq/advanced.config:ro
+      - rabbitmq-3-data:/var/lib/rabbitmq
 
   jaeger:
     image: jaegertracing/jaeger:2.10.0
@@ -89,11 +127,28 @@ services:
     volumes: [integration-db-data:/var/lib/postgresql/data]
 
   # ------------------------------------------------------------ services
+  # edge load balancer: the only container on the public port, spreads requests over the gateway replicas
+  edge:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:80"
+    volumes:
+      - ./infra/edge/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/edge/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      gateway: { condition: service_healthy }
+
   # web client (React/Vite, served by nginx) – reached through the gateway
   web:
     build: ./web
     image: routine/web:latest
     restart: unless-stopped
+    deploy: *replicated
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
       interval: 5s
@@ -104,8 +159,7 @@ services:
     <<: *node-service
     build: { <<: *build, args: { SERVICE: gateway } }
     image: routine/gateway:latest
-    ports:
-      - "${GATEWAY_PORT:-8080}:3000"
+    deploy: *replicated
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: gateway
@@ -116,12 +170,13 @@ services:
       INTEGRATION_WORKER_URL: http://integration-worker:3000
       WEB_URL: http://web:80
       EXTERNAL_API_URL: http://mock-external:8090
-      RABBITMQ_MANAGEMENT_URL: http://rabbitmq:15672
+      RABBITMQ_MANAGEMENT_URL: http://rabbitmq-1:15672,http://rabbitmq-2:15672,http://rabbitmq-3:15672
 
   identity-service:
     <<: *node-service
     build: { <<: *build, args: { SERVICE: identity-service } }
     image: routine/identity-service:latest
+    deploy: *replicated
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: identity-service
@@ -135,6 +190,7 @@ services:
     <<: *node-service
     build: { <<: *build, args: { SERVICE: routine-service } }
     image: routine/routine-service:latest
+    deploy: *replicated
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: routine-service
@@ -145,12 +201,13 @@ services:
       CHAOS_DUPLICATE_PUBLISH_RATE: ${CHAOS_DUPLICATE_PUBLISH_RATE:-0}
     depends_on:
       routine-db: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      <<: *broker-ready
 
   task-service:
     <<: *node-service
     build: { <<: *build, args: { SERVICE: task-service } }
     image: routine/task-service:latest
+    deploy: *replicated
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: task-service
@@ -158,12 +215,13 @@ services:
       CHAOS_FAILURE_RATE: ${TASK_CHAOS_FAILURE_RATE:-0}
     depends_on:
       task-db: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      <<: *broker-ready
 
   notification-service:
     <<: *node-service
     build: { <<: *build, args: { SERVICE: notification-service } }
     image: routine/notification-service:latest
+    deploy: *replicated
     environment:
       <<: *common-env
       OTEL_SERVICE_NAME: notification-service
@@ -173,7 +231,7 @@ services:
       CHAOS_FAILURE_RATE: ${NOTIFICATION_CHAOS_FAILURE_RATE:-0}
     depends_on:
       notification-db: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      <<: *broker-ready
 
   integration-worker:
     <<: *node-service
@@ -191,7 +249,7 @@ services:
       CHAOS_FAILURE_RATE: ${INTEGRATION_CHAOS_FAILURE_RATE:-0}
     depends_on:
       integration-db: { condition: service_healthy }
-      rabbitmq: { condition: service_healthy }
+      <<: *broker-ready
 
   # simulated third-party APIs (not part of the platform)
   mock-external:
@@ -211,7 +269,9 @@ services:
       retries: 20
 
 volumes:
-  rabbitmq-data:
+  rabbitmq-1-data:
+  rabbitmq-2-data:
+  rabbitmq-3-data:
   identity-db-data:
   routine-db-data:
   task-db-data:

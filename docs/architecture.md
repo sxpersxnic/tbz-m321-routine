@@ -6,14 +6,14 @@ This document describes how the platform outlined in the [README](../README.md) 
 
 ```mermaid
 flowchart LR
-    Client([Browser / curl]) -->|HTTPS/JSON| GW[API Gateway]
+    Client([Browser / curl]) -->|HTTPS/JSON| EDGE[Edge LB] --> GW[API Gateway ×2]
     GW -->|/ static UI| WEB[Web client]
     GW -->|/auth| ID[Identity Service]
     GW -->|/routines /executions| RS[Routine Service]
     GW -->|/tasks| TS[Task Service]
     GW -->|/notifications| NS[Notification Service]
 
-    RS -- "RoutineTriggered · ActionRequested\nExecutionCompleted/Failed" --> MB{{RabbitMQ}}
+    RS -- "RoutineTriggered · ActionRequested\nExecutionCompleted/Failed" --> MB{{RabbitMQ cluster ×3}}
     MB -- "action.task.#" --> TS
     MB -- "action.http/weather/summary/email.#" --> IW1[Integration Worker 1..n]
     MB -- "action.notification.# · execution.#" --> NS
@@ -29,6 +29,8 @@ flowchart LR
 ```
 
 All services, databases, the broker and Jaeger start with **one** command: `docker compose up -d --build --wait`.
+Every platform service runs as two replicas and the broker as a three-node cluster, so no single container is
+required. See [availability.md](availability.md) for the single-point-of-failure analysis.
 
 The web client is a service of its own, with its own build and deployment. The gateway forwards every non-API path to it –
 so the browser only ever sees one origin (no CORS), and the client shares no code with the services (its own types live in `web/src/types.ts`).
@@ -37,6 +39,7 @@ so the browser only ever sees one origin (no CORS), and the client shares no cod
 
 | Service | Responsibility | Data (own DB) | Interfaces |
 | --- | --- | --- | --- |
+| **edge** | Load balancer on the public port, spreads requests over the gateway replicas; config only (nginx) | – (stateless) | HTTP |
 | **gateway** | Single entry point, routing, token check at the edge, correlation ID, system status | – (stateless) | HTTP |
 | **web** | Web client (React + Vite, served by nginx); talks to the API only through the gateway | – (static) | HTTP |
 | **identity-service** | Users, login, issuing RS256 tokens, JWKS | `users`, `signing_keys` | HTTP |
@@ -137,6 +140,9 @@ Modelled on the *Scripting* actions of Apple's Shortcuts, without changing the s
 | Permanent errors (4xx, invalid params) | No retry → `ActionFailed` → execution `FAILED`; message goes to `<queue>.dlq` for analysis | workers |
 | Poison messages / crash loops | Quorum queue `x-delivery-limit: 10` → DLQ | `definitions.json` |
 | Broker restart | `amqp-connection-manager` reconnects and re-registers consumers automatically | `broker.ts` |
+| Broker node fails | 3-node cluster; quorum queues (retry queues and DLQs too) keep a replica on every node and elect a new leader; clients know all nodes and move on | `rabbitmq.conf`, `broker.ts` |
+| Service replica fails | 2 replicas per service; the edge and the gateway send the next request to a surviving replica | `compose.yaml`, `infra/edge/` |
+| Identity service unreachable | Token check falls back to the last fetched key set instead of failing after the cache age | `service-kit/src/auth.ts` |
 | Several scheduler replicas | `FOR UPDATE SKIP LOCKED` + `UNIQUE (routine_id, scheduled_for)` | `scheduler.ts` |
 | Duplicate external side effects | `Idempotency-Key: <actionId>` sent to external APIs | `integration-worker/src/actions.ts` |
 
@@ -151,8 +157,9 @@ The integration-worker is stateless (its only state is in its own DB). Replicas 
 docker compose up -d --scale integration-worker=5
 ```
 
-routine-service, task-service and notification-service could also run several times: all background processes
-(outbox relay, scheduler, migrations) are replica-safe through `SKIP LOCKED` or advisory locks.
+routine-service, task-service, notification-service, identity-service, gateway and web run as **two replicas** each
+(`SERVICE_REPLICAS`), which covers availability more than load: all background processes (outbox relay, scheduler,
+migrations) are replica-safe through `SKIP LOCKED` or advisory locks.
 
 ## 7. Observability
 
@@ -215,6 +222,8 @@ phase against the JSON Schemas.
 ## 11. Deliberate limits
 
 * No production-grade secret management (passwords in `compose.yaml`), no TLS.
+* One PostgreSQL instance per service, one edge and one Docker host remain single on purpose – see
+  [availability.md §3](availability.md#3-what-remains-on-purpose).
 * Jaeger keeps traces in memory only.
 * The retry queues use one TTL per queue (one queue per backoff step), so there is no head-of-line blocking.
 * The scheduler catches up on missed runs (service was down) once, not for every single missed slot.

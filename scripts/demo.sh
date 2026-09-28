@@ -9,6 +9,7 @@
 #   resilience   Resilience workflow (README §18): stop worker, message waits, start worker
 #   idempotency  Duplicate messages and duplicate API calls are handled safely
 #   scale        Horizontal scaling of the integration-worker (1 → 4 replicas)
+#   failover     No single point of failure: kill a broker node and service replicas mid-run
 #   schedule     Time-based trigger (cron)
 #   webhook      External event: a public webhook URL starts a routine (idempotent, rotatable)
 #   evolution    Schema evolution with expand-and-contract, including a breaking-change demo
@@ -224,6 +225,59 @@ scenario_resilience() {
   ok "no work lost, the user did not have to restart the routine"
 }
 
+rabbit_node_url() { # rabbit_node_url rabbitmq-N → management API of that node on the host
+  echo "http://localhost:$((15671 + ${1#rabbitmq-}))"
+}
+
+scenario_failover() {
+  title "No single point of failure (docs/availability.md)"
+  login
+  local rid eid leader survivor service container codes
+  rid=$(create_routine "$(jq -nc '{name: "Failover Check", trigger: {type: "manual"}, actions: [
+      {key: "weather", type: "weather.get", step: 1, params: {city: "Zurich"}},
+      {key: "task", type: "task.create", step: 1, params: {title: "Survived a failover"}},
+      {key: "notify", type: "notification.send", params: {title: "Failover check", body: "{{actions.weather.summary}}"}}]}')")
+
+  step "1. Broker: kill the RabbitMQ node that leads the queues – while a run is in flight"
+  # right after the first start, the broker is still adding replicas to queues declared while it formed
+  until [[ $(curl -sS -u "$RABBIT_AUTH" "$RABBIT/api/queues/%2F?columns=members" | jq '[.[] | select((.members | length) < 3)] | length') == 0 ]]; do
+    sleep 1
+  done
+  leader=$(curl -sS -u "$RABBIT_AUTH" "$RABBIT/api/queues/%2F/routine-service.action-results" | jq -r '.leader | sub("rabbit@"; "")')
+  survivor=$([[ $leader == rabbitmq-1 ]] && echo rabbitmq-2 || echo rabbitmq-1)
+  eid=$(trigger "$rid")
+  docker compose kill "$leader" >/dev/null 2>&1
+  ok "$leader killed (SIGKILL)"
+  wait_for "$eid" 60 COMPLETED
+  info "broker: $(api GET /api/v1/system/status | jq -r '"\([.brokerNodes[] | select(.running)] | length)/\(.brokerNodes | length) nodes running"')," \
+    "new queue leader: $(curl -sS -u "$RABBIT_AUTH" "$(rabbit_node_url "$survivor")/api/queues/%2F/routine-service.action-results" | jq -r .leader)"
+  docker compose up -d --no-build --wait "$leader" >/dev/null 2>&1 || fail "$leader could not be started"
+  ok "Raft elected a new leader, clients reconnected to another node – $leader rejoined"
+
+  step "2. Services: kill one replica of every platform service – under traffic"
+  for service in gateway web identity-service routine-service task-service notification-service integration-worker; do
+    container=$(docker compose ps -q "$service" | head -1)
+    docker kill "$container" >/dev/null
+    info "killed $(docker inspect -f '{{.Name}}' "$container" | tr -d /)"
+  done
+  codes=$(for _ in $(seq 1 100); do curl -s -o /dev/null -w '%{http_code}\n' -H "authorization: Bearer $TOKEN" "$GATEWAY/api/v1/routines"; done | sort | uniq -c | xargs)
+  info "100 × GET /api/v1/routines → $codes"
+  [[ $codes == "100 200" ]] || fail "requests failed while a replica was gone"
+  login && ok "new login (identity-service replica 2)"
+  eid=$(trigger "$rid")
+  wait_for "$eid" 60 COMPLETED
+  docker compose up -d --no-build --wait >/dev/null 2>&1 || fail "replicas could not be restarted"
+  ok "the surviving replicas carried the load – replicas restarted"
+
+  step "3. Identity: stop every identity-service replica"
+  docker compose stop identity-service >/dev/null 2>&1
+  info "GET /api/v1/routines (signed in) → HTTP $(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $TOKEN" "$GATEWAY/api/v1/routines")"
+  info "POST /api/v1/auth/login         → HTTP $(curl -s -o /dev/null -w '%{http_code}' "$GATEWAY/api/v1/auth/login" -H 'content-type: application/json' -d '{}')"
+  docker compose up -d --no-build --wait identity-service >/dev/null 2>&1 || fail "identity-service could not be started"
+  ok "signed-in users keep working, only new logins wait (503 = retry later)"
+  note "Beyond the 10-minute key cache too: services fall back to the last fetched keys (libs/service-kit/test/auth.test.ts)"
+}
+
 scenario_idempotency() {
   title "Idempotency"
   login
@@ -424,6 +478,7 @@ case "${1:-}" in
   resilience) scenario_resilience ;;
   idempotency) scenario_idempotency ;;
   scale) scenario_scale ;;
+  failover) scenario_failover ;;
   schedule) scenario_schedule ;;
   webhook) scenario_webhook ;;
   evolution) scenario_evolution ;;
@@ -431,7 +486,7 @@ case "${1:-}" in
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution
+    scenario_main; scenario_retry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

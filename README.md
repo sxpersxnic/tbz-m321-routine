@@ -680,7 +680,7 @@ Routine counts as successfully implemented when:
 
 ## 22. Implementation
 
-The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
+The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · No single point of failure: [docs/availability.md](docs/availability.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
 
 ## Quick start
 
@@ -697,16 +697,17 @@ docker compose down -v                # stop and delete data
 | | URL |
 | --- | --- |
 | Web UI & API (gateway) | <http://localhost:8080> – sign in with `demo@routine.local` / `demo12345` |
-| RabbitMQ management | <http://localhost:15672> – `routine` / `routine` |
+| RabbitMQ management | <http://localhost:15672> – `routine` / `routine` (cluster nodes 2 and 3: `:15673`, `:15674`) |
 | Jaeger (distributed tracing) | <http://localhost:16686> |
 | Mock external APIs | <http://localhost:8090> |
 
 ## Layout
 
 ```text
-compose.yaml                 whole system (16 containers)
+compose.yaml                 whole system (25 containers: 2 replicas per service, 3 broker nodes)
 contracts/                   OpenAPI, AsyncAPI, JSON Schemas (independent of the services)
-infra/rabbitmq/              broker topology as code
+infra/rabbitmq/              broker topology and cluster as code
+infra/edge/                  load balancer in front of the gateway replicas
 libs/service-kit/            technical chassis (logging, HTTP, DB, broker, auth, tracing) – no domain models
 services/
   gateway/                   API gateway (single entry point)

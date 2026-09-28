@@ -47,6 +47,7 @@ export function System() {
   };
 
   const services = Object.entries(status.data?.services ?? {});
+  const brokerNodes = status.data?.brokerNodes ?? [];
   const up = services.filter(([, service]) => service.status === 'up').length + (status.data?.broker === 'up' ? 1 : 0);
   const totalServices = services.length + (status.data ? 1 : 0);
   const waiting = work.reduce((total, queue) => total + queue.ready, 0);
@@ -132,7 +133,7 @@ export function System() {
               {status.data && (
                 <li>
                   <StatusIcon status={status.data.broker} size={22} />
-                  <span className="grow"><strong>rabbitmq</strong><span className="muted small block">Message Broker</span></span>
+                  <span className="grow"><strong>rabbitmq</strong><span className="muted small block">Message Broker{brokerNodes.length > 0 && ` · ${brokerNodes.filter((node) => node.running).length}/${brokerNodes.length} nodes`}</span></span>
                   {status.data.broker !== 'up' && <StatusBadge status={status.data.broker} />}
                 </li>
               )}

@@ -3,7 +3,7 @@
 ## Preparation
 
 ```bash
-docker compose up -d --build --wait    # whole system (16 containers)
+docker compose up -d --build --wait    # whole system (25 containers)
 scripts/demo.sh status                  # everything "up"?
 ```
 
@@ -22,6 +22,7 @@ Every scenario can be shown in the terminal (`scripts/demo.sh <scenario>`) or in
 | Resilience (§18) | `scripts/demo.sh resilience` | integration-worker stopped → message waits in the queue (0 consumers), the API and other routines keep working, execution `WAITING`; start the worker → `COMPLETED` |
 | Idempotency | `scripts/demo.sh idempotency` | Same `Idempotency-Key` → same execution. The same `ActionRequested` sent to the broker twice → only one task, logs say "duplicate … ignored" |
 | Scaling | `scripts/demo.sh scale` | 16 parallel actions with 1 vs. 4 worker replicas; duration and distribution per instance |
+| Failover | `scripts/demo.sh failover` | The RabbitMQ node leading the queues is killed mid-run → new leader, run `COMPLETED`, UI shows `2/3 nodes`. One replica of every service is killed → 100/100 requests OK, a new run completes. All identity replicas stopped → signed-in users keep working, login answers 503 ([availability.md](availability.md)) |
 | Schedule | `scripts/demo.sh schedule` | Cron `*/15 * * * * *` fires twice |
 | Webhook | `scripts/demo.sh webhook` | An external `curl` without a user token starts a routine; the JSON body becomes step input; a retry with the same `Idempotency-Key` returns the same run; after rotating the URL the old one answers 404 |
 | Evolution | `scripts/demo.sh evolution` | ExecutionCompleted v1 → expand → consumer update → v2; the breaking change lands in the DLQ and is replayed after the fix |
@@ -62,7 +63,7 @@ Example: `CHAOS_DUPLICATE_PUBLISH_RATE=0.5 docker compose up -d routine-service`
 | 4 | events through a message broker | exchanges `routine.actions`, `routine.action-results`, `routine.events` (`infra/rabbitmq/definitions.json`) |
 | 5 | duplicate messages handled safely | `idempotency`; unique constraints / claim table; tests in `services/*/test` |
 | 6 | worker scales horizontally | `scale`; `docker compose up -d --scale integration-worker=5` |
-| 7 | a failed consumer loses nothing | `resilience`; durable quorum queues, manual ack, outbox |
+| 7 | a failed consumer loses nothing | `resilience`, `failover`; durable quorum queues replicated on 3 broker nodes, manual ack, outbox |
 | 8 | a run is traceable across services | correlation ID in all logs (`trace`), one Jaeger trace across all services, execution log in the UI |
 | 9 | interface evolved without simultaneous deployment | `evolution`; each phase redeploys exactly one service |
 | 10 | one defined start command | `docker compose up -d --build --wait` |

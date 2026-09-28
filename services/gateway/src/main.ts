@@ -5,6 +5,7 @@ import {
   createTokenVerifier,
   env,
   envInt,
+  envList,
   installAuth,
   onShutdown,
 } from '@routine/service-kit';
@@ -46,6 +47,10 @@ const app = createHttpServer({ service: SERVICE, logger });
 // Reject unauthenticated calls at the edge; services still verify the token themselves (defense in depth).
 installAuth(app, createTokenVerifier(env('JWKS_URL', `${upstreams.identity}/.well-known/jwks.json`)), PROTECTED_PREFIXES);
 
+// Upstreams run as several replicas behind one DNS name. A connection that breaks because a replica
+// went away is retried on a fresh connection – only for GET/HEAD/OPTIONS without a body, never for writes.
+const RETRIES_ON_BROKEN_CONNECTION = 2;
+
 for (const route of routes) {
   await app.register(proxy, {
     upstream: route.upstream,
@@ -55,6 +60,7 @@ for (const route of routes) {
     replyOptions: {
       // propagate the correlation id so all services log the same id for this request
       rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }),
+      retriesCount: RETRIES_ON_BROKEN_CONNECTION,
     },
   });
 }
@@ -62,7 +68,8 @@ for (const route of routes) {
 // ---------------------------------------------------------------- system status (for the demo UI)
 
 const rabbit = {
-  url: env('RABBITMQ_MANAGEMENT_URL', 'http://rabbitmq:15672'),
+  // any cluster node answers for the whole cluster – ask the next one when a node is down
+  urls: envList('RABBITMQ_MANAGEMENT_URL', ['http://rabbitmq-1:15672']),
   auth: `Basic ${Buffer.from(`${env('RABBITMQ_USER', 'routine')}:${env('RABBITMQ_PASSWORD', 'routine')}`).toString('base64')}`,
 };
 
@@ -96,30 +103,50 @@ interface RabbitQueue {
   consumers?: number;
 }
 
+interface RabbitNode {
+  name: string;
+  running: boolean;
+}
+
+/** GET on the management API of the first cluster node that answers. */
+async function rabbitGet<T>(path: string): Promise<T> {
+  let lastError: unknown;
+  for (const url of rabbit.urls) {
+    try {
+      const response = await fetch(`${url}${path}`, { headers: { authorization: rabbit.auth }, signal: AbortSignal.timeout(1_500) });
+      if (response.ok) return (await response.json()) as T;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 app.get('/api/v1/system/status', async () => {
   const services = Object.fromEntries(
     await Promise.all(Object.entries(probes).map(async ([name, url]) => [name, await probe(url)] as const)),
   );
   let queues: Array<{ name: string; ready: number; unacked: number; consumers: number }> | null = null;
+  let brokerNodes: Array<{ name: string; running: boolean }> = [];
   try {
-    const response = await fetch(`${rabbit.url}/api/queues/%2F?columns=name,messages,messages_ready,messages_unacknowledged,consumers`, {
-      headers: { authorization: rabbit.auth },
-      signal: AbortSignal.timeout(1_500),
-    });
-    if (response.ok) {
-      queues = ((await response.json()) as RabbitQueue[])
-        .map((queue) => ({
-          name: queue.name,
-          ready: queue.messages_ready ?? 0,
-          unacked: queue.messages_unacknowledged ?? 0,
-          consumers: queue.consumers ?? 0,
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    }
+    const [rawQueues, rawNodes] = await Promise.all([
+      rabbitGet<RabbitQueue[]>('/api/queues/%2F?columns=name,messages,messages_ready,messages_unacknowledged,consumers'),
+      rabbitGet<RabbitNode[]>('/api/nodes?columns=name,running'),
+    ]);
+    queues = rawQueues
+      .map((queue) => ({
+        name: queue.name,
+        ready: queue.messages_ready ?? 0,
+        unacked: queue.messages_unacknowledged ?? 0,
+        consumers: queue.consumers ?? 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    brokerNodes = rawNodes.map((node) => ({ name: node.name, running: node.running })).sort((a, b) => a.name.localeCompare(b.name));
   } catch {
-    queues = null; // broker unreachable
+    queues = null; // no broker node reachable
   }
-  return { services, broker: queues ? 'up' : 'down', queues: queues ?? [] };
+  return { services, broker: queues ? 'up' : 'down', brokerNodes, queues: queues ?? [] };
 });
 
 // ---------------------------------------------------------------- web UI
@@ -130,7 +157,10 @@ await app.register(proxy, {
   upstream: upstreams.web,
   prefix: '/',
   logLevel: 'warn',
-  replyOptions: { rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }) },
+  replyOptions: {
+    rewriteRequestHeaders: (request, headers) => ({ ...headers, 'x-correlation-id': request.id }),
+    retriesCount: RETRIES_ON_BROKEN_CONNECTION,
+  },
 });
 
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });
