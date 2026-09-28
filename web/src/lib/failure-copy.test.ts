@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ErrorCode } from '../types.ts';
-import { ERROR_CODES, FAILURE_ACTION_LABELS, failureCopy, failureLine, type FailedStep } from './failure-copy.ts';
+import { ERROR_CODES, FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine, type FailedStep } from './failure-copy.ts';
 
 /** One failed step per code, as the services report it – the fixture every code is rendered from. */
 const FIXTURES: Record<ErrorCode, { step: FailedStep; sentence: string; action: string }> = {
@@ -60,5 +60,11 @@ describe('failure copy (02-experience §8)', () => {
   it('uses the message itself when it names no param', () => {
     const step = { type: 'email.send', params: {}, error: '"ada@" is not an e-mail address' };
     assert.equal(failureCopy('INVALID_PARAMS', step)?.sentence, 'This step is missing something: "ada@" is not an e-mail address.');
+  });
+
+  it('names the field "Edit step" should focus', () => {
+    assert.equal(failureField('INVALID_PARAMS', FIXTURES.INVALID_PARAMS.step), 'city');
+    assert.equal(failureField('NOT_FOUND', FIXTURES.NOT_FOUND.step), 'url');
+    assert.equal(failureField('TIMEOUT', FIXTURES.TIMEOUT.step), undefined);
   });
 });

@@ -9,7 +9,7 @@ import { startRoutine } from './Routines.tsx';
 import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusTone } from '../components/visual.tsx';
 import { between, clock, dateTime, groupByDay, JAEGER_URL, relative, splitInstance, TRIGGER_WORDS } from '../format.ts';
 import { navigate, useNow, usePolling, useRouteParam } from '../hooks.ts';
-import { FAILURE_ACTION_LABELS, failureCopy, failureLine } from '../lib/failure-copy.ts';
+import { FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine } from '../lib/failure-copy.ts';
 import { TERMINAL_STATUSES, type Execution, type ExecutionAction, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
 
 /** One run as a list row. `routine`, when known, gives the row its routine's colour and symbol. */
@@ -372,7 +372,8 @@ function FailureCard({ e, onResume, resuming }: { e: Detail; onResume: () => voi
   }
 
   const steps = Math.max(...e.actions.map((action) => action.step));
-  const edit = `#/routines/${e.routineId}/settings?step=${encodeURIComponent(failed.parentId ? (e.actions.find((action) => action.id === failed.parentId)?.key ?? failed.key) : failed.key)}`;
+  const field = failureField(failed.errorCode, failed);
+  const edit = `#/routines/${e.routineId}/settings?step=${encodeURIComponent(failed.parentId ? (e.actions.find((action) => action.id === failed.parentId)?.key ?? failed.key) : failed.key)}${field ? `&field=${encodeURIComponent(field)}` : ''}`;
   const called = copy.action === 'openRun' ? calledRun(e, failed) : undefined;
   // retrying is always possible (02 §7: Retry from here, then the fix); the explanation decides which
   // one stands out. Pages for connections and settings don't exist yet, so those point at the step too.

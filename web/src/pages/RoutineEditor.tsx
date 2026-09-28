@@ -431,14 +431,17 @@ export function RoutineEditor({ id }: { id?: string }) {
 
   // "Edit step" on a failed run lands here with ?step=<key>: unfold that step and put the cursor in it
   const [stepParam] = useRouteParam('step');
+  const [fieldParam] = useRouteParam('field');
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the routine has loaded, not again on every edit
   useEffect(() => {
     if (!loaded || !stepParam) return;
     const action = draft.actions.find((candidate) => candidate.key === stepParam);
     if (!action) return;
     toggleExpanded(action.uid, true);
-    requestAnimationFrame(() => focusField(fieldId(action.uid, fieldsFor(action.type)[0]?.name ?? 'key')));
-  }, [loaded, stepParam]);
+    // the field the failure is about, when the run said which – else the step's first field
+    const field = fieldsFor(action.type).find((candidate) => candidate.name === fieldParam) ?? fieldsFor(action.type)[0];
+    requestAnimationFrame(() => focusField(fieldId(action.uid, field?.name ?? 'key')));
+  }, [loaded, stepParam, fieldParam]);
 
   const update = (patch: Partial<Draft>) => setDraft((current) => ({ ...current, ...patch }));
   const updateAction = (key: string, patch: Partial<DraftAction>) =>

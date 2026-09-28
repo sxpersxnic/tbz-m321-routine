@@ -66,7 +66,8 @@ export function History({ id }: { id: string }) {
                 aria-current={index === 0 ? 'true' : undefined}>
                 <div className="history-head">
                   <strong>Version {version.version}</strong>
-                  <span className="muted small" title={dateTime(version.createdAt)}>{relative(version.createdAt, now)}</span>
+                  {/* server clocks may run a little ahead of this one: a version never lies in the future */}
+                  <span className="muted small" title={dateTime(version.createdAt)}>{relative(new Date(Math.min(Date.parse(version.createdAt), now)).toISOString(), now)}</span>
                   <span className="grow" />
                   {index === 0 ? <span className="chip">Current</span> : current && !sameRoutine(version, current) && (
                     <button type="button" className="btn small" disabled={restoring !== undefined} onClick={() => void restore(version.version)}>

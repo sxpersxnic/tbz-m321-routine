@@ -99,6 +99,13 @@ export function failureCopy(code: ErrorCode | null | undefined, step: FailedStep
   return copy && { sentence: copy.sentence(step, types), action: copy.action };
 }
 
+/** The field of the step the failure is about – "Edit step" puts the cursor there. */
+export function failureField(code: ErrorCode | null | undefined, step: FailedStep): string | undefined {
+  if (code === 'INVALID_PARAMS') return /param "([^"]+)"/.exec(step.error ?? '')?.[1];
+  if (step.type === 'http.request' && (code === 'NOT_FOUND' || code === 'FORBIDDEN_HOST' || code === 'UNAUTHORIZED')) return 'url';
+  return undefined;
+}
+
 /** One short sentence for a run row, where the failed step itself isn't known. */
 export function failureLine(code: ErrorCode | null | undefined): string | null {
   return code ? (COPY[code] ?? COPY.INTERNAL).short : null;
