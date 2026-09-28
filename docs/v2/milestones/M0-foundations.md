@@ -13,7 +13,7 @@
     work lands there, one commit per work package ([10 §4](../10-quality.md)).
   - Done when: tag and branch exist, `docs/v2/README.md` status says *in progress*.
 
-- [ ] **M0-02 · Move the outbox into service-kit**
+- [x] **M0-02 · Move the outbox into service-kit**
   - Move `services/routine-service/src/outbox.ts` to `libs/service-kit/src/outbox.ts`
     (`enqueue`, `OutboxRelay`, `purgePublished`) and export it. Add
     `libs/service-kit/migrations/outbox.sql` (the v1 `outbox` table DDL) and

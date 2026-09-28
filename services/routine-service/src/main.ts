@@ -10,6 +10,8 @@ import {
   envInt,
   installAuth,
   onShutdown,
+  OutboxRelay,
+  runKitMigrations,
   runMigrations,
   startLoop,
   waitForDatabase,
@@ -17,7 +19,6 @@ import {
 } from '@routine/service-kit';
 import { ExecutionEngine } from './engine.ts';
 import { parseActionResult, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
-import { OutboxRelay } from './outbox.ts';
 import { registerRoutes } from './api.ts';
 import { Scheduler } from './scheduler.ts';
 
@@ -30,6 +31,7 @@ if (!['v1', 'expand', 'v2'].includes(completionEventFormat)) throw new Error(`in
 const pool = createPool(env('DATABASE_URL'));
 await waitForDatabase(pool, logger);
 await runMigrations(pool, join(import.meta.dirname, '..', 'migrations'), logger);
+await runKitMigrations(pool, ['outbox'], logger);
 
 const broker = new Broker(env('AMQP_URL'), logger);
 const engine = new ExecutionEngine(pool, logger, {

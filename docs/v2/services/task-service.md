@@ -10,7 +10,7 @@ checklists), task events, task Today cards, and "make it a routine" suggestions.
 
 ```sql
 -- M2: domain kit tables
--- outbox (service-kit outboxMigrationSql) and processed_actions (04 §3.3)
+-- outbox (service-kit runKitMigrations(['outbox'])) and processed_actions (04 §3.3)
 
 -- M3: human steps
 ALTER TABLE tasks ADD COLUMN kind text NOT NULL DEFAULT 'task';        -- task | step

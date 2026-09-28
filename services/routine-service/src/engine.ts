@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { currentContext, currentTraceId, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
+import { currentContext, currentTraceId, enqueue, withTransaction, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
 import type { ExecutionTrigger } from './domain/definition.ts';
@@ -13,7 +13,6 @@ import {
   type ActionResult,
   type CompletionEventFormat,
 } from './messages.ts';
-import { enqueue } from './outbox.ts';
 import {
   appendLog,
   findExecutionByIdempotencyKey,

@@ -371,7 +371,7 @@ integration-worker):
 | Module | Exports | Purpose |
 | --- | --- | --- |
 | `manifest.ts` | types of §2, `validateManifest`, `manifestDigest` | contract types |
-| `outbox.ts` | `enqueue(tx, message)`, `OutboxRelay`, `outboxMigrationSql` | moved from routine-service unchanged in behaviour |
+| `outbox.ts` | `enqueue(tx, message)`, `OutboxRelay` (table via `runKitMigrations(pool, ['outbox'], logger)` in `db.ts`) | moved from routine-service unchanged in behaviour |
 | `domain.ts` | `startDomain(options)` | topology, registration, heartbeat, command dispatch, idempotency, results |
 | `events.ts` | `emitEvent(tx, type, data, origin?)` | domain events through the outbox |
 | `today.ts` | `upsertCard(tx, card)`, `removeCard(tx, ownerId, cardId)`, `onResync(handler)` | Today cards |
