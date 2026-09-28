@@ -426,6 +426,10 @@ components:
         PENDING → RUNNING → COMPLETED; RUNNING → WAITING (retry scheduled or no
         worker responding) → RUNNING; any time → FAILED on a permanent error.
 
+    ErrorCode:
+      description: Why an action failed (docs/v2/05-messaging.md §6, contracts/schemas/action-failed.v1.schema.json).
+      enum: [NOT_FOUND, UNAUTHORIZED, FORBIDDEN_HOST, TIMEOUT, UNREACHABLE, RATE_LIMITED, INVALID_PARAMS, TEMPLATE_ERROR, NOT_AVAILABLE, REFERENCE_GONE, SUBROUTINE_FAILED, AWAIT_EXPIRED, QUOTA_EXCEEDED, AI_REFUSED, INPUT_TOO_LARGE, CONFLICT, CANCELLED, INTERNAL]
+
     Execution:
       type: object
       properties:
@@ -440,6 +444,7 @@ components:
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }
         currentStep: { type: integer }
         error: { type: [string, 'null'] }
+        errorCode: { oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }], description: 'why a FAILED run failed (error code of its failed step); null otherwise and for runs that failed before v2' }
         createdAt: { type: string, format: date-time }
         startedAt: { type: [string, 'null'], format: date-time }
         finishedAt: { type: [string, 'null'], format: date-time }
@@ -464,6 +469,7 @@ components:
                   params: { type: object, description: resolved parameters (after dispatch) }
                   output: { type: [object, 'null'] }
                   error: { type: [string, 'null'] }
+                  errorCode: { oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }] }
                   processedBy: { type: [string, 'null'], description: 'service instance, e.g. integration-worker@3f2a…, or routine-engine for scripting actions' }
                   runIf: { type: object, description: 'as defined in the routine' }
                   forEach: { type: string, description: 'as defined in the routine; the action is then expanded into child actions' }

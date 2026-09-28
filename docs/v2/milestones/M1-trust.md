@@ -20,7 +20,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
     v2 branch changes the demo flow (v1 docs stay untouched on `main`).
   - Done when: the template gallery shows only user templates. Demo scenarios still work.
 
-- [ ] **M1-02 · Failure explanations (web)**
+- [x] **M1-02 · Failure explanations (web)**
   - `web/src/lib/failure-copy.ts`: map `errorCode` → sentence + action ([02 §8](../02-experience.md)).
     Run detail and run rows show the sentence. The raw error moves under *Under the hood*.
   - `types.ts`: `ErrorCode`, `errorCode` on `ExecutionAction`.

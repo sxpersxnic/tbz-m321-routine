@@ -417,6 +417,15 @@ a.list-row:active, button.list-row:active { background: var(--surface-3); }
 .error-note .btn { flex: none; background: var(--surface); color: var(--text); }
 .error-note ul { margin: 6px 0 4px; padding-left: 18px; }
 .error-note .link { color: inherit; text-decoration: underline; }
+
+/* a failed run: the step, why in plain words, and the one thing to do (02-experience §7, §8) */
+.failure-card {
+  background: var(--surface); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow), inset 0 0 0 1.5px var(--err-fill);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.failure-step { display: flex; align-items: center; gap: 10px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.failure-card p { margin: 0; }
+.contents { display: contents; }
 .spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: -2px; opacity: 0.8; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -535,7 +544,8 @@ button.story-block { width: 100%; border: 0; font: inherit; color: inherit; text
 button.story-block:hover { box-shadow: var(--shadow-hover); }
 .story-block .aside { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 .story-block.state-FAILED { box-shadow: inset 0 0 0 1.5px var(--err-fill) !important; }
-.story-block.state-SKIPPED { opacity: 0.72; }
+/* only the glyph fades: faded text would fall below 4.5:1, and the "Skipped" label already says it */
+.story-block.state-SKIPPED .glyph { opacity: 0.5; }
 
 /* ================================================================== home */
 .hero {

@@ -6,10 +6,11 @@ import { RunOutcome } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton, StatusBadge } from '../components/ui.tsx';
 import { startRoutine } from './Routines.tsx';
-import { ActionFlow, Monogram, RoutineGlyph, StatusIcon, statusTone } from '../components/visual.tsx';
+import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusTone } from '../components/visual.tsx';
 import { between, clock, dateTime, groupByDay, JAEGER_URL, relative, splitInstance, TRIGGER_WORDS } from '../format.ts';
 import { navigate, useNow, usePolling, useRouteParam } from '../hooks.ts';
-import { TERMINAL_STATUSES, type Execution, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
+import { FAILURE_ACTION_LABELS, failureCopy, failureLine } from '../lib/failure-copy.ts';
+import { TERMINAL_STATUSES, type Execution, type ExecutionAction, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
 
 /** One run as a list row. `routine`, when known, gives the row its routine's colour and symbol. */
 export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
@@ -26,6 +27,8 @@ export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
   const when = showClock ? clock(execution.createdAt) : relative(execution.createdAt, now);
   // success is the normal case: a tick is enough, words are kept for what needs attention
   const quiet = execution.status === 'COMPLETED';
+  // a failed run says why instead of how it started
+  const reason = execution.status === 'FAILED' ? failureLine(execution.errorCode) : null;
   return (
     <a href={`#/executions/${execution.id}`} className="list-row">
       {hideName
@@ -33,7 +36,7 @@ export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
         : routine ? <RoutineGlyph routine={routine} size={34} /> : <Monogram name={execution.routineName} size={34} />}
       <span className="grow">
         <span className="row-title">{hideName ? when : execution.routineName}</span>
-        <span className="row-sub">{hideName ? how : `${when} · ${how}`}</span>
+        <span className="row-sub">{hideName ? (reason ?? how) : `${when} · ${reason ?? how}`}</span>
       </span>
       {!hideName && <StatusIcon status={execution.status} size={20} label={!quiet} />}
       <span className="row-meta">{took}</span>
@@ -218,7 +221,7 @@ export function ExecutionDetail({ id }: { id: string }) {
         </div>
       )}
 
-      {e.error && <p className="error-note"><Icon name="warning" size={18} /> {e.error}</p>}
+      {e.status === 'FAILED' && <FailureCard e={e} />}
       <RunOutcome actions={e.actions} status={e.status} />
 
       <Section id="flow-title" title="Steps">
@@ -237,7 +240,7 @@ export function ExecutionDetail({ id }: { id: string }) {
                 <dt>Type</dt><dd><code>{action.type}</code> · <code>{action.key}</code></dd>
                 <dt>ID</dt><dd><code>{action.id}</code> <CopyButton value={action.id} what="ID" /></dd>
               </dl>
-              {action.error && <p className="error-note">{action.error}</p>}
+              {action.error && <p className="error-note">{failureCopy(action.errorCode, action, typesOf(e))?.sentence ?? action.error}</p>}
               <div className="grid-2">
                 <div><h4>Input</h4><JsonBlock value={action.params} /></div>
                 <div><h4>Output</h4>{action.output ? <JsonBlock value={action.output} /> : <p className="muted small">–</p>}</div>
@@ -258,6 +261,19 @@ export function ExecutionDetail({ id }: { id: string }) {
           <Icon name="chevron" size={18} />
         </summary>
         <div className="under-hood-body">
+          {failedActions(e).length > 0 && (
+            <div>
+              <h3>Errors</h3>
+              <dl className="kv">
+                {failedActions(e).map((failed) => (
+                  <div key={failed.id} className="contents">
+                    <dt><code>{failed.key}</code>{failed.errorCode && <> · <code>{failed.errorCode}</code></>}</dt>
+                    <dd className="mono small">{failed.error}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
           {e.triggerPayload && (
             <div>
               <h3>Webhook data</h3>
@@ -307,6 +323,49 @@ export function ExecutionDetail({ id }: { id: string }) {
 }
 
 const TERMINAL_ACTION = new Set(['COMPLETED', 'FAILED', 'SKIPPED']);
+
+/** Action key → type, so references in failure sentences read as "Forecast (Weather)". */
+const typesOf = (e: Detail) => Object.fromEntries(e.actions.map((action) => [action.key, action.type]));
+
+const failedActions = (e: Detail) => e.actions.filter((action) => action.status === 'FAILED' && action.error);
+
+/** The run a failed "Run routine" step started – its log line names it. */
+function calledRun(e: Detail, action: ExecutionAction): string | undefined {
+  const entry = e.log.find((candidate) => candidate.kind === 'ACTION_DISPATCHED' && candidate.actionKey === action.key);
+  return entry && /\(([0-9a-f-]{36})\)/.exec(entry.message)?.[1];
+}
+
+/**
+ * Failed at step n of m: the step as a sentence, what happened in plain words, and the one thing
+ * to do about it (02-experience §7, §8). Runs from before v2 have no code and keep their raw error.
+ */
+function FailureCard({ e }: { e: Detail }) {
+  const failed = failedActions(e).sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
+  const copy = failed && failureCopy(failed.errorCode, failed, typesOf(e));
+  if (!failed || !copy) return e.error ? <p className="error-note"><Icon name="warning" size={18} /> {e.error}</p> : null;
+
+  const steps = Math.max(...e.actions.map((action) => action.step));
+  const edit = `#/routines/${e.routineId}/settings?step=${encodeURIComponent(failed.parentId ? (e.actions.find((action) => action.id === failed.parentId)?.key ?? failed.key) : failed.key)}`;
+  const called = copy.action === 'openRun' ? calledRun(e, failed) : undefined;
+  // "Retry from here" comes with resuming (M1-05); pages for connections and settings don't exist yet
+  const link = copy.action === 'openRun' && called
+    ? { href: `#/executions/${called}`, label: FAILURE_ACTION_LABELS.openRun }
+    : copy.action === 'retry' ? null : { href: edit, label: FAILURE_ACTION_LABELS.editStep };
+
+  return (
+    <section className="failure" aria-labelledby="failure-title">
+      <h2 id="failure-title" className="group-label">Failed at step {failed.step} of {steps}</h2>
+      <div className="failure-card">
+        <div className="failure-step">
+          <StatusIcon status="FAILED" size={24} />
+          <ActionSentence type={failed.type} params={failed.params} types={typesOf(e)} />
+        </div>
+        <p>{copy.sentence}</p>
+        {link && <div className="row"><a className="btn tinted" href={link.href}>{link.label}</a></div>}
+      </div>
+    </section>
+  );
+}
 
 function ActionFlowForRun({ e, now, selected, onSelect }: { e: Detail; now: number; selected: string | null; onSelect: (key: string) => void }) {
   return (

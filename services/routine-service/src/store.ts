@@ -41,6 +41,8 @@ export interface ExecutionRow {
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
+  /** Code of the failed action (lists only: joined in by listExecutions). */
+  error_code?: ErrorCode | null;
 }
 
 export interface ExecutionActionRow {
@@ -320,11 +322,15 @@ export async function listExecutions(
   filter: { routineId?: string; status?: string; limit: number },
 ): Promise<ExecutionRow[]> {
   const { rows } = await db.query<ExecutionRow>(
-    `SELECT * FROM executions
-      WHERE owner_id = $1
-        AND ($2::uuid IS NULL OR routine_id = $2)
-        AND ($3::text IS NULL OR status = $3)
-      ORDER BY created_at DESC
+    `SELECT e.*,
+            (SELECT a.error_code FROM execution_actions a
+              WHERE a.execution_id = e.id AND a.status = 'FAILED'
+              ORDER BY a.finished_at DESC NULLS LAST LIMIT 1) AS error_code
+       FROM executions e
+      WHERE e.owner_id = $1
+        AND ($2::uuid IS NULL OR e.routine_id = $2)
+        AND ($3::text IS NULL OR e.status = $3)
+      ORDER BY e.created_at DESC
       LIMIT $4`,
     [ownerId, filter.routineId ?? null, filter.status ?? null, filter.limit],
   );
@@ -490,6 +496,7 @@ export function routineDto(row: RoutineRow) {
 }
 
 export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], log?: ExecutionLogRow[]) {
+  const failed = actions?.filter((action) => action.status === 'FAILED').sort((a, b) => (b.finished_at?.getTime() ?? 0) - (a.finished_at?.getTime() ?? 0))[0];
   return {
     id: row.id,
     routineId: row.routine_id,
@@ -501,6 +508,8 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     traceId: row.trace_id,
     currentStep: row.current_step,
     error: row.error,
+    /** Why the run failed (error code of its failed step), null when it didn't or failed before v2. */
+    errorCode: row.status === 'FAILED' ? (failed?.error_code ?? row.error_code ?? null) : null,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -517,6 +526,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
         params: action.resolved_params ?? action.params,
         output: action.output,
         error: action.error,
+        errorCode: action.error_code,
         processedBy: action.processed_by,
         dispatchedAt: action.dispatched_at,
         finishedAt: action.finished_at,

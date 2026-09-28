@@ -6,7 +6,7 @@ import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, Jso
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
 import { CRON_PRESETS, TRIGGER_ICONS, webhookUrl } from '../format.ts';
-import { navigate, usePolling, useUnsavedGuard } from '../hooks.ts';
+import { navigate, usePolling, useRouteParam, useUnsavedGuard } from '../hooks.ts';
 import { FREQUENCIES, parseSchedule, toCron, WEEKDAYS, withFrequency, type Frequency } from '../schedule.ts';
 import { TEMPLATES } from '../templates.ts';
 import type { ActionDefinition, RoutineInput, Trigger, TriggerType } from '../types.ts';
@@ -390,6 +390,17 @@ export function RoutineEditor({ id }: { id?: string }) {
     void loadExisting();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // "Edit step" on a failed run lands here with ?step=<key>: unfold that step and put the cursor in it
+  const [stepParam] = useRouteParam('step');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the routine has loaded, not again on every edit
+  useEffect(() => {
+    if (!loaded || !stepParam) return;
+    const action = draft.actions.find((candidate) => candidate.key === stepParam);
+    if (!action) return;
+    toggleExpanded(action.uid, true);
+    requestAnimationFrame(() => focusField(fieldId(action.uid, fieldsFor(action.type)[0]?.name ?? 'key')));
+  }, [loaded, stepParam]);
 
   const update = (patch: Partial<Draft>) => setDraft((current) => ({ ...current, ...patch }));
   const updateAction = (key: string, patch: Partial<DraftAction>) =>

@@ -3,6 +3,12 @@
 
 export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'COMPLETED' | 'FAILED';
 export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+
+/** Why an action failed (docs/v2/05-messaging.md §6). */
+export type ErrorCode =
+  | 'NOT_FOUND' | 'UNAUTHORIZED' | 'FORBIDDEN_HOST' | 'TIMEOUT' | 'UNREACHABLE' | 'RATE_LIMITED' | 'INVALID_PARAMS'
+  | 'TEMPLATE_ERROR' | 'NOT_AVAILABLE' | 'REFERENCE_GONE' | 'SUBROUTINE_FAILED' | 'AWAIT_EXPIRED' | 'QUOTA_EXCEEDED'
+  | 'AI_REFUSED' | 'INPUT_TOO_LARGE' | 'CONFLICT' | 'CANCELLED' | 'INTERNAL';
 export type Priority = 'low' | 'normal' | 'high';
 
 export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
@@ -77,6 +83,8 @@ export interface Execution {
   traceId: string | null;
   currentStep: number;
   error: string | null;
+  /** Error code of the failed step – null unless FAILED, and for runs that failed before v2. */
+  errorCode: ErrorCode | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -102,6 +110,7 @@ export interface ExecutionAction {
   params: Record<string, unknown>;
   output: Record<string, unknown> | null;
   error: string | null;
+  errorCode: ErrorCode | null;
   processedBy: string | null;
   dispatchedAt: string | null;
   finishedAt: string | null;
