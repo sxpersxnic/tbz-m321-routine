@@ -73,7 +73,7 @@
   - compose + `deploy/stack.yml`: the account's secret for Keycloak and per-service `SERVICE_TOKEN_SECRET`.
   - Tests: user token rejected on `/internal`, service token accepted, unknown service rejected.
 
-- [ ] **M0-08 · New exchanges**
+- [x] **M0-08 · New exchanges**
   - `infra/rabbitmq/definitions.json`: exchanges `domain.events`, `today.cards`,
     `platform.registry`, `routine.commands` (topic, durable). No queues yet.
   - Done when: `docker compose up` loads them, and the Infrastructure topology still renders.
