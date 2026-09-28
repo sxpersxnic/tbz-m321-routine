@@ -1,0 +1,33 @@
+name: service-kit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - libs/**
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/service-kit.yml
+  pull_request:
+    paths:
+      - libs/**
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/service-kit.yml
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npx biome lint libs
+      - run: npx tsc -p libs/service-kit/tsconfig.json
+      - run: node --test --disable-warning=ExperimentalWarning "libs/service-kit/test/**/*.test.ts"

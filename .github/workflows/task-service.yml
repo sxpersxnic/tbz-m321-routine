@@ -1,0 +1,33 @@
+name: task-service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/task-service/**
+      - libs/**
+      - contracts/**
+      - docker/node-service.Dockerfile
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/task-service.yml
+      - .github/workflows/_node-service.yml
+  pull_request:
+    paths:
+      - services/task-service/**
+      - libs/**
+      - contracts/**
+      - docker/node-service.Dockerfile
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/task-service.yml
+      - .github/workflows/_node-service.yml
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/_node-service.yml
+    with:
+      service: task-service

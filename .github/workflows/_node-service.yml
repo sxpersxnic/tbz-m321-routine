@@ -1,0 +1,52 @@
+# Reusable pipeline for one Node service: lint → typecheck → tests → container image.
+# Every service has its own caller workflow (e.g. routine-service.yml) that only runs when that service,
+# the shared chassis, the contracts or the build setup change – isolated pipelines per service.
+name: node-service
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: directory name under services/
+        required: true
+        type: string
+
+jobs:
+  check:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - name: Lint (Biome)
+        run: npx biome lint services/${{ inputs.service }}
+      - name: Typecheck (only this service and what it imports)
+        run: npx tsc -p services/${{ inputs.service }}/tsconfig.json
+      - name: Tests (unit + contract tests)
+        run: |
+          if [ -d services/${{ inputs.service }}/test ]; then
+            node --test --disable-warning=ExperimentalWarning "services/${{ inputs.service }}/test/**/*.test.ts"
+          else
+            echo "no tests for ${{ inputs.service }} – covered by the system test (system.yml)"
+          fi
+
+  image:
+    name: container image
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/node-service.Dockerfile
+          build-args: SERVICE=${{ inputs.service }}
+          tags: routine/${{ inputs.service }}:${{ github.sha }}
+          push: false
+          cache-from: type=gha,scope=${{ inputs.service }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.service }}

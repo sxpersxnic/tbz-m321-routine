@@ -1,0 +1,36 @@
+# System test: the whole platform in containers, then the demo scenarios as acceptance tests –
+# main workflow, idempotency, a stopped consumer (resilience) and killed broker nodes / replicas (failover).
+name: system
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: system-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the system (one command)
+        run: docker compose up -d --build --wait
+      - name: Main workflow
+        run: bash scripts/demo.sh main
+      - name: Idempotency
+        run: bash scripts/demo.sh idempotency
+      - name: Resilience (stopped consumer)
+        run: bash scripts/demo.sh resilience
+      - name: Failover (broker node, replicas, identity)
+        run: bash scripts/demo.sh failover
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - name: Stop
+        if: always()
+        run: docker compose down -v

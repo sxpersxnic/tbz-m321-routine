@@ -720,6 +720,7 @@ services/
 web/                         web client (React + Vite, nginx) – its own service
 scripts/demo.sh              demo scenarios / acceptance test
 deploy/                      automated deployment on three VMs (Docker Swarm)
+.github/workflows/           CI: one pipeline per service (lint, typecheck, tests, image) + system test
 ```
 
 ## Development
@@ -729,5 +730,10 @@ npm install                # service dependencies (Node ≥ 24)
 npm --prefix web install   # web client dependencies
 npm --prefix web run dev   # UI with hot reload on :5173 (API via the running gateway)
 npm run typecheck          # TypeScript
+npm run lint               # Biome
 npm test                   # unit and contract tests
 ```
+
+CI runs the same checks in one pipeline per service (`.github/workflows/<service>.yml`: lint, typecheck, tests,
+container image) – a pipeline only runs when its service, the shared chassis, the contracts or the build setup change.
+`system.yml` starts the whole system and runs the demo scenarios as acceptance tests.
