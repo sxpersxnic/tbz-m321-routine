@@ -7,69 +7,37 @@ import {
   createLogger,
   createPool,
   createTokenVerifier,
+  emitEvent,
   env,
   envFloat,
   envInt,
   HttpError,
   installAuth,
-  instanceId,
   notFound,
   onShutdown,
   requireUser,
+  runKitMigrations,
   runMigrations,
+  startDomain,
   waitForDatabase,
-  withContext,
-  type Envelope,
-  type Queryable,
+  withTransaction,
 } from '@routine/service-kit';
-import {
-  actionCompleted,
-  actionFailed,
-  actionRef,
-  actionRetryScheduled,
-  parseCreateTask,
-  RESULTS_EXCHANGE,
-  type CreateTaskCommand,
-} from './messages.ts';
+import { taskHandlers } from './capabilities.ts';
+import { TASKS_MANIFEST } from './manifest.ts';
+import { SOURCE } from './messages.ts';
+import { defaultListId, eventFields, getTask, insertTask, ownedListId, setStatus, type TaskListRow, type TaskRow } from './tasks.ts';
 
-const SERVICE = 'task-service';
-const PROCESSED_BY = `${SERVICE}@${instanceId}`;
+const SERVICE = SOURCE;
 const logger = createLogger(SERVICE);
 
 const pool = createPool(env('DATABASE_URL'));
 await waitForDatabase(pool, logger);
 await runMigrations(pool, join(import.meta.dirname, '..', 'migrations'), logger);
+await runKitMigrations(pool, ['outbox', 'processed_actions'], logger);
 const broker = new Broker(env('AMQP_URL'), logger);
-
-interface TaskRow {
-  id: string;
-  owner_id: string;
-  list_id: string;
-  title: string;
-  description: string;
-  priority: string;
-  status: 'OPEN' | 'DONE';
-  due_date: string | null;
-  source_action_id: string | null;
-  source_execution_id: string | null;
-  created_at: Date;
-  completed_at: Date | null;
-}
-
-interface TaskListRow {
-  id: string;
-  owner_id: string;
-  name: string;
-  description: string;
-  color: string;
-  icon: string | null;
-  is_default: boolean;
-  created_at: Date;
-}
 
 /** Colour names the web client knows (same palette as routines). */
 const LIST_COLORS = ['sky', 'indigo', 'violet', 'pink', 'orange', 'green', 'teal', 'grey'];
-const DEFAULT_LIST_NAME = 'Todo';
 
 const taskListDto = (row: TaskListRow) => ({
   id: row.id,
@@ -80,22 +48,6 @@ const taskListDto = (row: TaskListRow) => ({
   isDefault: row.is_default,
   createdAt: row.created_at,
 });
-
-/** The owner's default list, created on first use – concurrent callers end up with the same one. */
-async function defaultListId(db: Queryable, ownerId: string): Promise<string> {
-  await db.query(
-    `INSERT INTO task_lists (id, owner_id, name, is_default) VALUES ($1, $2, $3, true)
-     ON CONFLICT (owner_id) WHERE is_default DO NOTHING`,
-    [randomUUID(), ownerId, DEFAULT_LIST_NAME],
-  );
-  const { rows } = await db.query<{ id: string }>('SELECT id FROM task_lists WHERE owner_id = $1 AND is_default', [ownerId]);
-  return rows[0].id;
-}
-
-async function ownedListId(db: Queryable, ownerId: string, listId: string): Promise<string | null> {
-  const { rows } = await db.query<{ id: string }>('SELECT id FROM task_lists WHERE id = $1 AND owner_id = $2', [listId, ownerId]);
-  return rows[0]?.id ?? null;
-}
 
 const taskDto = (row: TaskRow) => ({
   id: row.id,
@@ -110,66 +62,16 @@ const taskDto = (row: TaskRow) => ({
   completedAt: row.completed_at,
 });
 
-/**
- * Idempotent: the unique source_action_id turns a duplicate delivery into a no-op.
- * A list that was deleted after the routine was set up is no reason to lose the
- * task – it lands in the default list instead.
- */
-async function createTaskFromAction(command: CreateTaskCommand): Promise<{ task: TaskRow; created: boolean }> {
-  const chosen = command.listId ? await ownedListId(pool, command.ownerId, command.listId) : null;
-  if (command.listId && !chosen) logger.warn({ listId: command.listId }, 'task list not found – using the default list');
-  const listId = chosen ?? (await defaultListId(pool, command.ownerId));
-  const inserted = await pool.query<TaskRow>(
-    `INSERT INTO tasks (id, owner_id, list_id, title, description, priority, due_date, source_action_id, source_execution_id)
-     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7::int IS NULL THEN NULL ELSE current_date + $7::int END, $8, $9)
-     ON CONFLICT (source_action_id) DO NOTHING
-     RETURNING *`,
-    [randomUUID(), command.ownerId, listId, command.title, command.description, command.priority, command.dueInDays, command.actionId, command.executionId],
-  );
-  if (inserted.rows[0]) return { task: inserted.rows[0], created: true };
-  const existing = await pool.query<TaskRow>(
-    `SELECT * FROM tasks WHERE source_action_id = $1`,
-    [command.actionId],
-  );
-  return { task: existing.rows[0], created: false };
-}
-
-const RESULT_ROUTING_KEYS: Record<string, string> = {
-  ActionCompleted: 'action.completed',
-  ActionFailed: 'action.failed',
-  ActionRetryScheduled: 'action.retry-scheduled',
-};
-
-async function publishResult(envelope: Envelope<unknown>) {
-  await broker.publish(RESULTS_EXCHANGE, RESULT_ROUTING_KEYS[envelope.type], envelope);
-}
-
-broker.consume(
-  {
-    queue: 'task-service.actions',
-    retryDelaysMs: [1_000, 5_000, 15_000],
-    chaosFailureRate: envFloat('CHAOS_FAILURE_RATE', 0),
-    onRetry: async (envelope, { attempt, delayMs, error }) => {
-      const ref = actionRef(envelope);
-      if (ref) await publishResult(actionRetryScheduled(ref, error, attempt, delayMs, PROCESSED_BY));
-    },
-    onGiveUp: async (envelope, { attempt, error }) => {
-      const ref = actionRef(envelope);
-      if (ref) await publishResult(actionFailed(ref, error, attempt, PROCESSED_BY));
-    },
-  },
-  async (envelope) => {
-    const command = parseCreateTask(envelope);
-    await withContext({ executionId: command.executionId, actionId: command.actionId }, async () => {
-      const { task, created } = await createTaskFromAction(command);
-      if (created) logger.info({ taskId: task.id, title: task.title }, 'task created');
-      else logger.info({ taskId: task.id }, 'duplicate ActionRequested – task already exists, result re-sent');
-      await publishResult(
-        actionCompleted(command, { taskId: task.id, listId: task.list_id, title: task.title, dueDate: task.due_date, priority: task.priority }, PROCESSED_BY, !created),
-      );
-    });
-  },
-);
+// the `tasks` domain: registration, its capabilities (on the v1 queue), results and events through the outbox
+const domain = startDomain({
+  manifest: TASKS_MANIFEST,
+  broker,
+  pool,
+  logger,
+  queue: 'task-service.actions',
+  handlers: taskHandlers(logger),
+  chaosFailureRate: envFloat('CHAOS_FAILURE_RATE', 0),
+});
 
 // ---------------------------------------------------------------- HTTP API
 
@@ -230,20 +132,21 @@ app.post<{ Body: { title: string; description?: string; priority?: string; dueDa
   async (request, reply) => {
     const user = requireUser(request);
     const { title, description = '', priority = 'normal', dueDate = null } = request.body;
-    let listId: string;
-    if (request.body.listId) {
-      const owned = await ownedListId(pool, user.id, request.body.listId);
-      if (!owned) throw new HttpError(422, 'unknown_list', 'This list does not exist');
-      listId = owned;
-    } else {
-      listId = await defaultListId(pool, user.id);
-    }
-    const { rows } = await pool.query<TaskRow>(
-      `INSERT INTO tasks (id, owner_id, list_id, title, description, priority, due_date) VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [randomUUID(), user.id, listId, title, description, priority, dueDate],
-    );
-    return reply.status(201).header('location', `/api/v1/tasks/${rows[0].id}`).send(taskDto(rows[0]));
+    // the task and its task.created event commit together (outbox) – no event without a task, or vice versa
+    const task = await withTransaction(pool, async (tx) => {
+      let listId: string;
+      if (request.body.listId) {
+        const owned = await ownedListId(tx, user.id, request.body.listId);
+        if (!owned) throw new HttpError(422, 'unknown_list', 'This list does not exist');
+        listId = owned;
+      } else {
+        listId = await defaultListId(tx, user.id);
+      }
+      const { row } = await insertTask(tx, { ownerId: user.id, listId, title, description, priority, dueDate });
+      await emitEvent(tx, SERVICE, 'task.created', await eventFields(tx, row));
+      return row;
+    });
+    return reply.status(201).header('location', `/api/v1/tasks/${task.id}`).send(taskDto(task));
   },
 );
 
@@ -257,14 +160,17 @@ app.patch<{ Params: { taskId: string }; Body: { status: 'OPEN' | 'DONE' } }>(
   },
   async (request) => {
     const user = requireUser(request);
-    const { rows } = await pool.query<TaskRow>(
-      `UPDATE tasks SET status = $3, completed_at = CASE WHEN $3 = 'DONE' THEN now() ELSE NULL END
-        WHERE id = $1 AND owner_id = $2
-        RETURNING *`,
-      [request.params.taskId, user.id, request.body.status],
-    );
-    if (!rows[0]) throw notFound('Task');
-    return taskDto(rows[0]);
+    const updated = await withTransaction(pool, async (tx) => {
+      const task = await getTask(tx, user.id, request.params.taskId, true);
+      if (!task) throw notFound('Task');
+      if (task.status === request.body.status) return task; // nothing changed – no event
+      const row = await setStatus(tx, task.id, request.body.status);
+      const fields = await eventFields(tx, row);
+      if (row.status === 'DONE') await emitEvent(tx, SERVICE, 'task.completed', { ...fields, completedAt: row.completed_at?.toISOString() });
+      else await emitEvent(tx, SERVICE, 'task.reopened', fields);
+      return row;
+    });
+    return taskDto(updated);
   },
 );
 
@@ -340,4 +246,4 @@ app.delete<{ Params: { listId: string } }>(
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });
 logger.info('task-service ready');
 
-onShutdown(logger, () => app.close(), () => broker.close(), () => pool.end());
+onShutdown(logger, () => app.close(), () => domain.stop(), () => broker.close(), () => pool.end());

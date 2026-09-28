@@ -37,7 +37,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - Tests: an in-memory fake broker test suite for the kit (duplicate delivery, retry,
     permanent failure, unknown type → `NOT_AVAILABLE`, test mode passes `mode`).
 
-- [ ] **M2-04 · task-service becomes domain `tasks`**
+- [x] **M2-04 · task-service becomes domain `tasks`**
   - Manifest per [services/task-service.md §5](../services/task-service.md) (M2 subset: `task.create`,
     `task.complete`, `task.move`, `task.openTasks`, `task.doneTasks`, `task.count`; triggers
     `task.created`, `task.completed`, `task.reopened`, `task.moved`). Handlers via `startDomain`.

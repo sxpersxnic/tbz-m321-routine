@@ -83,6 +83,10 @@ The `\|` in `smart=` above separates alternatives. Only one value is sent.
 Event fields (all events): `taskId, title, listId, listName, areaId, priority, dueDate, kind,
 sourceRoutineId`. Plus `completedAt` (completed), `fromListId` (moved).
 
+From M2 the HTTP API emits `task.created` (POST) and `task.completed` / `task.reopened` (PATCH
+status). v1 has no endpoint that moves a task, so until the full `PATCH` of M5 `task.moved`
+comes from the `task.move` capability only.
+
 ## 5. Manifest (`tasks`, `optional: false`)
 
 | Type | Kind | Params | Output |
