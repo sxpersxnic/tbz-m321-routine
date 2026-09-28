@@ -5,6 +5,7 @@
 | Layer | Tool | Where | Runs in CI |
 | --- | --- | --- | --- |
 | Unit (pure logic: engine state machine, parsers, filters, diff, money) | `node --test` | `libs/*/test`, `services/*/test`, `web/src/**/*.test.ts` | ✓ |
+| Engine (routine-service transitions against a real Postgres: outbox in, `applyResult` out, no broker) | `node --test` + `TEST_DATABASE_URL` (skipped without it) | `services/routine-service/test/engine*.test.ts`, harness in `test/support/` | ✓ (`_node-service.yml` input `database`) |
 | Contract (every produced message and manifest validates, and parsers read fixtures) | `contracts/validate.ts` | `services/*/test/contracts.test.ts` | ✓ |
 | Domain conformance ([04 §7](04-domain-platform.md)) | node test + in-memory fake broker from the kit | `services/<domain>/test/conformance.test.ts` | ✓ |
 | System (whole stack in Docker) | `scripts/demo.sh <scenario>` | new scenarios per milestone (§3) | ✓ (`system.yml`) |

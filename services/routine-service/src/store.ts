@@ -45,6 +45,9 @@ export interface ExecutionRow {
   error_code?: ErrorCode | null;
 }
 
+/** Why a step was skipped (docs/v2/06-engine.md §1). */
+export type SkipReason = 'condition' | 'failure' | 'expired' | 'user' | 'test';
+
 export interface ExecutionActionRow {
   id: string;
   execution_id: string;
@@ -58,6 +61,7 @@ export interface ExecutionActionRow {
   output: Record<string, unknown> | null;
   error: string | null;
   error_code: ErrorCode | null;
+  skip_reason: SkipReason | null;
   processed_by: string | null;
   dispatched_at: Date | null;
   finished_at: Date | null;
@@ -296,8 +300,8 @@ export async function insertLoopActions(db: Queryable, parent: ExecutionActionRo
   return rows;
 }
 
-export async function markActionSkipped(db: Queryable, id: string): Promise<void> {
-  await db.query(`UPDATE execution_actions SET status = 'SKIPPED', finished_at = now(), updated_at = now() WHERE id = $1`, [id]);
+export async function markActionSkipped(db: Queryable, id: string, reason: SkipReason): Promise<void> {
+  await db.query(`UPDATE execution_actions SET status = 'SKIPPED', skip_reason = $2, finished_at = now(), updated_at = now() WHERE id = $1`, [id, reason]);
 }
 
 export async function findExecutionByIdempotencyKey(db: Queryable, routineId: string, key: string): Promise<ExecutionRow | null> {
@@ -428,9 +432,10 @@ export async function markActionRetrying(db: Queryable, id: string, attempt: num
   );
 }
 
+/** After a failure: everything not run yet is skipped *because of* it – resume runs these again. */
 export async function skipPendingActions(db: Queryable, executionId: string): Promise<void> {
   await db.query(
-    `UPDATE execution_actions SET status = 'SKIPPED', updated_at = now() WHERE execution_id = $1 AND status = 'PENDING'`,
+    `UPDATE execution_actions SET status = 'SKIPPED', skip_reason = 'failure', updated_at = now() WHERE execution_id = $1 AND status = 'PENDING'`,
     [executionId],
   );
 }
@@ -527,6 +532,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
         output: action.output,
         error: action.error,
         errorCode: action.error_code,
+        skipReason: action.skip_reason,
         processedBy: action.processed_by,
         dispatchedAt: action.dispatched_at,
         finishedAt: action.finished_at,

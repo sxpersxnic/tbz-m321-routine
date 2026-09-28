@@ -26,7 +26,7 @@ Dead letters with *Replay* · Demo scenarios on Infrastructure.
   - `types.ts`: `ErrorCode`, `errorCode` on `ExecutionAction`.
   - Done when: each code has a rendered example in a failure fixture. axe clean.
 
-- [ ] **M1-03 · Skip reasons**
+- [x] **M1-03 · Skip reasons**
   - Migration: `execution_actions.skip_reason` + backfill ([06 §13](../06-engine.md)). Engine sets
     `condition` / `failure`. DTO exposes `skipReason`.
   - Tests: both reasons set correctly in `scripting.test.ts`-style engine tests.

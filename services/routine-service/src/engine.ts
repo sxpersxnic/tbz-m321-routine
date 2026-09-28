@@ -256,9 +256,9 @@ export class ExecutionEngine {
             if (action.run_if) {
               const condition = actions.find((candidate) => candidate.key === action.run_if?.action);
               if (!condition || !conditionMet(condition, action.run_if.is)) {
-                await markActionSkipped(client, action.id);
+                await markActionSkipped(client, action.id, 'condition');
                 await appendLog(client, execution.id, 'ACTION_SKIPPED', `Skipped – "${action.run_if.action}" was not ${action.run_if.is}`, action.key);
-                action.status = 'SKIPPED';
+                Object.assign(action, { status: 'SKIPPED', skip_reason: 'condition' });
                 continue;
               }
             }

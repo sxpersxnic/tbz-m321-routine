@@ -4,6 +4,9 @@
 export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'COMPLETED' | 'FAILED';
 export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
 
+/** Why a step was skipped: its condition, an earlier failure, expiry, the user, or a test run. */
+export type SkipReason = 'condition' | 'failure' | 'expired' | 'user' | 'test';
+
 /** Why an action failed (docs/v2/05-messaging.md §6). */
 export type ErrorCode =
   | 'NOT_FOUND' | 'UNAUTHORIZED' | 'FORBIDDEN_HOST' | 'TIMEOUT' | 'UNREACHABLE' | 'RATE_LIMITED' | 'INVALID_PARAMS'
@@ -111,6 +114,8 @@ export interface ExecutionAction {
   output: Record<string, unknown> | null;
   error: string | null;
   errorCode: ErrorCode | null;
+  /** Why it was skipped – null for runs from before v2. */
+  skipReason: SkipReason | null;
   processedBy: string | null;
   dispatchedAt: string | null;
   finishedAt: string | null;

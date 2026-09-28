@@ -470,6 +470,7 @@ components:
                   output: { type: [object, 'null'] }
                   error: { type: [string, 'null'] }
                   errorCode: { oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }] }
+                  skipReason: { enum: [condition, failure, expired, user, test, null], description: 'why a SKIPPED action was skipped; null otherwise and for runs before v2' }
                   processedBy: { type: [string, 'null'], description: 'service instance, e.g. integration-worker@3f2a…, or routine-engine for scripting actions' }
                   runIf: { type: object, description: 'as defined in the routine' }
                   forEach: { type: string, description: 'as defined in the routine; the action is then expanded into child actions' }

@@ -172,8 +172,9 @@ function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
     return { ...base, text: `${actionShort(action.type)} failed`, detail: action.error ?? undefined, bad: true };
   }
   if (action.status === 'SKIPPED') {
-    // in a successful run a skip is an If that did not hold – nothing went wrong
-    if (runStatus === 'COMPLETED' || steering) return null;
+    // a skip is only bad news when an earlier failure caused it (runs before v2 have no reason: a
+    // skip in a successful run was an If that did not hold)
+    if (action.skipReason ? action.skipReason !== 'failure' : runStatus === 'COMPLETED' || steering) return null;
     return { ...base, text: `${actionShort(action.type)} skipped`, detail: 'An earlier step failed', bad: true };
   }
   if (action.status !== 'COMPLETED' || steering) return null;
