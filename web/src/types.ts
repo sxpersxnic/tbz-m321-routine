@@ -174,6 +174,8 @@ export interface QueueStatus {
   ready: number;
   unacked: number;
   consumers: number;
+  /** Deliveries per second (absent from older gateways). */
+  rate?: number;
 }
 
 export interface SystemStatus {

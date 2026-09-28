@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import { Sparkline, Topology } from '../components/topology.tsx';
 import { ErrorNote, Icon, StatusBadge } from '../components/ui.tsx';
@@ -8,6 +8,29 @@ import { usePolling } from '../hooks.ts';
 import type { QueueStatus } from '../types.ts';
 
 const HISTORY = 60;
+const VIEW_KEY = 'routine.topology-view';
+
+// three.js only loads when the 3D view is shown
+const Topology3D = lazy(() => import('../components/topology-3d.tsx'));
+
+const webgl = (() => {
+  try {
+    return Boolean(document.createElement('canvas').getContext('webgl2'));
+  } catch {
+    return false;
+  }
+})();
+
+type TopologyView = '3d' | '2d';
+
+function storedView(): TopologyView {
+  if (!webgl) return '2d';
+  try {
+    return localStorage.getItem(VIEW_KEY) === '2d' ? '2d' : '3d';
+  } catch {
+    return '3d';
+  }
+}
 
 function queueKind(name: string): 'dlq' | 'retry' | 'work' | 'other' {
   if (name.endsWith('.dlq')) return 'dlq';
@@ -19,6 +42,15 @@ function queueKind(name: string): 'dlq' | 'retry' | 'work' | 'other' {
 export function System() {
   // queue depth history (last 60 s), kept only in this browser tab
   const history = useRef(new Map<string, number[]>());
+  const [view, setView] = useState<TopologyView>(storedView);
+  const chooseView = (next: TopologyView) => {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // private mode – the choice just isn't remembered
+    }
+  };
   const status = usePolling(async () => {
     const result = await api.system();
     for (const queue of result.queues) {
@@ -104,8 +136,24 @@ export function System() {
       </div>
 
       <div className="card">
-        <div className="card-head"><h2>Topology</h2><span className="live-dot">Live</span></div>
-        <Topology status={status.data} />
+        <div className="card-head">
+          <h2>Topology</h2>
+          <div className="row">
+            {webgl && (
+              <div className="segmented" role="radiogroup" aria-label="Topology view">
+                {(['3d', '2d'] as const).map((option) => (
+                  <button key={option} type="button" role="radio" aria-checked={view === option} className={view === option ? 'active' : ''} onClick={() => chooseView(option)}>
+                    {option.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
+            <span className="live-dot">Live</span>
+          </div>
+        </div>
+        {view === '3d'
+          ? <Suspense fallback={<div className="t3d-stage" />}><Topology3D status={status.data} /></Suspense>
+          : <Topology status={status.data} />}
       </div>
 
       <div className="grid-2 wide-left">
