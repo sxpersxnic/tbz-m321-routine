@@ -53,8 +53,10 @@
     column only) and puts `errorCode` into `ExecutionFailed`.
   - Tests: status → code table; engine stores the code.
 
-- [ ] **M0-06 · Roles**
-  - identity-service: `users.role`, `ADMIN_EMAILS`, demo user admin, `roles` claim in tokens.
+- [x] **M0-06 · Roles**
+  - Keycloak (the v1 identity provider, see [identity-service.md §6](../services/identity-service.md)):
+    realm role `admin`, demo user admin, `roles` claim in tokens. (Planned as `users.role` and
+    `ADMIN_EMAILS` in a custom identity-service.)
   - service-kit `AuthUser` gains `roles`; add `requireAdmin(request)`.
   - gateway: `/api/v1/system/**` except `status` requires admin (status stays open to users:
     the v1 Infrastructure page must keep working for non-admins, read-only).

@@ -227,6 +227,9 @@ sequenceDiagram
   registration with e-mail as user name. Keycloak hashes passwords with Argon2id and signs tokens with keys that never leave it.
 * The gateway **and** every service verify each token themselves (defence in depth): signature against Keycloak's
   public JWKS, `iss` = the realm URL (`JWT_ISSUER`), `aud` = `routine-api` (audience mapper on the clients), expiry.
+* **Roles**: every signed-in user is `user`; the realm role `admin` (the demo user has it) additionally opens the system
+  endpoints under `/api/v1/system/` – all but `status`, which every user may read. Tokens carry the realm roles in a
+  `roles` claim; the gateway answers 403 to non-admins.
 * **Tenant isolation**: every query filters on `owner_id = sub` (the Keycloak user id); other users' resources return 404.
 * Signing out ends the Keycloak session too (RP-initiated logout), so the next sign-in asks for the password again.
 * `http.request` only reaches hosts on the allow-list (`HTTP_ALLOWED_HOSTS`) → no SSRF against internal services. Redirects

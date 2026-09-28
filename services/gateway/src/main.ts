@@ -6,6 +6,7 @@ import {
   env,
   envInt,
   envList,
+  installAdminOnly,
   installAuth,
   onShutdown,
 } from '@routine/service-kit';
@@ -44,6 +45,9 @@ const app = createHttpServer({ service: SERVICE, logger });
 
 // Reject unauthenticated calls at the edge; services still verify the token themselves (defense in depth).
 installAuth(app, createTokenVerifier(env('JWKS_URL')), PROTECTED_PREFIXES);
+// System endpoints (DLQ, chaos, registry) are for admins. The status stays readable for every user:
+// the Infrastructure page shows it read-only.
+installAdminOnly(app, ['/api/v1/system'], ['/api/v1/system/status']);
 
 // Upstreams run as several replicas behind one DNS name. A connection that breaks because a replica
 // went away is retried on a fresh connection – only for GET/HEAD/OPTIONS without a body, never for writes.

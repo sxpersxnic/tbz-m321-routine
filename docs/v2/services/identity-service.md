@@ -1,5 +1,11 @@
 # identity-service (v2) · domain `profile`
 
+> **Keycloak note (M0):** v1 replaced the custom identity-service with **Keycloak** (realm
+> `routine`, `infra/keycloak/realm-routine.json`) before this plan was written. Users, sign-in,
+> tokens, **roles** and **service accounts** are therefore Keycloak configuration, not tables:
+> see §6. The profile, areas and workspaces (M5, M11) still need a service of their own. Where
+> they live is decided before M5 starts.
+
 ## 1. Responsibility
 
 Users, login and tokens (v1), plus **roles**, **service accounts**, the **profile** (time zone,
@@ -90,6 +96,18 @@ Produces (outbox, `domain.events`): `profile.updated` (all profile fields), `pro
   (`wsRole` claim).
 - An activity log is out of scope for M11. Events carry `actorId` (additive) so it can be
   built later.
+
+## 6. Roles and service accounts in Keycloak (as built in M0)
+
+| Plan (§2, §3) | Built |
+| --- | --- |
+| `users.role`, demo user `admin` | Realm role `admin`, granted to the demo user in the realm file. Every signed-in user counts as `user`. |
+| `roles` claim | Protocol mapper `roles` (realm roles, multivalued) on `routine-web` and `routine-cli`. service-kit `rolesOf` also reads Keycloak's `realm_access.roles`. |
+| `ADMIN_EMAILS` | Dropped: Keycloak can't grant a role on registration by e-mail without a custom extension. Admins are granted in the admin console (`/auth/admin`). |
+
+The realm file is imported only when the realm doesn't exist yet. An existing Keycloak database
+keeps its realm: grant `admin` in the admin console there (or recreate the `keycloak-db` volume
+in a development stack).
 
 ## 8. Configuration
 

@@ -17,10 +17,24 @@ import { HttpError } from './errors.ts';
 /** Audience every access token for the API must carry (Keycloak: audience mapper on the clients). */
 export const JWT_AUDIENCE = 'routine-api';
 
+/** `user` for everyone signed in; `admin` for the system endpoints (DLQ, chaos, registry). */
+export type Role = 'user' | 'admin';
+
 export interface AuthUser {
   id: string;
   email: string;
   name?: string;
+  roles: Role[];
+}
+
+/**
+ * Roles of a token: every user is `user`, and `admin` when the identity provider says so – in the flat
+ * `roles` claim (protocol mapper on the Keycloak clients) or Keycloak's own `realm_access.roles`.
+ */
+export function rolesOf(payload: Record<string, unknown>): Role[] {
+  const realmAccess = payload.realm_access as { roles?: unknown } | undefined;
+  const claimed = Array.isArray(payload.roles) ? payload.roles : Array.isArray(realmAccess?.roles) ? realmAccess.roles : [];
+  return claimed.includes('admin') ? ['user', 'admin'] : ['user'];
 }
 
 declare module 'fastify' {
@@ -96,6 +110,7 @@ export function createTokenVerifier(jwksUrl: string, options: TokenVerifierOptio
         id: payload.sub,
         email: String(payload.email ?? ''),
         name: typeof payload.name === 'string' ? payload.name : undefined,
+        roles: rolesOf(payload),
       };
     },
   };
@@ -131,4 +146,22 @@ export function installAuth(app: FastifyInstance, verifier: TokenVerifier, prote
 export function requireUser(request: FastifyRequest): AuthUser {
   if (!request.user) throw new HttpError(401, 'unauthorized', 'Authentication required');
   return request.user;
+}
+
+export function requireAdmin(request: FastifyRequest): AuthUser {
+  const user = requireUser(request);
+  if (!user.roles.includes('admin')) throw new HttpError(403, 'forbidden', 'Admin role required');
+  return user;
+}
+
+/**
+ * Requires the admin role on every route under `prefixes`, except the paths in `except`. Register it
+ * after `installAuth`, whose hook sets `request.user` first.
+ */
+export function installAdminOnly(app: FastifyInstance, prefixes: string[], except: string[] = []): void {
+  app.addHook('preHandler', async (request) => {
+    const path = request.url.split('?')[0];
+    if (!prefixes.some((prefix) => path.startsWith(prefix)) || except.includes(path)) return;
+    requireAdmin(request);
+  });
 }
