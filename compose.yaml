@@ -6,6 +6,12 @@
 # RabbitMQ:        http://localhost:15672   (routine / routine; nodes 2 and 3 on :15673 / :15674)
 # Jaeger tracing:  http://localhost:16686
 # Mock external:   http://localhost:8090
+#
+# Profiles (v2 services, docs/v2/03-architecture.md §7) – without a profile: v1 core + trigger, today, connector
+#   --profile domains    budget, health, people, home, calendar
+#   --profile presence   delivery-service
+#   --profile ai         assistant-service
+#   --profile all        everything
 
 name: routine
 
@@ -128,6 +134,14 @@ services:
     <<: *postgres
     environment: { POSTGRES_USER: integration, POSTGRES_PASSWORD: integration, POSTGRES_DB: integration }
     volumes: [integration-db-data:/var/lib/postgresql/data]
+  # v2 services: one database + role each, co-hosted on one instance to keep laptop memory reasonable
+  # (ADR-12) – a role can connect to its own database only. The Swarm stack gives each its own instance.
+  domains-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: domains, POSTGRES_PASSWORD: domains, POSTGRES_DB: domains }
+    volumes:
+      - domains-db-data:/var/lib/postgresql/data
+      - ./infra/postgres/domains-init.sql:/docker-entrypoint-initdb.d/10-domains.sql:ro
 
   # ------------------------------------------------------------ services
   # edge load balancer: the only container on the public port, spreads requests over the gateway replicas
@@ -298,3 +312,4 @@ volumes:
   task-db-data:
   notification-db-data:
   integration-db-data:
+  domains-db-data:

@@ -78,7 +78,7 @@
     `platform.registry`, `routine.commands` (topic, durable). No queues yet.
   - Done when: `docker compose up` loads them, and the Infrastructure topology still renders.
 
-- [ ] **M0-09 · CI and compose scaffolding for new services**
+- [x] **M0-09 · CI and compose scaffolding for new services**
   - `docker/node-service.Dockerfile` unchanged. Add a `domains-db` Postgres to compose with an
     init script `infra/postgres/domains-init.sql` that creates one database + role per new
     service (budget, health, people, home, calendar, trigger, today, delivery, connector,
