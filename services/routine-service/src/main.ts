@@ -59,7 +59,8 @@ const app = createHttpServer({
 });
 // webhook calls carry their secret in the URL instead of a user token
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/'], ['/api/v1/hooks/']);
-registerRoutes(app, { pool, engine, catalog });
+const staleAfterMs = envInt('REGISTRY_STALE_AFTER_MS', 90_000);
+registerRoutes(app, { pool, engine, catalog, registryStaleAfterMs: staleAfterMs });
 
 // The routine service consumes its own RoutineTriggered events: triggering
 // (API/scheduler) stays fast and works even while the broker is unavailable.
@@ -102,7 +103,6 @@ broker.consume({ queue: 'routine-service.registry', retryDelaysMs: [1_000, 5_000
   else if (!(await applyHeartbeat(pool, message))) logger.debug({ domain: message.domain }, 'heartbeat of an unregistered domain ignored');
 });
 
-const staleAfterMs = envInt('REGISTRY_STALE_AFTER_MS', 90_000);
 let stale = '';
 const registryLoop = startLoop('registry', 30_000, logger, async () => {
   await builtinHeartbeat();

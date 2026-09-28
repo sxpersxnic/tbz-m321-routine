@@ -75,7 +75,7 @@ from manifests (no visible difference for v1 steps, which is the point).
   - Grouped picker with search ([02 §6](../02-experience.md), [07 §5.4](../07-web.md)). The *You* group
     appears once M3 adds human capabilities.
 
-- [ ] **M2-11 · Registry on Infrastructure**
+- [x] **M2-11 · Registry on Infrastructure**
   - `GET /api/v1/system/registry` (routine-service, admin), `System.tsx` section *Registry*:
     domain, version, service, last heartbeat, status (up/stale), rejected registration
     reason, bindings.

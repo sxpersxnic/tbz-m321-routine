@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { conflict, HttpError, notFound, requireUser, withContext, withTransaction, type Pool } from '@routine/service-kit';
+import { conflict, HttpError, notFound, requireAdmin, requireUser, withContext, withTransaction, type Pool } from '@routine/service-kit';
 import type { CatalogStore } from './catalog-store.ts';
+import { BUILTIN_MANIFESTS } from './domain/builtin-manifests.ts';
 import type { Catalog } from './domain/catalog.ts';
 import { DefinitionError, ROUTINE_COLORS, validateRoutine, type Appearance, type RoutineDefinition, type RoutineInput } from './domain/definition.ts';
 import { nextRun } from './domain/schedule.ts';
@@ -27,6 +28,7 @@ import {
   updateAppearance,
   updateRoutine,
 } from './store.ts';
+import { registryReport } from './registry.ts';
 
 // JSON schemas mirror contracts/openapi/routine-api.yaml
 const actionSchema = {
@@ -152,7 +154,7 @@ function firstRun(definition: Pick<RoutineDefinition, 'trigger'>, active: boolea
   return nextRun(definition.trigger.cron, definition.trigger.timezone, new Date());
 }
 
-export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine: ExecutionEngine; catalog: CatalogStore }): void {
+export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine: ExecutionEngine; catalog: CatalogStore; registryStaleAfterMs?: number }): void {
   const { pool, engine } = deps;
 
   // ------------------------------------------------------------ catalog (04 §4.5)
@@ -166,6 +168,14 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
     if (request.headers['if-none-match'] === etag) return reply.status(304).send();
     // every domain counts as enabled until the profile projection exists (M5)
     return { domains: catalog.manifests.map((manifest) => ({ ...manifest, enabled: true })) };
+  });
+
+  // the registry as the Infrastructure page shows it (admin – the gateway checks too)
+  const builtIn = new Set(BUILTIN_MANIFESTS.map((manifest) => manifest.domain));
+  app.get('/api/v1/system/registry', async (request) => {
+    requireAdmin(request);
+    const staleAfterMs = deps.registryStaleAfterMs ?? 90_000;
+    return { staleAfterMs, items: await registryReport(pool, staleAfterMs, builtIn) };
   });
 
   // v1: the same catalog in the old shape

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { api } from '../api.ts';
 import { DeadLetters } from '../components/dead-letters.tsx';
+import { Registry } from '../components/registry.tsx';
 import { useCreateRoutine } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { Sparkline, Topology } from '../components/topology.tsx';
@@ -246,6 +247,7 @@ export function System() {
         </div>
       </div>
       {admin && <DeadLetters />}
+      {admin && <Registry />}
     </div>
   );
 }

@@ -316,6 +316,23 @@ export interface DeadLetter {
   body: unknown;
 }
 
+/** One domain in the registry (GET /api/v1/system/registry, admin – routine-service.md §4). */
+export interface RegistryEntry {
+  domain: string;
+  name: string | null;
+  service: string;
+  builtIn: boolean;
+  version: number | null;
+  versions: number[];
+  digest: string | null;
+  registeredAt: string | null;
+  lastHeartbeatAt: string;
+  status: 'up' | 'stale' | 'rejected';
+  rejected: { reason: string; manifestVersion: number | null; digest: string | null; service: string | null; instance: string; at: string } | null;
+  bindings: string[];
+  usage: Record<string, number>;
+}
+
 export interface DeadLetterQueue {
   queue: string;
   workQueue: string;

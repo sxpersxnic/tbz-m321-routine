@@ -14,6 +14,7 @@
 #   webhook      External event: a public webhook URL starts a routine (idempotent, rotatable)
 #   evolution    Schema evolution with expand-and-contract, including a breaking-change demo
 #   resume       A failed run is fixed and resumed from its failed step ("Retry from here")
+#   registry     Domain platform: five domains registered, a task event on the broker, an incompatible manifest refused
 #   all          All scenarios in sequence (acceptance test)
 #   trace <id>   Logs of all services for a correlation or execution ID
 #   hook <routine> [json]  Call a webhook routine by ID or name, then follow the run (manual testing)
@@ -506,6 +507,56 @@ scenario_hook() {
   note "open in the UI: http://localhost:8080/#/executions/$eid"
 }
 
+registry() { api GET /api/v1/system/registry; }
+
+scenario_registry() {
+  title "Domain registry (M2)"
+  login
+  local names tick task event current manifest envelope before reason q=demo.task-events
+  step "a) Every domain registered its manifest – and keeps its heartbeat"
+  registry | jq -r '.items[] | "  \(.status | . + (" " * (9 - length))) \(.domain | . + (" " * (14 - length))) v\(.version)  \(.service)"'
+  names=$(registry | jq -r '[.items[] | select(.status == "up") | .domain] | sort | join(",")')
+  [[ $names == *connections*notifications*routines*scripting*tasks* ]] || fail "expected five domains online, got: $names"
+  ok "five domains online – the step picker and forms are built from these manifests"
+
+  step "b) Ticking a task publishes task.completed on the domain.events exchange"
+  # nothing consumes task events before M4 (event starts) – a queue of our own makes the message visible
+  curl -sS -f -u "$RABBIT_AUTH" -X PUT "$RABBIT/api/queues/%2F/$q" -H 'content-type: application/json' -d '{"durable":false,"auto_delete":false}' >/dev/null
+  curl -sS -f -u "$RABBIT_AUTH" -X POST "$RABBIT/api/bindings/%2F/e/domain.events/q/$q" -H 'content-type: application/json' -d '{"routing_key":"task.completed"}' >/dev/null
+  task=$(api POST /api/v1/tasks '{"title":"Registry demo – tick me"}' | jq -r .id)
+  api PATCH "/api/v1/tasks/$task" '{"status":"DONE"}' >/dev/null
+  info "task $task ticked"
+  for _ in $(seq 1 20); do
+    event=$(curl -sS -u "$RABBIT_AUTH" -X POST "$RABBIT/api/queues/%2F/$q/get" -H 'content-type: application/json' \
+      -d '{"count":1,"ackmode":"ack_requeue_false","encoding":"auto"}' | jq -c '.[0].payload // empty | fromjson')
+    [[ -n $event ]] && break
+    sleep 0.5
+  done
+  curl -sS -u "$RABBIT_AUTH" -X DELETE "$RABBIT/api/queues/%2F/$q" >/dev/null
+  [[ -n $event ]] || fail "no task.completed event arrived"
+  jq -r '"  \(.type) from \(.source): \(.data.title) (\(.data.listName))"' <<<"$event"
+  [[ $(jq -r .data.taskId <<<"$event") == "$task" ]] || fail "the event is about another task"
+  ok "domain event on the broker (RabbitMQ UI → Exchanges → domain.events)"
+
+  step "c) A new task-service version that drops a step without deprecating it first is refused"
+  current=$(api GET /api/v1/catalog | jq -c '.domains[] | select(.domain == "tasks") | del(.enabled)')
+  manifest=$(jq -c '.manifestVersion += 1 | .capabilities |= map(select(.type != "task.complete"))' <<<"$current")
+  envelope=$(jq -nc --arg mid "$(uuid)" --argjson manifest "$manifest" '{
+    messageId: $mid, type: "DomainRegistered", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $mid,
+    data: {manifest: $manifest, instance: "task-service@demo-fixture"}}')
+  before=$(registry | jq -r '.items[] | select(.domain == "tasks") | .rejected.at // ""')
+  rabbit_publish platform.registry domain.registered "$envelope"
+  for _ in $(seq 1 20); do
+    reason=$(registry | jq -r --arg before "$before" '.items[] | select(.domain == "tasks" and .rejected != null and .rejected.at != $before) | .rejected.reason')
+    [[ -n $reason ]] && break
+    sleep 0.5
+  done
+  [[ -n $reason ]] || fail "the incompatible manifest was not refused"
+  info "refused: $reason"
+  [[ $(registry | jq -r '.items[] | select(.domain == "tasks") | .version') == $(jq -r .manifestVersion <<<"$current") ]] || fail "the current version changed"
+  ok "the accepted version stays current – shown under Infrastructure → Registry"
+}
+
 scenario_trace() {
   local id=${1:?pass a correlation or execution ID}
   title "Logs for $id (all services)"
@@ -536,11 +587,12 @@ case "${1:-}" in
   webhook) scenario_webhook ;;
   evolution) scenario_evolution ;;
   resume) scenario_resume ;;
+  registry) scenario_registry ;;
   trace) scenario_trace "${2:-}" ;;
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_resume; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
+    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

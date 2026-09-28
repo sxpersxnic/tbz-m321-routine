@@ -1300,3 +1300,15 @@ button.notice-main { cursor: pointer; }
 .date-input { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .date-input input { width: auto; min-width: 0; }
 .date-input input[type="number"] { width: 5.5em; }
+
+/* the domain registry (components/registry.tsx) */
+.registry { list-style: none; margin: 0; padding: 0; }
+.registry > li { padding: 12px 0; border-top: 1px solid var(--separator); }
+.registry > li:first-child { border-top: 0; padding-top: 0; }
+.registry-head { display: flex; align-items: center; gap: 12px; }
+.registry-rejected { margin: 8px 0 0 34px; }
+.registry-rejected strong { color: var(--err); }
+.registry > li .disclosure { margin: 6px 0 0 34px; }
+.registry-details { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 8px 0 0; }
+.registry-details dt { color: var(--muted); }
+.registry-details dd { margin: 0; overflow-wrap: anywhere; }

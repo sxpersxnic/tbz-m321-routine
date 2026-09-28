@@ -181,6 +181,7 @@ export function statusTone(status: string): Tone {
       return 'ok';
     case 'FAILED':
     case 'down':
+    case 'rejected':
       return 'err';
     case 'RUNNING':
     case 'DISPATCHED':
@@ -188,6 +189,7 @@ export function statusTone(status: string): Tone {
       return 'busy';
     case 'WAITING':
     case 'RETRYING':
+    case 'stale':
       return 'wait';
     default:
       return 'idle';

@@ -13,6 +13,7 @@ for every new service, SSE pass-through, and **admin endpoints** for the systems
 | --- | --- |
 | `/api/v1/me`, `/api/v1/areas`, `/api/v1/workspaces` | identity-service |
 | `/api/v1/catalog`, `/api/v1/templates`, `/api/v1/shared`, `/api/v1/shares` | routine-service (`/api/v1/shared` is public) |
+| `/api/v1/system/registry` | routine-service (admin, like every `/api/v1/system` path) |
 | `/api/v1/capture`, `/api/v1/task-suggestions` | task-service |
 | `/api/v1/today` | today-service. `/api/v1/today/stream` is exempt from the gateway's bearer check (it carries a one-time ticket that today-service verifies) and is proxied without response buffering. The access log must log that path **without** its query string. |
 | `/api/v1/triggers` | trigger-service |

@@ -30,6 +30,8 @@ const routes: Array<{ prefix: string; upstream: string }> = [
   { prefix: '/api/v1/executions', upstream: upstreams.routine },
   { prefix: '/api/v1/action-types', upstream: upstreams.routine },
   { prefix: '/api/v1/catalog', upstream: upstreams.routine },
+  // admin (installAdminOnly below covers it like every /api/v1/system path)
+  { prefix: '/api/v1/system/registry', upstream: upstreams.routine },
   // public: the secret token in the path is the credential, checked by the routine service
   { prefix: '/api/v1/hooks', upstream: upstreams.routine },
   { prefix: '/api/v1/tasks', upstream: upstreams.task },

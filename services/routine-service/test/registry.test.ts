@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import type { CapabilitySpec, DomainManifest } from '@routine/service-kit';
 import { BUILTIN_MANIFESTS } from '../src/domain/builtin-manifests.ts';
-import { applyHeartbeat, applyRegistration, compatibilityIssues, listDomains, staleDomains } from '../src/registry.ts';
+import { applyHeartbeat, applyRegistration, compatibilityIssues, listDomains, staleDomains, type RegistryEntry } from '../src/registry.ts';
 import { engineHarness, needsDatabase, type EngineHarness } from './support/engine-harness.ts';
 
 const capability = (type: string, extra: Partial<CapabilitySpec> = {}): CapabilitySpec => ({
@@ -212,5 +212,30 @@ describe('registry (04 §4.3)', { skip: needsDatabase }, () => {
 
   it('accepts the built-in domains', async () => {
     for (const builtin of BUILTIN_MANIFESTS) assert.equal((await register(builtin, 'routine-service@test')).kind, 'accepted', builtin.domain);
+  });
+
+  it('reports every domain for Infrastructure – versions, freshness, rejections, bindings, usage; admins only', async () => {
+    await h.pool.query(`UPDATE domains SET last_heartbeat_at = now() - interval '5 minutes' WHERE domain = 'kappa'`);
+    const user = await h.api();
+    assert.equal((await user.inject({ url: '/api/v1/system/registry' })).statusCode, 403);
+    const admin = await h.api({ roles: ['user', 'admin'] });
+    const response = await admin.inject({ url: '/api/v1/system/registry' });
+    assert.equal(response.statusCode, 200);
+    const { staleAfterMs, items } = response.json() as { staleAfterMs: number; items: RegistryEntry[] };
+    const entry = (name: string) => items.find((item) => item.domain === name);
+    assert.equal(staleAfterMs, 90_000);
+    assert.deepEqual(
+      [entry('alpha')?.status, entry('alpha')?.version, entry('alpha')?.bindings, entry('alpha')?.builtIn],
+      ['up', 1, ['action.alpha.act', 'action.alpha.other'], false],
+    );
+    assert.equal(entry('kappa')?.status, 'stale');
+    assert.equal(entry('eta')?.status, 'rejected');
+    assert.match(entry('eta')?.rejected?.reason ?? '', /prefix "zeta"/);
+    // the rejected v2 is not a version, and the routine that blocked it counts
+    assert.deepEqual(entry('epsilon')?.versions, [1]);
+    assert.equal(entry('epsilon')?.usage['epsilon.act'], 1);
+    assert.equal(entry('epsilon')?.usage['epsilon.other'], 0);
+    assert.deepEqual([entry('scripting')?.builtIn, entry('scripting')?.bindings], [true, []]);
+    await Promise.all([user.close(), admin.close()]);
   });
 });

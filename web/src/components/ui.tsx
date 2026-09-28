@@ -206,13 +206,15 @@ const STATUS_LABELS: Record<string, string> = {
   SKIPPED: 'Skipped',
   up: 'Online',
   down: 'Offline',
+  stale: 'Stale',
+  rejected: 'Rejected',
 };
 
 /** The one place a status enum becomes words – badges, pipeline and filters share it. */
 export const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 const BADGE_TONE: Record<string, string> = {
-  COMPLETED: 'ok', up: 'ok', FAILED: 'err', down: 'err',
+  COMPLETED: 'ok', up: 'ok', FAILED: 'err', down: 'err', rejected: 'err', stale: 'wait',
   RUNNING: 'busy', DISPATCHED: 'busy', PENDING: 'busy', WAITING: 'wait', RETRYING: 'wait',
 };
 

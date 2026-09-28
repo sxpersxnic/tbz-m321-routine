@@ -228,3 +228,66 @@ export async function staleDomains(db: Queryable, staleAfterMs: number): Promise
   );
   return rows.map((row) => row.domain);
 }
+
+// ---------------------------------------------------------------- Infrastructure (M2-11)
+
+export interface RegistryEntry {
+  domain: string;
+  name: string | null;
+  service: string;
+  /** In-process in routine-service – no queue of its own. */
+  builtIn: boolean;
+  version: number | null;
+  versions: number[];
+  digest: string | null;
+  registeredAt: string | null;
+  lastHeartbeatAt: string;
+  /** `rejected`: never accepted, only a refused registration so far. */
+  status: 'up' | 'stale' | 'rejected';
+  rejected: DomainRow['rejected'];
+  /** Routing keys on `routine.actions` its queue is bound to – one per capability (04 §6). */
+  bindings: string[];
+  /** How many routines use each capability (as a step) and trigger (as their event). */
+  usage: Record<string, number>;
+}
+
+/** Everything the Infrastructure page shows about the registry (routine-service.md §4, admin). */
+export async function registryReport(db: Queryable, staleAfterMs: number, builtIn: ReadonlySet<string>): Promise<RegistryEntry[]> {
+  const [domains, versions, usage] = await Promise.all([
+    db.query<DomainRow & { manifest: DomainManifest | null; digest: string | null; registered_at: Date | null; stale: boolean }>(
+      `SELECT d.*, m.manifest, m.digest, m.registered_at, d.last_heartbeat_at < now() - make_interval(secs => $1) AS stale
+         FROM domains d LEFT JOIN domain_manifests m ON m.domain = d.domain AND m.manifest_version = d.current_version
+        ORDER BY (m.manifest->>'order')::int NULLS LAST, d.domain`,
+      [staleAfterMs / 1000],
+    ),
+    db.query<{ domain: string; versions: number[] }>('SELECT domain, array_agg(manifest_version ORDER BY manifest_version) AS versions FROM domain_manifests GROUP BY domain'),
+    // one pass over all routines: step types and event triggers
+    db.query<{ type: string; count: number }>(
+      `SELECT type, count(DISTINCT id)::int AS count FROM (
+         SELECT r.id, a->>'type' AS type FROM routines r CROSS JOIN LATERAL jsonb_array_elements(r.actions) a
+         UNION ALL
+         SELECT id, trigger->>'event' FROM routines WHERE trigger->>'event' IS NOT NULL
+       ) used GROUP BY type`,
+    ),
+  ]);
+  const versionsOf = new Map(versions.rows.map((row) => [row.domain, row.versions]));
+  const used = new Map(usage.rows.map((row) => [row.type, row.count]));
+  return domains.rows.map((row) => {
+    const types = [...(row.manifest?.capabilities ?? []).map((capability) => capability.type), ...(row.manifest?.triggers ?? []).map((trigger) => trigger.type)];
+    return {
+      domain: row.domain,
+      name: row.manifest?.name ?? null,
+      service: row.service,
+      builtIn: builtIn.has(row.domain),
+      version: row.current_version,
+      versions: versionsOf.get(row.domain) ?? [],
+      digest: row.digest,
+      registeredAt: row.registered_at?.toISOString() ?? null,
+      lastHeartbeatAt: row.last_heartbeat_at.toISOString(),
+      status: row.current_version === null ? 'rejected' : row.stale ? 'stale' : 'up',
+      rejected: row.rejected,
+      bindings: builtIn.has(row.domain) ? [] : (row.manifest?.capabilities ?? []).map((capability) => `action.${capability.type}`),
+      usage: Object.fromEntries(types.map((type) => [type, used.get(type) ?? 0])),
+    };
+  });
+}

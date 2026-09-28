@@ -1,21 +1,4 @@
-import type {
-  ActionDefinition,
-  CatalogDomain,
-  DeadLetterQueue,
-  Execution,
-  ExecutionDetail,
-  ExecutionStats,
-  ExecutionStatus,
-  Notification,
-  Routine,
-  RoutineInput,
-  RoutineVersion,
-  SystemStatus,
-  Task,
-  TaskList,
-  TaskListInput,
-  User,
-} from './types.ts';
+import type { ActionDefinition, CatalogDomain, DeadLetterQueue, Execution, ExecutionDetail, ExecutionStats, ExecutionStatus, Notification, RegistryEntry, Routine, RoutineInput, RoutineVersion, SystemStatus, Task, TaskList, TaskListInput, User } from './types.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -215,6 +198,7 @@ export const api = {
 
   system: () => get<SystemStatus>('/api/v1/system/status'),
   deadLetters: async () => (await get<{ items: DeadLetterQueue[] }>('/api/v1/system/dead-letters')).items,
+  registry: () => get<{ staleAfterMs: number; items: RegistryEntry[] }>('/api/v1/system/registry'),
   replayDeadLetters: (queue: string) => send<{ moved: number }>('POST', `/api/v1/system/dead-letters/${encodeURIComponent(queue)}/replay`),
   discardDeadLetters: (queue: string, messageIds: string[]) =>
     send<{ discarded: number }>('POST', `/api/v1/system/dead-letters/${encodeURIComponent(queue)}/discard`, { messageIds }),

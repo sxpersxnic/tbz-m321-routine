@@ -10,7 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { createHttpServer, createPool, runKitMigrations, runMigrations, withTransaction, type ErrorCode, type Pool } from '@routine/service-kit';
+import { createHttpServer, createPool, runKitMigrations, runMigrations, withTransaction, type ErrorCode, type Pool, type Role } from '@routine/service-kit';
 import pg from 'pg';
 import pino from 'pino';
 import { registerRoutes } from '../../src/api.ts';
@@ -103,11 +103,11 @@ export async function engineHarness() {
       engine.applyResult({ kind: 'failed', actionId, executionId, error, code, attempts: 1, processedBy: 'test-worker' }),
 
     /** The real HTTP routes, signed in as the harness owner – call with `app.inject(…)`. */
-    async api() {
+    async api({ roles = ['user'] }: { roles?: Role[] } = {}) {
       const app = createHttpServer({ service: 'routine-service-test', logger });
       app.decorateRequest('user', null);
       app.addHook('preHandler', async (request) => {
-        request.user = { id: ownerId, email: 'test@routine.local', roles: ['user'] };
+        request.user = { id: ownerId, email: 'test@routine.local', roles };
       });
       registerRoutes(app, { pool, engine, catalog: catalogStore });
       await app.ready();
