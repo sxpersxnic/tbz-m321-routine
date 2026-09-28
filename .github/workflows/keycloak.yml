@@ -1,0 +1,47 @@
+# Identity provider: the realm "routine" as code and the Keycloak image with it.
+name: keycloak
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/keycloak/**
+      - docker/keycloak.Dockerfile
+      - .github/workflows/keycloak.yml
+  pull_request:
+    paths:
+      - infra/keycloak/**
+      - docker/keycloak.Dockerfile
+      - .github/workflows/keycloak.yml
+  workflow_dispatch:
+
+jobs:
+  realm:
+    name: realm configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: valid JSON, and the web client never allows the password grant
+        run: |
+          jq empty infra/keycloak/realm-routine.json
+          jq -e '.clients[] | select(.clientId == "routine-web")
+            | .publicClient and .standardFlowEnabled and (.directAccessGrantsEnabled | not) and (.implicitFlowEnabled | not)
+            and .attributes["pkce.code.challenge.method"] == "S256"' infra/keycloak/realm-routine.json
+
+  image:
+    name: container image
+    needs: realm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/keycloak.Dockerfile
+          tags: routine/keycloak:${{ github.sha }}
+          push: false
+          cache-from: type=gha,scope=keycloak
+          cache-to: type=gha,mode=max,scope=keycloak
