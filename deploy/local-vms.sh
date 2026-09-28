@@ -6,6 +6,8 @@
 #   deploy/local-vms.sh down   remove the simulated VMs (and everything deployed on them)
 #
 # Each "VM" is a privileged docker:dind container with its own Docker daemon on the network routine-vms.
+# Every port is bound to 127.0.0.1 only: the dind daemons accept unauthenticated API calls, and nothing of
+# the simulation should be reachable from your network.
 # In front of them runs a load balancer (like a cloud LB in front of real VMs) – the UI/API is reached
 # through it: http://localhost:18080, Jaeger http://localhost:26686.
 # From your machine: vmN's Docker on tcp://127.0.0.1:2375N, its RabbitMQ management on http://localhost:2567N.
@@ -22,7 +24,7 @@ up() {
     if [[ -z $(docker ps -aq --filter "name=^routine-vm$n\$") ]]; then
       docker run -d -q --privileged --name "routine-vm$n" --hostname "vm$n" --network "$NETWORK" --network-alias "vm$n" \
         -e DOCKER_TLS_CERTDIR= -v "routine-vm$n:/var/lib/docker" \
-        -p "127.0.0.1:2375$n:2375" -p "2567$n:15672" \
+        -p "127.0.0.1:2375$n:2375" -p "127.0.0.1:2567$n:15672" \
         docker:dind >/dev/null
     else
       docker start "routine-vm$n" >/dev/null
@@ -32,7 +34,7 @@ up() {
     until DOCKER_HOST="tcp://127.0.0.1:2375$n" docker info >/dev/null 2>&1; do sleep 1; done
   done
   if [[ -z $(docker ps -aq --filter name=^routine-vms-lb\$) ]]; then
-    docker run -d -q --name routine-vms-lb --network "$NETWORK" -p 18080:8080 -p 26686:16686 \
+    docker run -d -q --name routine-vms-lb --network "$NETWORK" -p 127.0.0.1:18080:8080 -p 127.0.0.1:26686:16686 \
       -v "$PWD/deploy/local-vms-lb.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.29-alpine >/dev/null
   else
     docker start routine-vms-lb >/dev/null

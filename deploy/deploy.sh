@@ -14,7 +14,9 @@
 #   destroy    remove the stack (volumes and swarm stay)
 #
 # Inventory: deploy/vms.env (copy deploy/vms.env.example), or INVENTORY=<file>.
-# Requirements on your machine: docker CLI, ssh (key-based login to the VMs), git, curl, jq.
+# Secrets: generated on the first run into deploy/vms.secrets.env (next to the inventory, mode 600, never
+#          committed) – keep that file: the databases on the VMs only accept the passwords they were created with.
+# Requirements on your machine: docker CLI, ssh (key-based login to the VMs), git, curl, jq, openssl.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -23,6 +25,8 @@ INVENTORY=${INVENTORY:-deploy/vms.env}
 # shellcheck source=/dev/null
 source "$INVENTORY"
 
+SECRETS=${SECRETS:-${INVENTORY%.env}.secrets.env}
+GENERATED=deploy/.generated
 STACK=${STACK:-routine}
 NODES=(1 2 3)
 IMAGES=(gateway identity-service routine-service task-service notification-service integration-worker mock-external web)
@@ -56,6 +60,33 @@ default_tag() { # commit of the image inputs; uncommitted changes add a hash of 
 }
 TAG=${TAG:-$(default_tag)}
 
+# ------------------------------------------------------------------ secrets
+SECRET_NAMES=(RABBITMQ_PASSWORD RABBITMQ_ERLANG_COOKIE
+  IDENTITY_DB_PASSWORD ROUTINE_DB_PASSWORD TASK_DB_PASSWORD NOTIFICATION_DB_PASSWORD INTEGRATION_DB_PASSWORD)
+
+load_secrets() { # generate what is missing (first run, or a secret added later), then export all
+  touch "$SECRETS" && chmod 600 "$SECRETS"
+  # shellcheck source=/dev/null
+  source "$SECRETS"
+  for name in "${SECRET_NAMES[@]}"; do
+    [[ -n ${!name:-} ]] && continue
+    printf '%s=%s\n' "$name" "$(openssl rand -hex 24)" >>"$SECRETS" # hex: safe inside URLs and YAML
+    note "generated $name → $SECRETS"
+  done
+  # shellcheck source=/dev/null
+  source "$SECRETS"
+  export "${SECRET_NAMES[@]}"
+}
+
+render_config() { # files the stack needs that contain secrets – written locally, never committed
+  mkdir -p "$GENERATED"
+  jq --arg password "$RABBITMQ_PASSWORD" '.users |= map(.password = $password)' \
+    infra/rabbitmq/definitions.json >"$GENERATED/rabbitmq-definitions.json"
+  chmod 600 "$GENERATED/rabbitmq-definitions.json"
+}
+
+rabbit_auth() { printf 'routine:%s' "$RABBITMQ_PASSWORD"; }
+
 # ------------------------------------------------------------------ steps
 cmd_bootstrap() {
   step "Docker on the VMs"
@@ -66,8 +97,11 @@ cmd_bootstrap() {
       ok "vm$n ($target): Docker $(ssh -o BatchMode=yes "$target" 'docker version --format "{{.Server.Version}}"')"
       continue
     fi
-    note "vm$n ($target): installing Docker (get.docker.com) …"
-    ssh -o BatchMode=yes "$target" 'curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker "$USER"' >/dev/null ||
+    # the distribution's signed package, not a script piped from the internet into a root shell
+    ssh -o BatchMode=yes "$target" 'command -v apt-get' >/dev/null 2>&1 ||
+      fail "vm$n: no apt-get – install Docker on this VM yourself (docs/deployment.md §3), then run deploy.sh again"
+    note "vm$n ($target): installing Docker (apt package docker.io) …"
+    ssh -o BatchMode=yes "$target" 'sudo DEBIAN_FRONTEND=noninteractive apt-get update -q && sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq docker.io && sudo usermod -aG docker "$USER"' >/dev/null ||
       fail "vm$n: Docker installation failed (needs sudo without password)"
     ok "vm$n ($target): Docker installed"
   done
@@ -114,7 +148,7 @@ cmd_images() {
 }
 
 config_version() { # content hash: swarm configs are immutable, a changed file needs a new name
-  cat infra/rabbitmq/rabbitmq.conf infra/rabbitmq/definitions.json infra/rabbitmq/advanced.config infra/edge/nginx.conf |
+  cat infra/rabbitmq/rabbitmq.conf "$GENERATED/rabbitmq-definitions.json" infra/rabbitmq/advanced.config infra/edge/nginx.conf |
     { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-12
 }
 
@@ -138,7 +172,7 @@ wait_broker_replicated() { # a VM may only fail once every quorum queue has a re
   # instead of waiting for the broker's periodic reconciliation
   for n in "${NODES[@]}"; do on 1 exec "$container" rabbitmq-queues grow "rabbit@rabbitmq-$n" all >/dev/null 2>&1 || true; done
   while ((SECONDS < deadline)); do
-    short=$(on 1 exec "$container" wget -qO- --header "Authorization: Basic $(printf routine:routine | base64)" \
+    short=$(on 1 exec "$container" wget -qO- --header "Authorization: Basic $(rabbit_auth | base64 | tr -d "\n")" \
       'http://127.0.0.1:15672/api/queues/%2F?columns=name,members' | jq -r '[.[] | select((.members | length) < 3) | .name] | join(" ")')
     [[ -z $short ]] && return 0
     printf "\r  %swaiting for replicas: %s%s\033[K" "$dim" "$(cut -c1-100 <<<"$short")" "$reset"
@@ -149,6 +183,8 @@ wait_broker_replicated() { # a VM may only fail once every quorum queue has a re
 
 cmd_stack() {
   step "Stack \"$STACK\" (images $TAG)"
+  load_secrets
+  render_config
   export TAG CONFIG_VERSION
   CONFIG_VERSION=$(config_version)
   on 1 stack deploy --detach=true --prune --resolve-image never -c deploy/stack.yml "$STACK" >/dev/null
@@ -169,7 +205,8 @@ cmd_verify() {
     ((SECONDS < deadline)) || fail "$(public_url) not reachable – firewall? (see docs/deployment.md)"
     sleep 2
   done
-  GATEWAY=$(public_url) RABBIT=${RABBIT_URL:-http://$(addr 1):15672} bash scripts/demo.sh main
+  load_secrets
+  GATEWAY=$(public_url) RABBIT=${RABBIT_URL:-http://$(addr 1):15672} RABBIT_AUTH=$(rabbit_auth) bash scripts/demo.sh main
   [[ -n ${PUBLIC_URL:-} ]] && return # behind a load balancer / port mapping: only that one URL is reachable
   local url
   for n in "${NODES[@]}"; do

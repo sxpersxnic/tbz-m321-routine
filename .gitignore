@@ -7,3 +7,5 @@ dist/
 # deployment inventories (contain your VM addresses)
 deploy/vms.env
 deploy/local-vms.env
+deploy/*.secrets.env
+deploy/.generated/

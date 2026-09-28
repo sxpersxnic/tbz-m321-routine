@@ -58,10 +58,12 @@ on different VMs and moves them when a VM fails.*
 ## 3. Requirements
 
 **VMs** (3×): Linux with systemd (recommended: Ubuntu 24.04 LTS; so far tested only on simulated VMs, see §8), 2 vCPU, 4 GB RAM, 20 GB disk, in the same
-network with fixed IP addresses. On your machine: `docker` CLI, `ssh`, `git`, `curl`, `jq`.
+network with fixed IP addresses. On your machine: `docker` CLI, `ssh`, `git`, `curl`, `jq`, `openssl`.
 
 **Access**: SSH login with a key (`ssh ubuntu@10.0.0.11` works without a password) and `sudo` without a password
-(the default on cloud images). `deploy.sh bootstrap` installs Docker and adds the user to the `docker` group.
+(the default on cloud images). `deploy.sh bootstrap` installs Docker from the distribution's signed package
+(`apt-get install docker.io`, Debian/Ubuntu) and adds the user to the `docker` group. On other distributions,
+install Docker yourself first – bootstrap then skips the VM.
 
 **Network**: open these ports between the VMs, and the public ones to your users:
 
@@ -72,10 +74,14 @@ network with fixed IP addresses. On your machine: `docker` CLI, `ssh`, `git`, `c
 | 4789 | UDP | VMs | Overlay network (VXLAN) – all service traffic between VMs |
 | 22 | TCP | your machine → VMs | SSH (deploy.sh talks to Docker over SSH) |
 | 8080 | TCP | users → VMs | UI and API (edge) |
-| 15672 | TCP | admins → VMs | RabbitMQ management of the node on that VM |
-| 16686 | TCP | admins → VMs | Jaeger |
+| 15672 | TCP | **admins only** → VMs | RabbitMQ management of the node on that VM (password from the secrets file) |
+| 16686 | TCP | **admins only** → VMs | Jaeger – has **no login**, so never open it to users or the internet |
 
-Everything else (databases, broker ports 5672/4369/25672) stays inside the overlay network and is not published.
+Everything else (databases, broker ports 5672/4369/25672, mock-external) stays inside the overlay network and is
+not published. Restrict 2377/7946/4789 to the three VMs. Swarm encrypts its control plane (mutual TLS) and
+gossip, but not the service traffic on 4789/udp (VXLAN) – on a network you do not trust, add
+`driver_opts: { encrypted: "true" }` to the network in `deploy/stack.yml` (IPsec; also allow IP protocol 50/ESP
+between the VMs). Not enabled by default because it is untested in this setup.
 
 ## 4. Automated deployment
 
@@ -86,14 +92,31 @@ Everything else (databases, broker ports 5672/4369/25672) stays inside the overl
 
 | Step | Command | What happens |
 | --- | --- | --- |
-| 1 | `deploy.sh bootstrap` | Installs Docker on every VM that does not have it (`get.docker.com`) |
+| 1 | `deploy.sh bootstrap` | Installs Docker on every VM that does not have it (apt package `docker.io`) |
 | 2 | `deploy.sh swarm` | `swarm init` on vm1, vm2 and vm3 join as **managers**; node labels `routine.rabbitmq=1..3` and `routine.data=true` (vm1) |
 | 3 | `deploy.sh images` | Builds the 8 service images **on vm1** (native CPU architecture of the VMs; no registry needed) and streams them to vm2 and vm3 (`docker save \| docker load`). Tag = git commit, plus a content hash when there are uncommitted changes |
-| 4 | `deploy.sh stack` | `docker stack deploy` of [`deploy/stack.yml`](../deploy/stack.yml); broker and edge configuration become Swarm *configs* (named by content hash). Waits until every service runs its desired replicas and is healthy, then until **every quorum queue has a replica on every VM** (`rabbitmq-queues grow`) – only then may a VM fail |
+| 4 | `deploy.sh stack` | Generates the secrets on the first run (below). `docker stack deploy` of [`deploy/stack.yml`](../deploy/stack.yml); broker and edge configuration become Swarm *configs* (named by content hash). Waits until every service runs its desired replicas and is healthy, then until **every quorum queue has a replica on every VM** (`rabbitmq-queues grow`) – only then may a VM fail |
 | 5 | `deploy.sh verify` | Runs the main workflow (`scripts/demo.sh main`) against the deployed system and checks that every VM answers on :8080 |
 
-Afterwards: UI on `http://<any VM>:8080` (`demo@routine.local` / `demo12345`), RabbitMQ on `http://<VM>:15672`,
-Jaeger on `http://<any VM>:16686`.
+Afterwards: UI on `http://<any VM>:8080` (`demo@routine.local` / `demo12345`), RabbitMQ on `http://<VM>:15672`
+(user `routine`, password `RABBITMQ_PASSWORD` from the secrets file), Jaeger on `http://<any VM>:16686`.
+
+### Secrets
+
+The single-host `compose.yaml` uses well-known development passwords (`routine`/`routine` …). The VM deployment
+never does: on its first run `deploy.sh` writes random values (`openssl rand`) to `deploy/vms.secrets.env` next to
+the inventory – mode 600, in `.gitignore` – and the stack refuses to deploy if one is missing (`${VAR:?}`).
+
+| Secret | Used for |
+| --- | --- |
+| `RABBITMQ_PASSWORD` | broker user `routine` (services, management UI); written into a local copy of the broker definitions (`deploy/.generated/`, also ignored) |
+| `RABBITMQ_ERLANG_COOKIE` | shared secret of the broker nodes – whoever has it controls the cluster |
+| `<SERVICE>_DB_PASSWORD` (5×) | one password per database |
+
+**Keep the secrets file** (e.g. in your password manager): PostgreSQL sets a password only when it creates the
+database, so a regenerated file locks the services out of the existing data. The secrets reach the containers
+as environment variables, visible to whoever can run `docker service inspect` on a manager – that is, to
+the admins of the VMs. The demo account's password is public on purpose.
 
 ### Rehearse without VMs
 
@@ -190,4 +213,5 @@ Two findings from these tests are built into the deployment:
 | A service shows `0/2`, `docker service ps --no-trunc routine_<svc>` says *No such image* | The image is missing on that VM – run `deploy.sh images` again |
 | Services cannot reach each other across VMs, but work on the same VM | Overlay traffic is blocked (4789/udp) or the MTU is too small (some clouds: VXLAN needs 50 bytes; create the network with `com.docker.network.driver.mtu=1450`) |
 | `port is already allocated` for the edge after changing how port 8080 is published | A published port cannot switch between routing mesh and host mode in place: `docker service rm routine_edge`, then `deploy.sh stack` |
+| `password authentication failed` / broker login refused after redeploying | The secrets file was lost or regenerated, but the volumes still hold the old passwords. Restore the file – or, if the data may go, `deploy.sh destroy` and remove the volumes on the VMs |
 | Replicas show e.g. `3/2` after a VM failure | Swarm still counts the tasks on the unreachable VM until it is back or removed – harmless |

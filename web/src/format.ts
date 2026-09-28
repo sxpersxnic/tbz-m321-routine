@@ -80,8 +80,10 @@ export function splitInstance(processedBy: string | null): { service: string; in
   return { service, instance: instance.slice(0, 6) };
 }
 
-export const JAEGER_URL = 'http://localhost:16686';
-export const RABBITMQ_URL = 'http://localhost:15672';
+// same host the UI was opened on – localhost for compose, the VM's address in the 3-VM deployment
+const toolUrl = (port: number) => `${window.location.protocol}//${window.location.hostname}:${port}`;
+export const JAEGER_URL = toolUrl(16686);
+export const RABBITMQ_URL = toolUrl(15672);
 
 /** "Good morning" etc. – the first line of the home screen talks to a person. */
 export function greeting(now = new Date()): string {
