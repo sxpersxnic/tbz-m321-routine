@@ -129,6 +129,25 @@ Modelled on the *Scripting* actions of Apple's Shortcuts, without changing the s
 
 ## 5. Reliability
 
+Error handling for one action, from the outbox to a result:
+
+```mermaid
+flowchart TD
+    O[routine-service<br/>outbox relay] -->|ActionRequested<br/>publisher confirm| X((routine.actions))
+    X -->|action.&lt;type&gt;| Q[work queue<br/>quorum, 3 replicas]
+    X -.->|no binding for the type| U[routine.unrouted-actions]
+    Q --> C{consumer<br/>idempotent by actionId}
+    C -->|success| A[ActionCompleted confirmed → ack]
+    C -->|transient: 503, timeout<br/>attempt 1–3| R[retry queue 1 s → 5 s → 15 s<br/>TTL dead-letters back]
+    R --> Q
+    C -.->|ActionRetryScheduled| W[execution WAITING]
+    C -->|permanent: 4xx, invalid params<br/>or retries used up| D[queue.dlq]
+    C -.->|ActionFailed| F[execution FAILED<br/>later steps SKIPPED]
+    Q -->|crash loop:<br/>more than 10 deliveries| D
+    D -.->|after the fix:<br/>scripts/replay-dlq.sh| Q
+    NR[no result within WAITING_AFTER_MS] -.-> W
+```
+
 | Problem | Solution | Where |
 | --- | --- | --- |
 | State saved but message lost (dual write) | **Transactional outbox**: the message is written in the same DB transaction and published by the relay | `routine-service/src/outbox.ts` |
