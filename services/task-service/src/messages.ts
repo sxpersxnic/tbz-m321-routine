@@ -1,94 +1,86 @@
-/** Translation between the message contracts and the task service's own model. */
-import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
+/** Param parsing of the task capabilities: the contract's params → the task service's own model. */
+import { PermanentError } from '@routine/service-kit';
 
 export const SOURCE = 'task-service';
-export const RESULTS_EXCHANGE = 'routine.action-results';
+
+const INVALID_PARAMS = { code: 'INVALID_PARAMS' } as const;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type Priority = 'low' | 'normal' | 'high';
 
-export interface CreateTaskCommand {
-  actionId: string;
-  executionId: string;
-  ownerId: string;
-  actionType: string;
+export interface CreateTaskParams {
   title: string;
   description: string;
   priority: Priority;
-  dueInDays: number | null;
+  /** YYYY-MM-DD in the owner's time zone, or null. */
+  dueDate: string | null;
   /** Target list; null = the owner's default list. */
   listId: string | null;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export interface ActionRef {
-  actionId: string;
-  executionId: string;
-  actionType: string;
+/** Today in `timezone` as YYYY-MM-DD, `offsetDays` later. */
+export function localDate(timezone: string, offsetDays = 0, now = new Date()): string {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const date = new Date(`${today}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
 }
 
-/** Reads the fields needed to answer an ActionRequested, even if the params are unusable. */
-export function actionRef(envelope: Envelope): ActionRef | null {
-  const { actionId, executionId, actionType } = envelope.data;
-  if (typeof actionId !== 'string' || typeof executionId !== 'string') return null;
-  return { actionId, executionId, actionType: typeof actionType === 'string' ? actionType : 'unknown' };
+/** A `date` param (04 §2.1): YYYY-MM-DD, or `+Nd` relative to today in the owner's time zone. */
+export function parseDate(value: unknown, name: string, timezone: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const relative = typeof value === 'string' ? /^\+(\d+)d$/.exec(value) : null;
+  if (relative) return localDate(timezone, Number(relative[1]));
+  throw new PermanentError(`param "${name}" must be a date (YYYY-MM-DD or +Nd)`, INVALID_PARAMS);
 }
 
-export function parseCreateTask(envelope: Envelope): CreateTaskCommand {
-  if (envelope.type !== 'ActionRequested') throw new PermanentError(`unsupported message type ${envelope.type}`);
-  const ref = actionRef(envelope);
-  const { ownerId, actionType, params } = envelope.data as { ownerId?: unknown; actionType?: unknown; params?: Record<string, unknown> };
-  if (!ref || typeof ownerId !== 'string') throw new PermanentError('ActionRequested is missing ids');
-  if (actionType !== 'task.create') throw new PermanentError(`task-service cannot handle action type ${String(actionType)}`);
-
-  const title = params?.title;
-  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required');
-  const priority = params?.priority ?? 'normal';
-  if (priority !== 'low' && priority !== 'normal' && priority !== 'high') throw new PermanentError('param "priority" must be low, normal or high');
-  const dueInDays = params?.dueInDays;
-  if (dueInDays !== undefined && (!Number.isInteger(dueInDays) || (dueInDays as number) < 0)) {
-    throw new PermanentError('param "dueInDays" must be a non-negative integer');
+export function parseId(value: unknown, name: string, what: string, required: true): string;
+export function parseId(value: unknown, name: string, what: string, required?: false): string | null;
+export function parseId(value: unknown, name: string, what: string, required = false): string | null {
+  if (value === undefined || value === null || value === '') {
+    if (required) throw new PermanentError(`param "${name}" is required`, INVALID_PARAMS);
+    return null;
   }
+  if (typeof value !== 'string' || !UUID.test(value)) throw new PermanentError(`param "${name}" must be a ${what} id`, INVALID_PARAMS);
+  return value;
+}
 
-  const listId = params?.listId;
-  if (listId !== undefined && listId !== '' && (typeof listId !== 'string' || !UUID.test(listId))) {
-    throw new PermanentError('param "listId" must be a list id');
+/** task.create – v1's `dueInDays` or v2's `dueDate` (the latter wins). */
+export function parseCreateParams(params: Record<string, unknown>, timezone: string): CreateTaskParams {
+  const title = params.title;
+  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required', INVALID_PARAMS);
+  const priority = params.priority ?? 'normal';
+  if (priority !== 'low' && priority !== 'normal' && priority !== 'high') throw new PermanentError('param "priority" must be low, normal or high', INVALID_PARAMS);
+  const dueInDays = params.dueInDays;
+  if (dueInDays !== undefined && dueInDays !== null && dueInDays !== '' && (!Number.isInteger(Number(dueInDays)) || Number(dueInDays) < 0)) {
+    throw new PermanentError('param "dueInDays" must be a non-negative integer', INVALID_PARAMS);
   }
-
+  const dueDate = parseDate(params.dueDate, 'dueDate', timezone)
+    ?? (dueInDays === undefined || dueInDays === null || dueInDays === '' ? null : localDate(timezone, Number(dueInDays)));
   return {
-    ...ref,
-    ownerId,
-    listId: typeof listId === 'string' && listId !== '' ? listId : null,
     title: title.trim().slice(0, 200),
-    description: typeof params?.description === 'string' ? params.description : '',
+    description: typeof params.description === 'string' ? params.description : '',
     priority,
-    dueInDays: (dueInDays as number | undefined) ?? null,
+    dueDate,
+    listId: parseId(params.listId, 'listId', 'list'),
   };
 }
 
-export function actionCompleted(ref: ActionRef, output: Record<string, unknown>, processedBy: string, duplicate: boolean) {
-  return createEnvelope({
-    type: 'ActionCompleted',
-    version: 1,
-    source: SOURCE,
-    data: { ...ref, output, processedBy, completedAt: new Date().toISOString(), duplicate },
-  });
+/** task.await – a task for the person to do. */
+export function parseAwaitParams(params: Record<string, unknown>): { title: string; description: string; listId: string | null } {
+  const title = params.title;
+  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required', INVALID_PARAMS);
+  return {
+    title: title.trim().slice(0, 200),
+    description: typeof params.description === 'string' ? params.description : '',
+    listId: parseId(params.listId, 'listId', 'list'),
+  };
 }
 
-export function actionFailed(ref: ActionRef, error: Error, attempts: number, processedBy: string) {
-  return createEnvelope({
-    type: 'ActionFailed',
-    version: 1,
-    source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempts, processedBy },
-  });
-}
-
-export function actionRetryScheduled(ref: ActionRef, error: Error, attempt: number, nextAttemptInMs: number, processedBy: string) {
-  return createEnvelope({
-    type: 'ActionRetryScheduled',
-    version: 1,
-    source: SOURCE,
-    data: { ...ref, error: { code: error.name, message: error.message }, attempt, nextAttemptInMs, processedBy },
-  });
+export function parseLimit(value: unknown, fallback = 20): number {
+  if (value === undefined || value === null || value === '') return fallback;
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new PermanentError('param "limit" must be a whole number from 1 to 100', INVALID_PARAMS);
+  return limit;
 }

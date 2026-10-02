@@ -1,0 +1,1687 @@
+[
+  {
+    "contract": 1,
+    "domain": "tasks",
+    "manifestVersion": 2,
+    "service": "task-service",
+    "name": "Tasks",
+    "description": "To-dos on your lists – created, ticked and moved by routines too.",
+    "icon": "checklist",
+    "tint": "green",
+    "order": 10,
+    "optional": false,
+    "prefixes": [
+      "task"
+    ],
+    "page": "/tasks",
+    "collections": {
+      "lists": {
+        "label": "Lists",
+        "list": "/api/v1/task-lists",
+        "idField": "id",
+        "labelField": "name",
+        "iconField": "icon",
+        "tintField": "color"
+      }
+    },
+    "capabilities": [
+      {
+        "type": "task.create",
+        "kind": "action",
+        "label": "Create task",
+        "sentence": "Create task {title}, due {dueDate}",
+        "description": "Puts a task on your list.",
+        "params": [
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "description",
+            "label": "Notes",
+            "type": "longText"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice",
+            "options": [
+              {
+                "value": "low",
+                "label": "Low"
+              },
+              {
+                "value": "normal",
+                "label": "Normal"
+              },
+              {
+                "value": "high",
+                "label": "High"
+              }
+            ],
+            "default": "normal"
+          },
+          {
+            "name": "dueInDays",
+            "label": "Due in days",
+            "type": "integer",
+            "min": 0,
+            "hint": "0 = today",
+            "advanced": true
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          },
+          {
+            "name": "title",
+            "label": "Task",
+            "type": "text",
+            "example": "Write weekly review"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref"
+          },
+          {
+            "name": "dueDate",
+            "label": "Due date",
+            "type": "date",
+            "example": "2026-10-01"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "task.complete",
+        "kind": "action",
+        "label": "Complete task",
+        "sentence": "Complete {taskId}",
+        "description": "Ticks off a task.",
+        "params": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          },
+          {
+            "name": "completedAt",
+            "label": "Done at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "task.move",
+        "kind": "action",
+        "label": "Move task",
+        "sentence": "Move {taskId} to {listId}",
+        "description": "Moves a task to another list or day.",
+        "params": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "task.await",
+        "kind": "human",
+        "label": "Do yourself",
+        "sentence": "You: {title}",
+        "description": "Puts a task on your list and waits until you tick it.",
+        "icon": "person",
+        "params": [
+          {
+            "name": "title",
+            "label": "What to do",
+            "type": "text",
+            "required": true,
+            "placeholder": "Stretch for 5 minutes"
+          },
+          {
+            "name": "description",
+            "label": "Notes",
+            "type": "longText"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          },
+          {
+            "name": "completedAt",
+            "label": "Done at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "human": {
+          "awaits": "task"
+        },
+        "since": 2
+      },
+      {
+        "type": "task.openTasks",
+        "kind": "value",
+        "label": "Get open tasks",
+        "sentence": "Get open tasks in {listId}, due by {dueBy}",
+        "description": "The tasks still to do, soonest first.",
+        "params": [
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          },
+          {
+            "name": "dueBy",
+            "label": "Due by",
+            "type": "date"
+          },
+          {
+            "name": "limit",
+            "label": "At most",
+            "type": "integer",
+            "min": 1,
+            "max": 100,
+            "default": 20,
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Tasks",
+            "type": "list"
+          },
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 3
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "task.doneTasks",
+        "kind": "value",
+        "label": "Get done tasks",
+        "sentence": "Get tasks done since {since}",
+        "description": "What you ticked off – for a review.",
+        "params": [
+          {
+            "name": "since",
+            "label": "Since",
+            "type": "date",
+            "default": "+0d"
+          },
+          {
+            "name": "limit",
+            "label": "At most",
+            "type": "integer",
+            "min": 1,
+            "max": 100,
+            "default": 20,
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Tasks",
+            "type": "list"
+          },
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 3
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "task.count",
+        "kind": "value",
+        "label": "Count tasks",
+        "sentence": "Count open tasks in {listId}",
+        "description": "How many tasks are open (or overdue).",
+        "params": [
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          },
+          {
+            "name": "overdueOnly",
+            "label": "Only overdue",
+            "type": "boolean",
+            "default": false
+          }
+        ],
+        "output": [
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 4
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      }
+    ],
+    "triggers": [
+      {
+        "type": "task.created",
+        "label": "A task is created",
+        "sentence": "When a task {filter} is created",
+        "description": "Runs when a task is added – by you or a routine.",
+        "fields": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "example": "Write weekly review"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref"
+          },
+          {
+            "name": "listName",
+            "label": "List name",
+            "type": "text"
+          },
+          {
+            "name": "areaId",
+            "label": "Area",
+            "type": "ref"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice"
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          },
+          {
+            "name": "kind",
+            "label": "Kind",
+            "type": "choice"
+          },
+          {
+            "name": "sourceRoutineId",
+            "label": "Created by routine",
+            "type": "ref"
+          }
+        ],
+        "since": 1
+      },
+      {
+        "type": "task.completed",
+        "label": "A task is completed",
+        "sentence": "When a task {filter} is completed",
+        "description": "Runs when you tick a task.",
+        "fields": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "example": "Write weekly review"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref"
+          },
+          {
+            "name": "listName",
+            "label": "List name",
+            "type": "text"
+          },
+          {
+            "name": "areaId",
+            "label": "Area",
+            "type": "ref"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice"
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          },
+          {
+            "name": "kind",
+            "label": "Kind",
+            "type": "choice"
+          },
+          {
+            "name": "sourceRoutineId",
+            "label": "Created by routine",
+            "type": "ref"
+          },
+          {
+            "name": "completedAt",
+            "label": "Done at",
+            "type": "text"
+          }
+        ],
+        "since": 1
+      },
+      {
+        "type": "task.reopened",
+        "label": "A task is reopened",
+        "sentence": "When a task {filter} is reopened",
+        "description": "Runs when a done task is opened again.",
+        "fields": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "example": "Write weekly review"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref"
+          },
+          {
+            "name": "listName",
+            "label": "List name",
+            "type": "text"
+          },
+          {
+            "name": "areaId",
+            "label": "Area",
+            "type": "ref"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice"
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          },
+          {
+            "name": "kind",
+            "label": "Kind",
+            "type": "choice"
+          },
+          {
+            "name": "sourceRoutineId",
+            "label": "Created by routine",
+            "type": "ref"
+          }
+        ],
+        "since": 1
+      },
+      {
+        "type": "task.moved",
+        "label": "A task is moved",
+        "sentence": "When a task {filter} is moved",
+        "description": "Runs when a task changes its list or day.",
+        "fields": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "example": "Write weekly review"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref"
+          },
+          {
+            "name": "listName",
+            "label": "List name",
+            "type": "text"
+          },
+          {
+            "name": "areaId",
+            "label": "Area",
+            "type": "ref"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice"
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          },
+          {
+            "name": "kind",
+            "label": "Kind",
+            "type": "choice"
+          },
+          {
+            "name": "sourceRoutineId",
+            "label": "Created by routine",
+            "type": "ref"
+          },
+          {
+            "name": "fromListId",
+            "label": "From list",
+            "type": "ref"
+          }
+        ],
+        "since": 1
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "contract": 1,
+    "domain": "notifications",
+    "manifestVersion": 2,
+    "service": "notification-service",
+    "name": "Notifications",
+    "description": "Messages to you in the app.",
+    "icon": "bell",
+    "tint": "pink",
+    "order": 20,
+    "optional": false,
+    "prefixes": [
+      "notification"
+    ],
+    "page": "/notifications",
+    "capabilities": [
+      {
+        "type": "notification.send",
+        "kind": "action",
+        "label": "Send notification",
+        "sentence": "Send notification {title}",
+        "description": "Sends you a notification in the app.",
+        "params": [
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "body",
+            "label": "Message",
+            "type": "longText"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice",
+            "options": [
+              {
+                "value": "low",
+                "label": "Low"
+              },
+              {
+                "value": "normal",
+                "label": "Normal"
+              },
+              {
+                "value": "high",
+                "label": "High"
+              }
+            ],
+            "default": "normal"
+          }
+        ],
+        "output": [
+          {
+            "name": "notificationId",
+            "label": "Notification",
+            "type": "text"
+          },
+          {
+            "name": "deliveredAt",
+            "label": "Delivered at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "notification.ask",
+        "kind": "human",
+        "label": "Ask me",
+        "sentence": "Ask me {question}",
+        "description": "Asks you a question with a few answers and waits for yours.",
+        "icon": "person",
+        "params": [
+          {
+            "name": "question",
+            "label": "Question",
+            "type": "text",
+            "required": true,
+            "placeholder": "How did you sleep?"
+          },
+          {
+            "name": "options",
+            "label": "Answers",
+            "type": "list",
+            "required": true,
+            "hint": "2 to 4 answers, e.g. [\"Well\", \"Badly\"]",
+            "default": [
+              "Yes",
+              "No"
+            ]
+          },
+          {
+            "name": "body",
+            "label": "Details",
+            "type": "longText",
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "value",
+            "label": "Answer",
+            "type": "text",
+            "example": "Well"
+          },
+          {
+            "name": "label",
+            "label": "Answer label",
+            "type": "text",
+            "example": "Well"
+          },
+          {
+            "name": "answeredAt",
+            "label": "Answered at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "human": {
+          "awaits": "question"
+        },
+        "since": 2
+      }
+    ],
+    "triggers": [
+      {
+        "type": "notification.answered",
+        "label": "A question is answered",
+        "sentence": "When you answer {filter}",
+        "description": "Runs when you answer a question a routine asked.",
+        "fields": [
+          {
+            "name": "notificationId",
+            "label": "Question",
+            "type": "text"
+          },
+          {
+            "name": "value",
+            "label": "Answer",
+            "type": "text",
+            "example": "Well"
+          },
+          {
+            "name": "label",
+            "label": "Answer label",
+            "type": "text"
+          }
+        ],
+        "since": 2
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "contract": 1,
+    "domain": "connections",
+    "manifestVersion": 1,
+    "service": "integration-worker",
+    "name": "Connections",
+    "description": "Weather, websites and e-mail – Routine talking to the outside world.",
+    "icon": "globe",
+    "tint": "violet",
+    "order": 30,
+    "optional": false,
+    "prefixes": [
+      "weather",
+      "http",
+      "summary",
+      "email"
+    ],
+    "capabilities": [
+      {
+        "type": "weather.get",
+        "kind": "value",
+        "label": "Get weather",
+        "sentence": "Get weather for {city}",
+        "description": "Fetches the current weather for a city.",
+        "icon": "cloud",
+        "tint": "sky",
+        "params": [
+          {
+            "name": "city",
+            "label": "City",
+            "type": "text",
+            "required": true,
+            "placeholder": "Zurich"
+          }
+        ],
+        "output": [
+          {
+            "name": "city",
+            "label": "City",
+            "type": "text"
+          },
+          {
+            "name": "temperatureC",
+            "label": "Temperature",
+            "type": "number",
+            "example": 21
+          },
+          {
+            "name": "condition",
+            "label": "Conditions",
+            "type": "text",
+            "example": "sunny"
+          },
+          {
+            "name": "summary",
+            "label": "Forecast",
+            "type": "text",
+            "example": "Zurich: sunny, 21 °C"
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "http.request",
+        "kind": "action",
+        "label": "Call webhook",
+        "sentence": "Call webhook {url}",
+        "description": "Sends a request to another service.",
+        "params": [
+          {
+            "name": "method",
+            "label": "Method",
+            "type": "choice",
+            "options": [
+              {
+                "value": "GET",
+                "label": "GET"
+              },
+              {
+                "value": "POST",
+                "label": "POST"
+              },
+              {
+                "value": "PUT",
+                "label": "PUT"
+              },
+              {
+                "value": "PATCH",
+                "label": "PATCH"
+              },
+              {
+                "value": "DELETE",
+                "label": "DELETE"
+              }
+            ],
+            "default": "GET",
+            "templating": false
+          },
+          {
+            "name": "url",
+            "label": "URL",
+            "type": "text",
+            "required": true,
+            "placeholder": "http://mock-external:8090/webhooks/demo",
+            "hint": "mock-external only"
+          },
+          {
+            "name": "headers",
+            "label": "Headers",
+            "type": "object",
+            "advanced": true
+          },
+          {
+            "name": "body",
+            "label": "Body (JSON)",
+            "type": "value"
+          }
+        ],
+        "output": [
+          {
+            "name": "status",
+            "label": "HTTP status",
+            "type": "integer",
+            "example": 200
+          },
+          {
+            "name": "body",
+            "label": "Response",
+            "type": "value"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "summary.generate",
+        "kind": "value",
+        "label": "Create summary",
+        "sentence": "Create summary {title}",
+        "description": "Combines results of earlier steps into one text.",
+        "icon": "doc",
+        "tint": "orange",
+        "params": [
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "sections",
+            "label": "Sections",
+            "type": "object"
+          },
+          {
+            "name": "lines",
+            "label": "Lines",
+            "type": "list",
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "text",
+            "label": "Text",
+            "type": "longText"
+          },
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text"
+          },
+          {
+            "name": "lineCount",
+            "label": "Lines",
+            "type": "integer"
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "email.send",
+        "kind": "action",
+        "label": "Send e-mail",
+        "sentence": "Send e-mail {subject} to {to}",
+        "description": "Sends an e-mail to one or more addresses.",
+        "icon": "mail",
+        "tint": "indigo",
+        "params": [
+          {
+            "name": "to",
+            "label": "To",
+            "type": "text",
+            "required": true,
+            "placeholder": "ada@example.com",
+            "hint": "Several: separate with commas"
+          },
+          {
+            "name": "subject",
+            "label": "Subject",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "body",
+            "label": "Message",
+            "type": "longText"
+          }
+        ],
+        "output": [
+          {
+            "name": "messageId",
+            "label": "Message ID",
+            "type": "text"
+          },
+          {
+            "name": "to",
+            "label": "Recipients",
+            "type": "text"
+          },
+          {
+            "name": "subject",
+            "label": "Subject",
+            "type": "text"
+          },
+          {
+            "name": "sentAt",
+            "label": "Sent at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "preview": true,
+        "since": 1
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "contract": 1,
+    "domain": "routines",
+    "manifestVersion": 1,
+    "service": "routine-service",
+    "name": "Routines",
+    "description": "Run a routine from another one, and react to how runs end.",
+    "icon": "routines",
+    "tint": "grey",
+    "order": 80,
+    "optional": false,
+    "prefixes": [
+      "routine",
+      "execution"
+    ],
+    "page": "/routines",
+    "collections": {
+      "routines": {
+        "label": "Routines",
+        "list": "/api/v1/routines",
+        "idField": "id",
+        "labelField": "name"
+      }
+    },
+    "capabilities": [
+      {
+        "type": "routine.run",
+        "kind": "action",
+        "label": "Run routine",
+        "sentence": "Run routine {routineId} with {input}",
+        "description": "Runs another routine like a function and waits for it.",
+        "params": [
+          {
+            "name": "routineId",
+            "label": "Routine",
+            "type": "ref",
+            "required": true,
+            "ref": {
+              "domain": "routines",
+              "collection": "routines"
+            },
+            "templating": false
+          },
+          {
+            "name": "input",
+            "label": "Input",
+            "type": "value",
+            "hint": "The routine reads it as {{input}}; it returns its variable \"result\""
+          },
+          {
+            "name": "routineName",
+            "label": "Routine name",
+            "type": "text",
+            "advanced": true,
+            "templating": false
+          }
+        ],
+        "output": [
+          {
+            "name": "result",
+            "label": "Result",
+            "type": "value"
+          },
+          {
+            "name": "executionId",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "name": "vars",
+            "label": "Variables",
+            "type": "object"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      }
+    ],
+    "triggers": [
+      {
+        "type": "execution.completed",
+        "label": "A routine finished",
+        "sentence": "When {routineName} finishes",
+        "description": "Starts when a run of a routine succeeded.",
+        "fields": [
+          {
+            "name": "routineId",
+            "label": "Routine",
+            "type": "ref"
+          },
+          {
+            "name": "routineName",
+            "label": "Routine name",
+            "type": "text"
+          }
+        ],
+        "since": 1
+      },
+      {
+        "type": "execution.failed",
+        "label": "A routine failed",
+        "sentence": "When {routineName} fails",
+        "description": "Starts when a run of a routine failed.",
+        "fields": [
+          {
+            "name": "routineId",
+            "label": "Routine",
+            "type": "ref"
+          },
+          {
+            "name": "routineName",
+            "label": "Routine name",
+            "type": "text"
+          },
+          {
+            "name": "errorCode",
+            "label": "Why",
+            "type": "text"
+          }
+        ],
+        "since": 1
+      }
+    ],
+    "enabled": true
+  },
+  {
+    "contract": 1,
+    "domain": "scripting",
+    "manifestVersion": 3,
+    "service": "routine-service",
+    "name": "Scripting",
+    "description": "Variables, conditions, calculations, text and lists between your steps.",
+    "icon": "calc",
+    "tint": "grey",
+    "order": 90,
+    "optional": false,
+    "prefixes": [
+      "variable",
+      "condition",
+      "math",
+      "flow",
+      "text",
+      "list",
+      "json"
+    ],
+    "capabilities": [
+      {
+        "type": "variable.set",
+        "kind": "value",
+        "label": "Set variable",
+        "sentence": "Set {name} to {value}",
+        "description": "Keeps a value under a name, for later steps.",
+        "icon": "variable",
+        "params": [
+          {
+            "name": "name",
+            "label": "Name",
+            "type": "text",
+            "required": true,
+            "placeholder": "city",
+            "templating": false
+          },
+          {
+            "name": "value",
+            "label": "Value",
+            "type": "value",
+            "hint": "Text, a number, or a list like [\"a\", \"b\"]"
+          }
+        ],
+        "output": [
+          {
+            "name": "name",
+            "label": "Name",
+            "type": "text"
+          },
+          {
+            "name": "value",
+            "label": "Value",
+            "type": "value"
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "condition.if",
+        "kind": "value",
+        "label": "If",
+        "sentence": "If {left} {operator} {right}",
+        "description": "Compares two values – later steps can run only if it holds.",
+        "icon": "branch",
+        "params": [
+          {
+            "name": "left",
+            "label": "Value",
+            "type": "value"
+          },
+          {
+            "name": "operator",
+            "label": "Comparison",
+            "type": "choice",
+            "required": true,
+            "options": [
+              {
+                "value": "equals",
+                "label": "is"
+              },
+              {
+                "value": "notEquals",
+                "label": "is not"
+              },
+              {
+                "value": "contains",
+                "label": "contains"
+              },
+              {
+                "value": "notContains",
+                "label": "does not contain"
+              },
+              {
+                "value": "greaterThan",
+                "label": "is greater than"
+              },
+              {
+                "value": "lessThan",
+                "label": "is less than"
+              },
+              {
+                "value": "isEmpty",
+                "label": "is empty"
+              },
+              {
+                "value": "isNotEmpty",
+                "label": "is not empty"
+              }
+            ],
+            "default": "equals",
+            "templating": false
+          },
+          {
+            "name": "right",
+            "label": "Compared with",
+            "type": "value"
+          }
+        ],
+        "output": [
+          {
+            "name": "result",
+            "label": "Result",
+            "type": "boolean",
+            "example": true
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "math.calculate",
+        "kind": "value",
+        "label": "Calculate",
+        "sentence": "Calculate {a} {operator} {b}",
+        "description": "Adds, subtracts, multiplies, … two numbers.",
+        "params": [
+          {
+            "name": "a",
+            "label": "Number",
+            "type": "value",
+            "required": true
+          },
+          {
+            "name": "operator",
+            "label": "Operation",
+            "type": "choice",
+            "required": true,
+            "options": [
+              {
+                "value": "+",
+                "label": "+"
+              },
+              {
+                "value": "-",
+                "label": "−"
+              },
+              {
+                "value": "*",
+                "label": "×"
+              },
+              {
+                "value": "/",
+                "label": "÷"
+              },
+              {
+                "value": "%",
+                "label": "modulo"
+              },
+              {
+                "value": "min",
+                "label": "min"
+              },
+              {
+                "value": "max",
+                "label": "max"
+              },
+              {
+                "value": "round",
+                "label": "round to digits"
+              }
+            ],
+            "default": "+",
+            "templating": false
+          },
+          {
+            "name": "b",
+            "label": "Number",
+            "type": "value"
+          }
+        ],
+        "output": [
+          {
+            "name": "result",
+            "label": "Result",
+            "type": "number",
+            "example": 42
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "flow.wait",
+        "kind": "value",
+        "label": "Wait",
+        "sentence": "Wait for {for} until {until}",
+        "description": "Pauses the routine for a while, or until a time of day.",
+        "icon": "clock",
+        "params": [
+          {
+            "name": "for",
+            "label": "For",
+            "type": "duration",
+            "placeholder": "PT1H",
+            "hint": "At most 7 days"
+          },
+          {
+            "name": "until",
+            "label": "Until",
+            "type": "time",
+            "placeholder": "17:00",
+            "hint": "The next time it is this late"
+          }
+        ],
+        "output": [
+          {
+            "name": "wokeAt",
+            "label": "Woke at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": false,
+        "since": 2
+      },
+      {
+        "type": "text.format",
+        "kind": "value",
+        "label": "Text",
+        "sentence": "Text {template}",
+        "description": "Writes a text from values of earlier steps.",
+        "icon": "doc",
+        "params": [
+          {
+            "name": "template",
+            "label": "Text",
+            "type": "longText",
+            "required": true,
+            "placeholder": "Hi {{vars.name}}, {{actions.weather.summary}}"
+          }
+        ],
+        "output": [
+          {
+            "name": "text",
+            "label": "Text",
+            "type": "text",
+            "example": "Hi Sam, sunny"
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "text.replace",
+        "kind": "value",
+        "label": "Replace text",
+        "sentence": "Replace {find} with {replaceWith} in {text}",
+        "description": "Swaps words in a text.",
+        "icon": "doc",
+        "params": [
+          {
+            "name": "text",
+            "label": "Text",
+            "type": "longText",
+            "required": true
+          },
+          {
+            "name": "find",
+            "label": "Find",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "replaceWith",
+            "label": "Replace with",
+            "type": "text"
+          },
+          {
+            "name": "all",
+            "label": "Every time",
+            "type": "boolean",
+            "default": true,
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "text",
+            "label": "Text",
+            "type": "text"
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "text.split",
+        "kind": "value",
+        "label": "Split text",
+        "sentence": "Split {text} at {separator}",
+        "description": "Turns a text into a list – for \"Repeat for each\".",
+        "icon": "doc",
+        "params": [
+          {
+            "name": "text",
+            "label": "Text",
+            "type": "longText",
+            "required": true,
+            "placeholder": "milk, bread, eggs"
+          },
+          {
+            "name": "separator",
+            "label": "At",
+            "type": "text",
+            "default": ",",
+            "hint": "Pieces are trimmed, empty ones left out"
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Pieces",
+            "type": "list",
+            "example": [
+              "milk",
+              "bread",
+              "eggs"
+            ]
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "list.get",
+        "kind": "value",
+        "label": "Get item",
+        "sentence": "Get the {position} item of {list}",
+        "description": "Picks one item of a list.",
+        "icon": "stack",
+        "params": [
+          {
+            "name": "list",
+            "label": "List",
+            "type": "list",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          },
+          {
+            "name": "position",
+            "label": "Which",
+            "type": "value",
+            "default": "first",
+            "hint": "first, last, or a number from 1"
+          }
+        ],
+        "output": [
+          {
+            "name": "item",
+            "label": "Item",
+            "type": "value"
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "list.count",
+        "kind": "value",
+        "label": "Count items",
+        "sentence": "Count the items of {list}",
+        "description": "How many items a list has.",
+        "icon": "stack",
+        "params": [
+          {
+            "name": "list",
+            "label": "List",
+            "type": "list",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          }
+        ],
+        "output": [
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 3
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "list.filter",
+        "kind": "value",
+        "label": "Filter list",
+        "sentence": "Keep items of {list} whose {field} {operator} {value}",
+        "description": "Keeps the items that match, like an If for each.",
+        "icon": "stack",
+        "params": [
+          {
+            "name": "list",
+            "label": "List",
+            "type": "list",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          },
+          {
+            "name": "field",
+            "label": "Field",
+            "type": "text",
+            "placeholder": "title",
+            "hint": "Of each item; empty = the item itself",
+            "templating": false
+          },
+          {
+            "name": "operator",
+            "label": "Comparison",
+            "type": "choice",
+            "required": true,
+            "options": [
+              {
+                "value": "equals",
+                "label": "is"
+              },
+              {
+                "value": "notEquals",
+                "label": "is not"
+              },
+              {
+                "value": "contains",
+                "label": "contains"
+              },
+              {
+                "value": "notContains",
+                "label": "does not contain"
+              },
+              {
+                "value": "greaterThan",
+                "label": "is greater than"
+              },
+              {
+                "value": "lessThan",
+                "label": "is less than"
+              },
+              {
+                "value": "isEmpty",
+                "label": "is empty"
+              },
+              {
+                "value": "isNotEmpty",
+                "label": "is not empty"
+              }
+            ],
+            "default": "equals",
+            "templating": false
+          },
+          {
+            "name": "value",
+            "label": "Compared with",
+            "type": "value"
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Items",
+            "type": "list"
+          },
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 2
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "list.sort",
+        "kind": "value",
+        "label": "Sort list",
+        "sentence": "Sort {list} by {field}, {direction}",
+        "description": "Puts the items in order.",
+        "icon": "stack",
+        "params": [
+          {
+            "name": "list",
+            "label": "List",
+            "type": "list",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          },
+          {
+            "name": "field",
+            "label": "Field",
+            "type": "text",
+            "placeholder": "title",
+            "hint": "Of each item; empty = the item itself",
+            "templating": false
+          },
+          {
+            "name": "direction",
+            "label": "Order",
+            "type": "choice",
+            "options": [
+              {
+                "value": "asc",
+                "label": "A → Z, small → big"
+              },
+              {
+                "value": "desc",
+                "label": "Z → A, big → small"
+              }
+            ],
+            "default": "asc",
+            "templating": false
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Items",
+            "type": "list"
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      },
+      {
+        "type": "json.parse",
+        "kind": "value",
+        "label": "Read JSON",
+        "sentence": "Read JSON from {text}",
+        "description": "Turns JSON text (e.g. from a webhook) into values later steps can use.",
+        "icon": "doc",
+        "params": [
+          {
+            "name": "text",
+            "label": "JSON",
+            "type": "longText",
+            "required": true,
+            "placeholder": "{\"temperature\": 21}"
+          }
+        ],
+        "output": [
+          {
+            "name": "value",
+            "label": "Value",
+            "type": "value"
+          }
+        ],
+        "sideEffects": false,
+        "since": 3
+      }
+    ],
+    "enabled": true
+  }
+]

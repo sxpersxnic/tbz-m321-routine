@@ -4,14 +4,18 @@ import { statusLabel } from './ui.tsx';
 
 // ---------------------------------------------------------------- status pipeline
 
+const PAUSES = ['WAITING', 'WAITING_FOR_YOU', 'DELAYED'] as const;
+
 export function Pipeline({ status, log }: { status: ExecutionStatus; log: ExecutionLogEntry[] }) {
-  const waited = status === 'WAITING' || log.some((entry) => entry.kind === 'WAITING');
-  const stages: ExecutionStatus[] = ['PENDING', 'RUNNING', ...(waited ? (['WAITING'] as const) : []), status === 'FAILED' ? 'FAILED' : 'COMPLETED'];
-  const order: Record<ExecutionStatus, number> = { PENDING: 0, RUNNING: 1, WAITING: 2, COMPLETED: 3, FAILED: 3 };
+  // the pauses this run went through (or is in), in the order of the state machine
+  const paused = PAUSES.filter((pause) => status === pause || log.some((entry) => entry.kind === pause));
+  const stages: ExecutionStatus[] = ['PENDING', 'RUNNING', ...paused, status === 'FAILED' ? 'FAILED' : 'COMPLETED'];
+  const order: Record<ExecutionStatus, number> = { PENDING: 0, RUNNING: 1, WAITING: 2, WAITING_FOR_YOU: 2, DELAYED: 2, COMPLETED: 3, FAILED: 3 };
+  const isPause = (stage: ExecutionStatus) => (PAUSES as readonly ExecutionStatus[]).includes(stage);
   return (
     <ol className="pipeline" aria-label="Status history">
       {stages.map((stage) => {
-        const state = stage === status ? 'current' : order[stage] < order[status] || (stage === 'WAITING' && waited && status !== 'WAITING') ? 'done' : 'todo';
+        const state = stage === status ? 'current' : order[stage] < order[status] || isPause(stage) ? 'done' : 'todo';
         return (
           <li key={stage} className={`stage ${state} stage-${stage}`} aria-current={state === 'current' ? 'step' : undefined}>
             <span className="stage-dot" />
@@ -31,7 +35,10 @@ const KIND_TONE: Record<string, string> = {
   FAILED: 'err',
   ACTION_FAILED: 'err',
   ACTION_RETRY: 'warn',
+  RESUMED: 'info',
   WAITING: 'warn',
+  WAITING_FOR_YOU: 'warn',
+  DELAYED: 'info',
   RUNNING: 'info',
   ACTION_DISPATCHED: 'info',
 };
@@ -43,12 +50,15 @@ const KIND_LABELS: Record<string, string> = {
   STARTED: 'Started',
   RUNNING: 'Running',
   WAITING: 'Waiting',
+  WAITING_FOR_YOU: 'Waiting for you',
+  DELAYED: 'Waiting',
   COMPLETED: 'Done',
   FAILED: 'Failed',
   ACTION_DISPATCHED: 'Dispatched',
   ACTION_COMPLETED: 'Completed',
   ACTION_FAILED: 'Failed',
   ACTION_RETRY: 'Retry',
+  RESUMED: 'Resumed',
 };
 
 export function Timeline({ log }: { log: ExecutionLogEntry[] }) {

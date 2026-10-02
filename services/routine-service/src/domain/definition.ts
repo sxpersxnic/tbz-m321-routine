@@ -1,5 +1,8 @@
-import { KNOWN_ACTION_TYPES } from './action-catalog.ts';
-import { CONDITION_OPERATORS, MATH_OPERATORS, VARIABLE_NAME } from './control.ts';
+import type { ParamSpec } from '@routine/service-kit';
+import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './catalog.ts';
+import { VARIABLE_NAME } from './control.ts';
+import { inputSpecIssues, type RoutineInputSpec } from './inputs.ts';
+import { waitIssue } from './wait.ts';
 import { DEFAULT_TIMEZONE, validateSchedule } from './schedule.ts';
 import { referencedActionKeys, templatePaths } from './templates.ts';
 
@@ -22,6 +25,13 @@ export interface ActionDefinition {
   runIf?: RunIf;
   /** A single `{{…}}` reference to a list: the step runs once per item, readable as {{item}} / {{index}}. */
   forEach?: string;
+  /** "If you don't get to it" – human steps only: after `after` (ISO 8601 duration) the step is skipped or fails. */
+  timeout?: StepTimeout;
+}
+
+export interface StepTimeout {
+  after: string;
+  then: 'skip' | 'fail';
 }
 
 /** Colours the client knows; icons are free-form names from the client's icon set. */
@@ -38,7 +48,11 @@ export interface RoutineInput extends Appearance {
   name: string;
   description?: string;
   trigger: { type: 'manual' } | { type: 'schedule'; cron: string; timezone?: string } | { type: 'webhook' };
-  actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string }>;
+  actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string; timeout?: StepTimeout }>;
+  /** Tell the owner after this many failures in a row; null = never; omitted = unchanged (2 for a new routine). */
+  alertAfterFailures?: number | null;
+  /** "Ask when run?" – manual routines only. */
+  inputs?: RoutineInputSpec[] | null;
 }
 
 export interface RoutineDefinition extends Appearance {
@@ -46,6 +60,10 @@ export interface RoutineDefinition extends Appearance {
   description: string;
   trigger: TriggerDefinition;
   actions: ActionDefinition[];
+  /** undefined = leave as it is (on create: 2). */
+  alertAfterFailures?: number | null;
+  /** Questions asked when the routine is run by hand; absent = none. */
+  inputs?: RoutineInputSpec[];
 }
 
 export class DefinitionError extends Error {
@@ -67,26 +85,87 @@ const EARLIER_STEPS_ONLY = 'can only reference actions of earlier steps';
  * Validates and normalises a routine. Actions without an explicit `step` run
  * after the previous action (step + 1); actions sharing a step run in parallel.
  */
-/** Param checks of the scripting actions that go beyond "required". A `{{…}}` value is checked at run time instead. */
+/** The one scripting rule a manifest can't say: variable names must work in `{{vars.<name>}}`. */
 function scriptingIssues(action: ActionDefinition): string[] {
-  const literal = (value: unknown) => typeof value === 'string' && !value.includes('{{');
-  const { operator, name } = action.params;
-  if (action.type === 'condition.if' && literal(operator) && !(CONDITION_OPERATORS as readonly string[]).includes(operator as string)) {
-    return [`action "${action.key}": unknown comparison "${String(operator)}"`];
-  }
-  if (action.type === 'math.calculate' && literal(operator) && !(MATH_OPERATORS as readonly string[]).includes(operator as string)) {
-    return [`action "${action.key}": unknown operator "${String(operator)}"`];
-  }
+  const { name } = action.params;
   if (action.type === 'variable.set' && (typeof name !== 'string' || !VARIABLE_NAME.test(name))) {
     return [`action "${action.key}": variable name must start with a letter and use only letters, digits and _`];
+  }
+  if (action.type === 'flow.wait') {
+    const issue = waitIssue(action.params);
+    if (issue) return [`action "${action.key}": ${issue}`];
   }
   return [];
 }
 
-export function validateRoutine(input: RoutineInput): RoutineDefinition {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE = /^(\d{4}-\d{2}-\d{2}|\+\d+d)$/;
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DURATION = /^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$/;
+
+const asNumber = (value: unknown) => (typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN);
+
+/** Why one param value doesn't fit its spec (04 §2.1), or null. Templated values are checked at run time. */
+function valueIssue(param: ParamSpec, value: unknown): string | null {
+  if (typeof value === 'string' && value.includes('{{') && param.templating !== false) return null;
+  const range = (n: number) =>
+    param.min !== undefined && n < param.min ? `must be at least ${param.min}` : param.max !== undefined && n > param.max ? `must be at most ${param.max}` : null;
+  switch (param.type) {
+    case 'number':
+    case 'money': {
+      const n = asNumber(value);
+      return Number.isFinite(n) ? range(n) : 'must be a number';
+    }
+    case 'integer': {
+      const n = asNumber(value);
+      return Number.isInteger(n) ? range(n) : 'must be a whole number';
+    }
+    case 'boolean':
+      return typeof value === 'boolean' ? null : 'must be true or false';
+    case 'choice':
+      return (param.options ?? []).some((option) => option.value === String(value)) ? null : `unknown`;
+    case 'ref':
+      return typeof value === 'string' && UUID.test(value) ? null : `must be a ${param.ref?.collection ?? 'item'} id`;
+    case 'date':
+      return typeof value === 'string' && DATE.test(value) ? null : 'must be a date (YYYY-MM-DD or +Nd)';
+    case 'time':
+      return typeof value === 'string' && TIME.test(value) ? null : 'must be a time (HH:mm)';
+    case 'duration':
+      return typeof value === 'string' && DURATION.test(value) ? null : 'must be a duration like PT2H';
+    case 'list':
+      return Array.isArray(value) ? null : 'must be a list';
+    case 'object':
+      return value && typeof value === 'object' && !Array.isArray(value) ? null : 'must be an object';
+    default:
+      return null;
+  }
+}
+
+/** Required params present, literal values well-formed (04 §2.1). Unknown params stay allowed (additive). */
+function paramIssues(action: ActionDefinition, capability: CatalogCapability): string[] {
+  const issues: string[] = [];
+  for (const param of capability.params) {
+    const value = action.params[param.name];
+    if (value === undefined || value === null || value === '') {
+      if (param.required) issues.push(`action "${action.key}": missing required param "${param.name}"`);
+      continue;
+    }
+    const issue = valueIssue(param, value);
+    if (issue === 'unknown') issues.push(`action "${action.key}": unknown ${param.label.toLowerCase()} "${String(value)}"`);
+    else if (issue) issues.push(`action "${action.key}": "${param.name}" ${issue}`);
+  }
+  return issues;
+}
+
+export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_CATALOG): RoutineDefinition {
   const issues: string[] = [];
   const name = input.name.trim();
   if (name === '') issues.push('name must not be blank');
+
+  const inputs = input.inputs ?? [];
+  const questions = new Set(inputs.map((spec) => spec.name));
+  issues.push(...inputSpecIssues(inputs));
+  if (inputs.length > 0 && input.trigger.type !== 'manual') issues.push('questions are only asked when a routine is run by hand');
 
   let previousStep = 0;
   const actions: ActionDefinition[] = input.actions.map((action) => {
@@ -99,6 +178,8 @@ export function validateRoutine(input: RoutineInput): RoutineDefinition {
       params: action.params ?? {},
       ...(action.runIf ? { runIf: action.runIf } : {}),
       ...(action.forEach ? { forEach: action.forEach.trim() } : {}),
+      // biome-ignore lint/suspicious/noThenProperty: the field is named "then" in the routine definition (06-engine §2)
+      ...(action.timeout ? { timeout: { after: action.timeout.after, then: action.timeout.then } } : {}),
     };
   });
   // stable sort keeps the author's order within a step
@@ -119,17 +200,18 @@ export function validateRoutine(input: RoutineInput): RoutineDefinition {
   }
 
   for (const action of actions) {
-    const info = KNOWN_ACTION_TYPES.get(action.type);
-    if (!info) {
+    const capability = catalog.capability(action.type);
+    if (!capability) {
       issues.push(`action "${action.key}": unknown type "${action.type}"`);
       continue;
     }
-    for (const param of info.requiredParams) {
-      if (action.params[param] === undefined || action.params[param] === '') {
-        issues.push(`action "${action.key}": missing required param "${param}"`);
-      }
-    }
+    issues.push(...paramIssues(action, capability));
     issues.push(...scriptingIssues(action));
+    if (action.timeout) {
+      if (capability.kind !== 'human') issues.push(`action "${action.key}": only steps you do yourself can time out`);
+      else if (!DURATION.test(action.timeout.after)) issues.push(`action "${action.key}": the time to wait must be a duration like PT2H`);
+      else if (action.timeout.then !== 'skip' && action.timeout.then !== 'fail') issues.push(`action "${action.key}": after the wait the step is skipped or fails`);
+    }
     if (action.runIf) {
       const conditionStep = stepByKey.get(action.runIf.action);
       if (conditionStep === undefined) issues.push(`action "${action.key}": runs only if unknown action "${action.runIf.action}"`);
@@ -143,6 +225,11 @@ export function validateRoutine(input: RoutineInput): RoutineDefinition {
     for (const path of paths) {
       const root = path.split('.')[0];
       if (!TEMPLATE_ROOTS.has(root)) issues.push(`action "${action.key}": unknown template root in "{{${path}}}"`);
+      // with questions, {{input.<name>}} must be one of them; without, {{input}} is what a calling routine passes (v1)
+      if (root === 'input' && questions.size > 0) {
+        const name = path.split('.')[1];
+        if (name !== undefined && !questions.has(name)) issues.push(`action "${action.key}": "${name}" is not a question of this routine`);
+      }
       if (LOOP_ROOTS.has(root) && !action.forEach) issues.push(`action "${action.key}": "{{${path}}}" is only available in a step that repeats for each item`);
       if (LOOP_ROOTS.has(root) && action.forEach && templatePaths(action.forEach).includes(path)) {
         issues.push(`action "${action.key}": the list to repeat over cannot be the item itself`);
@@ -177,6 +264,20 @@ export function validateRoutine(input: RoutineInput): RoutineDefinition {
     trigger = { type: 'webhook' };
   }
 
+  const alert = input.alertAfterFailures;
+  if (alert !== undefined && alert !== null && (!Number.isInteger(alert) || alert < 1 || alert > 10)) {
+    issues.push('alertAfterFailures must be a whole number from 1 to 10, or null for never');
+  }
+
   if (issues.length > 0) throw new DefinitionError(issues);
-  return { name, description: input.description?.trim() ?? '', trigger, actions, icon: input.icon, color: input.color };
+  return {
+    name,
+    description: input.description?.trim() ?? '',
+    trigger,
+    actions,
+    icon: input.icon,
+    color: input.color,
+    ...(alert !== undefined && { alertAfterFailures: alert }),
+    ...(inputs.length > 0 && { inputs: inputs.map((spec) => ({ ...spec, label: spec.label.trim() })) }),
+  };
 }

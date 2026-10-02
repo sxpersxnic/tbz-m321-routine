@@ -6,10 +6,12 @@ import { RunOutcome } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton, StatusBadge } from '../components/ui.tsx';
 import { startRoutine } from './Routines.tsx';
-import { ActionFlow, Monogram, RoutineGlyph, StatusIcon, statusTone } from '../components/visual.tsx';
+import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusSymbol, statusTone } from '../components/visual.tsx';
 import { between, clock, dateTime, groupByDay, JAEGER_URL, relative, splitInstance, TRIGGER_WORDS } from '../format.ts';
 import { navigate, useNow, usePolling, useRouteParam } from '../hooks.ts';
-import { TERMINAL_STATUSES, type Execution, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
+import { FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine } from '../lib/failure-copy.ts';
+import { delayedUntil, doItHref, doneTooLate, moment, waitingLine, waitingSteps } from '../lib/waiting.ts';
+import { TERMINAL_STATUSES, type Execution, type ExecutionAction, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
 
 /** One run as a list row. `routine`, when known, gives the row its routine's colour and symbol. */
 export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
@@ -26,6 +28,8 @@ export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
   const when = showClock ? clock(execution.createdAt) : relative(execution.createdAt, now);
   // success is the normal case: a tick is enough, words are kept for what needs attention
   const quiet = execution.status === 'COMPLETED';
+  // a failed run says why instead of how it started
+  const reason = execution.status === 'FAILED' ? failureLine(execution.errorCode) : null;
   return (
     <a href={`#/executions/${execution.id}`} className="list-row">
       {hideName
@@ -33,7 +37,7 @@ export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
         : routine ? <RoutineGlyph routine={routine} size={34} /> : <Monogram name={execution.routineName} size={34} />}
       <span className="grow">
         <span className="row-title">{hideName ? when : execution.routineName}</span>
-        <span className="row-sub">{hideName ? how : `${when} · ${how}`}</span>
+        <span className="row-sub">{hideName ? (reason ?? how) : `${when} · ${reason ?? how}`}</span>
       </span>
       {!hideName && <StatusIcon status={execution.status} size={20} label={!quiet} />}
       <span className="row-meta">{took}</span>
@@ -46,6 +50,7 @@ const FILTERS: Array<{ label: string; status?: ExecutionStatus }> = [
   { label: 'All' },
   { label: 'Running', status: 'RUNNING' },
   { label: 'Waiting', status: 'WAITING' },
+  { label: 'Waiting for you', status: 'WAITING_FOR_YOU' },
   { label: 'Succeeded', status: 'COMPLETED' },
   { label: 'Failed', status: 'FAILED' },
 ];
@@ -123,14 +128,25 @@ const HEADLINE: Record<ExecutionStatus, string> = {
   PENDING: 'Starting …',
   RUNNING: 'Running …',
   WAITING: 'Waiting to retry',
+  WAITING_FOR_YOU: 'Waiting for you',
+  DELAYED: 'Waiting',
   COMPLETED: 'Succeeded',
   FAILED: 'Failed',
 };
+
+/** "Waiting until 17:00" for a run that sleeps, "Cancelled" for one ended on purpose (02 §7). */
+function headline(e: Detail): string {
+  if (e.errorCode === 'CANCELLED') return 'Cancelled';
+  const until = e.status === 'DELAYED' ? delayedUntil(e) : undefined;
+  return until ? `Waiting until ${moment(until)}` : HEADLINE[e.status];
+}
 
 export function ExecutionDetail({ id }: { id: string }) {
   const toast = useToast();
   const now = useNow(500);
   const [rerunning, setRerunning] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [skipping, setSkipping] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const execution = usePolling(
@@ -167,16 +183,47 @@ export function ExecutionDetail({ id }: { id: string }) {
   const e = execution.data;
   const routine = routineInfo.data;
 
-  // Same routine, same input: a webhook run is replayed with the body it received.
+  // Same routine, same input: a webhook run is replayed with the body it received, a run by hand with its answers.
   async function runAgain() {
     if (!routine) return;
     setRerunning(true);
     try {
-      navigate(`/executions/${await startRoutine(routine, e.triggerPayload ?? undefined)}`);
+      navigate(`/executions/${await startRoutine(routine, e.triggerPayload ?? undefined, e.inputs)}`);
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setRerunning(false);
+    }
+  }
+
+  // "Retry from here": shown as running at once, then the server's answer replaces the guess
+  async function resume() {
+    setResuming(true);
+    execution.mutate((current) => ({ ...current, status: 'RUNNING', error: null, errorCode: null, finishedAt: null, resumeCount: current.resumeCount + 1 }));
+    try {
+      const resumed = await api.resume(e.id);
+      execution.mutate(() => resumed);
+      // polling starts again only now: a poll before the server resumed would see FAILED and stop it
+      setFinished(false);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      execution.reload();
+    } finally {
+      setResuming(false);
+    }
+  }
+
+  // the run goes on without the step; the server's answer shows where it went
+  async function skip(key: string) {
+    setSkipping(key);
+    try {
+      const after = await api.skipStep(e.id, key);
+      execution.mutate(() => after);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      execution.reload();
+    } finally {
+      setSkipping(null);
     }
   }
 
@@ -193,13 +240,14 @@ export function ExecutionDetail({ id }: { id: string }) {
 
       <header className="run-hero">
         <span className={`big-status tone-${tone}`} aria-hidden="true">
-          {tone === 'busy' ? <span className="status-spin" /> : <Icon name={tone === 'ok' ? 'check' : tone === 'err' ? 'x' : 'retry'} size={34} />}
+          {tone === 'busy' ? <span className="status-spin" /> : <Icon name={statusSymbol(e.status)} size={34} />}
         </span>
         <div className="grow">
           <span className="eyebrow">{e.routineName}</span>
-          <h1 aria-live="polite">{HEADLINE[e.status]}</h1>
+          <h1 aria-live="polite">{headline(e)}</h1>
           <p>
             {e.calledBy ? <a href={`#/executions/${e.calledBy}`}>{started}</a> : started} · {dateTime(e.createdAt)} · <span className="tabular">{between(e.startedAt ?? e.createdAt, e.finishedAt, now)}</span>
+            {e.resumeCount > 0 && <> · Resumed {e.resumeCount}×</>}
           </p>
         </div>
         {!running && routine?.active && (
@@ -218,7 +266,8 @@ export function ExecutionDetail({ id }: { id: string }) {
         </div>
       )}
 
-      {e.error && <p className="error-note"><Icon name="warning" size={18} /> {e.error}</p>}
+      {e.status === 'FAILED' && <FailureCard e={e} onResume={() => void resume()} resuming={resuming} />}
+      {waitingSteps(e).length > 0 && <WaitingCard e={e} now={now} skipping={skipping} onSkip={(key) => void skip(key)} />}
       <RunOutcome actions={e.actions} status={e.status} />
 
       <Section id="flow-title" title="Steps">
@@ -237,7 +286,7 @@ export function ExecutionDetail({ id }: { id: string }) {
                 <dt>Type</dt><dd><code>{action.type}</code> · <code>{action.key}</code></dd>
                 <dt>ID</dt><dd><code>{action.id}</code> <CopyButton value={action.id} what="ID" /></dd>
               </dl>
-              {action.error && <p className="error-note">{action.error}</p>}
+              {action.error && <p className="error-note">{failureCopy(action.errorCode, action, typesOf(e))?.sentence ?? action.error}</p>}
               <div className="grid-2">
                 <div><h4>Input</h4><JsonBlock value={action.params} /></div>
                 <div><h4>Output</h4>{action.output ? <JsonBlock value={action.output} /> : <p className="muted small">–</p>}</div>
@@ -258,6 +307,19 @@ export function ExecutionDetail({ id }: { id: string }) {
           <Icon name="chevron" size={18} />
         </summary>
         <div className="under-hood-body">
+          {failedActions(e).length > 0 && (
+            <div>
+              <h3>Errors</h3>
+              <dl className="kv">
+                {failedActions(e).map((failed) => (
+                  <div key={failed.id} className="contents">
+                    <dt><code>{failed.key}</code>{failed.errorCode && <> · <code>{failed.errorCode}</code></>}</dt>
+                    <dd className="mono small">{failed.error}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
           {e.triggerPayload && (
             <div>
               <h3>Webhook data</h3>
@@ -277,6 +339,7 @@ export function ExecutionDetail({ id }: { id: string }) {
               <h3>Tracing</h3>
               <dl className="kv">
                 <dt>Execution</dt><dd><code>{e.id}</code> <CopyButton value={e.id} what="execution ID" /></dd>
+                {e.routineVersion !== null && <><dt>Routine</dt><dd><a href={`#/routines/${e.routineId}/history?version=${e.routineVersion}`}>version {e.routineVersion}</a></dd></>}
                 <dt>Correlation</dt><dd><code>{e.correlationId}</code> <CopyButton value={e.correlationId} what="correlation ID" /></dd>
                 <dt>Trace</dt><dd>{e.traceId ? <><code>{e.traceId}</code> <CopyButton value={e.traceId} what="trace ID" /></> : '–'}</dd>
               </dl>
@@ -308,6 +371,91 @@ export function ExecutionDetail({ id }: { id: string }) {
 
 const TERMINAL_ACTION = new Set(['COMPLETED', 'FAILED', 'SKIPPED']);
 
+/** Action key → type, so references in failure sentences read as "Forecast (Weather)". */
+const typesOf = (e: Detail) => Object.fromEntries(e.actions.map((action) => [action.key, action.type]));
+
+const failedActions = (e: Detail) => e.actions.filter((action) => action.status === 'FAILED' && action.error);
+
+/** The run a failed "Run routine" step started – its log line names it. */
+function calledRun(e: Detail, action: ExecutionAction): string | undefined {
+  const entry = e.log.find((candidate) => candidate.kind === 'ACTION_DISPATCHED' && candidate.actionKey === action.key);
+  return entry && /\(([0-9a-f-]{36})\)/.exec(entry.message)?.[1];
+}
+
+/**
+ * Failed at step n of m: the step as a sentence, what happened in plain words, and the one thing
+ * to do about it (02-experience §7, §8). Runs from before v2 have no code and keep their raw error.
+ */
+function FailureCard({ e, onResume, resuming }: { e: Detail; onResume: () => void; resuming: boolean }) {
+  // ended on purpose: nothing to fix, nothing to retry
+  if (e.errorCode === 'CANCELLED') return null;
+  const failed = failedActions(e).sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
+  const copy = failed && failureCopy(failed.errorCode, failed, typesOf(e));
+  const retry = (primary: boolean) => (
+    <button type="button" className={`btn ${primary ? 'tinted' : ''}`} disabled={resuming} onClick={onResume}>
+      {resuming ? <span className="spinner" /> : <Icon name="retry" size={16} />} {FAILURE_ACTION_LABELS.retry}
+    </button>
+  );
+  if (!failed || !copy) {
+    return e.error ? <p className="error-note"><Icon name="warning" size={18} /> <span className="grow">{e.error}</span> {retry(false)}</p> : null;
+  }
+
+  const steps = Math.max(...e.actions.map((action) => action.step));
+  const field = failureField(failed.errorCode, failed);
+  const edit = `#/routines/${e.routineId}/settings?step=${encodeURIComponent(failed.parentId ? (e.actions.find((action) => action.id === failed.parentId)?.key ?? failed.key) : failed.key)}${field ? `&field=${encodeURIComponent(field)}` : ''}`;
+  const called = copy.action === 'openRun' ? calledRun(e, failed) : undefined;
+  // retrying is always possible (02 §7: Retry from here, then the fix); the explanation decides which
+  // one stands out. Pages for connections and settings don't exist yet, so those point at the step too.
+  const link = copy.action === 'openRun' && called
+    ? { href: `#/executions/${called}`, label: FAILURE_ACTION_LABELS.openRun }
+    : { href: edit, label: FAILURE_ACTION_LABELS.editStep };
+  const retryFirst = copy.action === 'retry';
+
+  return (
+    <section className="failure" aria-labelledby="failure-title">
+      <h2 id="failure-title" className="group-label">Failed at step {failed.step} of {steps}</h2>
+      <div className="failure-card">
+        <div className="failure-step">
+          <StatusIcon status="FAILED" size={24} />
+          <ActionSentence type={failed.type} params={failed.params} types={typesOf(e)} />
+        </div>
+        <p>{copy.sentence}</p>
+        <div className="row">
+          {retry(retryFirst)}
+          <a className={`btn ${retryFirst ? '' : 'tinted'}`} href={link.href}>{link.label}</a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The steps that wait for you (02-experience §7): since when and until when, *Do it now* where the
+ * item is, and *Skip* to let the run go on without it.
+ */
+function WaitingCard({ e, now, skipping, onSkip }: { e: Detail; now: number; skipping: string | null; onSkip: (key: string) => void }) {
+  return (
+    // the headline says "Waiting for you" already – the cards say since when and what to do
+    <section className="waiting" aria-label="Steps waiting for you">
+      {waitingSteps(e).map((action) => (
+        <div key={action.id} className="waiting-card">
+          <div className="failure-step">
+            <StatusIcon status="AWAITING_USER" size={24} />
+            <span>{action.awaiting?.title ?? actionLabel(action.type)}</span>
+          </div>
+          <p className="muted waiting-line">{waitingLine(action, new Date(now))}</p>
+          <div className="row">
+            <a className="btn tinted" href={doItHref(action)}>Do it now</a>
+            <button type="button" className="btn" disabled={skipping !== null} onClick={() => onSkip(action.key)}>
+              {skipping === action.key ? <span className="spinner" /> : <Icon name="x" size={16} />} Skip
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function ActionFlowForRun({ e, now, selected, onSelect }: { e: Detail; now: number; selected: string | null; onSelect: (key: string) => void }) {
   return (
     <ActionFlow
@@ -318,6 +466,8 @@ function ActionFlowForRun({ e, now, selected, onSelect }: { e: Detail; now: numb
       aside={(action) => (
         <span className="aside">
           <StatusIcon status={action.status} size={20} label={action.status !== 'COMPLETED'} />
+          {action.status === 'SKIPPED' && doneTooLate(e, action.key) && <span className="muted small">done too late</span>}
+          {action.status === 'SCHEDULED' && action.wakeAt && <span className="muted small">until {moment(action.wakeAt)}</span>}
           <span className="muted small tabular">
             {action.attempts > 1 && <>attempt {action.attempts} · </>}
             {action.dispatchedAt ? between(action.dispatchedAt, action.finishedAt, now) : ''}

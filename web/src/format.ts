@@ -81,7 +81,8 @@ export function splitInstance(processedBy: string | null): { service: string; in
 }
 
 // same host the UI was opened on – localhost for compose, the VM's address in the 3-VM deployment
-const toolUrl = (port: number) => `${window.location.protocol}//${window.location.hostname}:${port}`;
+// (outside a browser – unit tests of modules importing this file – there is no window and no tool URL)
+const toolUrl = (port: number) => (typeof window === 'undefined' ? '' : `${window.location.protocol}//${window.location.hostname}:${port}`);
 export const JAEGER_URL = toolUrl(16686);
 export const RABBITMQ_URL = toolUrl(15672);
 

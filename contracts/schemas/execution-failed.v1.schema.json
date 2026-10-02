@@ -48,6 +48,24 @@
             "string",
             "null"
           ]
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "error.code of the failed action (docs/v2/05-messaging.md §6), null when no action failed"
+        },
+        "failedActionType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resumeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how often the execution was resumed before this failure (0 = first failure); consumers keep one notification per failure with it"
         }
       },
       "additionalProperties": true

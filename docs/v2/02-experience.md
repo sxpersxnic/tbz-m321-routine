@@ -318,7 +318,13 @@ Every failed step shows one sentence and one action, chosen by `errorCode`
 | `AWAIT_EXPIRED` | Nobody did this in time. | Retry from here |
 | `QUOTA_EXCEEDED` | This month's AI allowance is used up. | Settings |
 | `AI_REFUSED` | The AI step declined this request. | Edit step |
+| `INPUT_TOO_LARGE` | This step got more than it can handle: {detail}. | Edit step |
+| `CONFLICT` | Something changed in the meantime, so this step couldn't go ahead. | Retry from here |
+| `CANCELLED` | You cancelled this run. | Retry from here |
 | `INTERNAL` | Something went wrong on our side. | Retry from here |
+
+Run rows show a short form without details (*"A step is missing something."*). Failures
+without a code (runs from before v2) keep their raw error.
 
 ---
 

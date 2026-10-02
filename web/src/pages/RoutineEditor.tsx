@@ -1,15 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ACTION_FORMS, GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, type ParamField } from '../action-forms.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, formOf, type ParamField } from '../action-forms.ts';
 import { api, ApiError } from '../api.ts';
 import { useToast } from '../components/toast.tsx';
+import { runsInTest } from '../catalog/catalog.ts';
+import { pickerGroups } from '../catalog/picker.ts';
+import { useCatalog } from '../catalog/store.ts';
+import { shortValue, TryStep } from '../components/try-step.tsx';
+import { DateInput } from '../forms/date-input.tsx';
+import { DURATION_CHOICES } from '../forms/durations.ts';
+import { fromSpec, QUESTION_TYPES, questionName, toSpec, type DraftQuestion } from '../forms/questions.ts';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
 import { CRON_PRESETS, TRIGGER_ICONS, webhookUrl } from '../format.ts';
-import { navigate, usePolling, useUnsavedGuard } from '../hooks.ts';
+import { navigate, usePolling, useRouteParam, useUnsavedGuard } from '../hooks.ts';
 import { FREQUENCIES, parseSchedule, toCron, WEEKDAYS, withFrequency, type Frequency } from '../schedule.ts';
+import { ALERT_CHOICES } from '../lib/health.ts';
+import { stepTimeout } from '../lib/waiting.ts';
 import { TEMPLATES } from '../templates.ts';
-import type { ActionDefinition, RoutineInput, Trigger, TriggerType } from '../types.ts';
+import type { ActionDefinition, RoutineInput, StepTimeout, Trigger, TriggerType } from '../types.ts';
 
 // ---------------------------------------------------------------- editor model
 
@@ -25,6 +34,8 @@ interface DraftAction {
   runIf: { uid: string; is: boolean } | null;
   /** `{{…}}` reference to a list, '' = runs once. */
   forEach: string;
+  /** "If you don't get to it" – steps you do yourself; null = keep waiting. */
+  timeout: StepTimeout | null;
 }
 
 interface Draft {
@@ -37,6 +48,10 @@ interface Draft {
   cron: string;
   timezone: string;
   actions: DraftAction[];
+  /** "Tell me after N failures in a row" – null = never. */
+  alertAfterFailures: number | null;
+  /** "Ask when run?" – manual routines only. */
+  questions: DraftQuestion[];
 }
 
 const RAW_FIELD: ParamField = { name: '__raw', label: 'Parameters (JSON)', kind: 'json' };
@@ -47,7 +62,7 @@ const MAX_STEP = 50;
 const uid = () => crypto.randomUUID();
 
 function fieldsFor(type: string): ParamField[] {
-  return ACTION_FORMS[type]?.fields ?? [RAW_FIELD];
+  return formOf(type)?.fields ?? [RAW_FIELD];
 }
 
 function toValues(type: string, params: Record<string, unknown>): Record<string, FieldValue> {
@@ -106,6 +121,8 @@ function toParams(action: DraftAction): Record<string, unknown> {
       }
     } else if (field.kind === 'number') {
       params[field.name] = Number(text);
+    } else if (field.kind === 'boolean') {
+      params[field.name] = text === 'true';
     } else if (field.kind === 'value') {
       params[field.name] = parseValue(text);
     } else if (field.kind === 'routine') {
@@ -131,6 +148,8 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
     triggerType: routine.trigger.type,
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
+    alertAfterFailures: routine.alertAfterFailures === undefined ? 2 : routine.alertAfterFailures,
+    questions: (routine.inputs ?? []).map((spec) => fromSpec(spec, uid())),
     actions: routine.actions.map((action) => ({
       uid: uids.get(action.key) ?? uid(),
       key: action.key,
@@ -139,6 +158,7 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
       values: toValues(action.type, action.params),
       runIf: action.runIf && uids.has(action.runIf.action) ? { uid: uids.get(action.runIf.action) as string, is: action.runIf.is } : null,
       forEach: action.forEach ?? '',
+      timeout: action.timeout ?? null,
     })),
   };
 }
@@ -165,6 +185,7 @@ function toInput(draft: Draft): RoutineInput {
       params: toParams(action),
       ...(action.runIf && condition ? { runIf: { action: condition, is: action.runIf.is } } : {}),
       ...(action.forEach.trim() ? { forEach: action.forEach.trim() } : {}),
+      ...(action.timeout ? { timeout: action.timeout } : {}),
     };
   });
   return {
@@ -174,6 +195,9 @@ function toInput(draft: Draft): RoutineInput {
     actions,
     icon: draft.icon,
     color: draft.color,
+    alertAfterFailures: draft.alertAfterFailures,
+    // questions are asked only when run by hand – another trigger drops them
+    inputs: draft.triggerType === 'manual' && draft.questions.length > 0 ? draft.questions.map(toSpec) : null,
   };
 }
 
@@ -296,7 +320,9 @@ const TIMEZONES: string[] = (() => {
   }
 })();
 
-const EMPTY: Draft = { name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [] };
+const EMPTY: Draft = {
+  name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [], alertAfterFailures: 2, questions: [],
+};
 
 // ---------------------------------------------------------------- component
 
@@ -312,7 +338,7 @@ function safeParams(action: DraftAction): Record<string, unknown> {
 export function RoutineEditor({ id }: { id?: string }) {
   const toast = useToast();
   const editing = Boolean(id);
-  const actionTypes = usePolling(() => api.actionTypes(), 0);
+  const catalog = useCatalog();
   const taskLists = usePolling(() => api.taskLists(), 0);
   const routineList = usePolling(() => api.routines(), 0);
   // One shared starting value: fromRoutine() mints random uids, so calling it
@@ -322,6 +348,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   const [version, setVersion] = useState<number>();
   const [loaded, setLoaded] = useState(!editing);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [stepQuery, setStepQuery] = useState('');
   const [issues, setIssues] = useState<Issue[]>([]);
   const [conflict, setConflict] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -391,6 +418,50 @@ export function RoutineEditor({ id }: { id?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Example values for the reference pills: what the last real run produced, updated by "Try this step"
+  const [examples, setExamples] = useState<Record<string, unknown>>({});
+  const rememberOutputs = useCallback(
+    (key: string, output: Record<string, unknown>) =>
+      setExamples((current) => ({ ...current, ...Object.fromEntries(Object.entries(output).map(([field, value]) => [`{{actions.${key}.${field}}}`, value])) })),
+    [],
+  );
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      const [last] = await api.routineExecutions(id, 1).catch(() => []);
+      if (!last) return;
+      const run = await api.execution(last.id).catch(() => undefined);
+      if (cancelled || !run) return;
+      for (const action of run.actions) if (action.status === 'COMPLETED' && action.output && !action.parentId) rememberOutputs(action.key, action.output);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, rememberOutputs]);
+  /** The step as a definition, for a test run – null while its fields can't be read. */
+  const definitionOf = (action: DraftAction) => {
+    try {
+      return toInput(draft).actions.find((candidate) => candidate.key === action.key.trim()) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  // "Edit step" on a failed run lands here with ?step=<key>: unfold that step and put the cursor in it
+  const [stepParam] = useRouteParam('step');
+  const [fieldParam] = useRouteParam('field');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once the routine has loaded, not again on every edit
+  useEffect(() => {
+    if (!loaded || !stepParam) return;
+    const action = draft.actions.find((candidate) => candidate.key === stepParam);
+    if (!action) return;
+    toggleExpanded(action.uid, true);
+    // the field the failure is about, when the run said which – else the step's first field
+    const field = fieldsFor(action.type).find((candidate) => candidate.name === fieldParam) ?? fieldsFor(action.type)[0];
+    requestAnimationFrame(() => focusField(fieldId(action.uid, field?.name ?? 'key')));
+  }, [loaded, stepParam, fieldParam]);
+
   const update = (patch: Partial<Draft>) => setDraft((current) => ({ ...current, ...patch }));
   const updateAction = (key: string, patch: Partial<DraftAction>) =>
     setDraft((current) => ({ ...current, actions: current.actions.map((action) => (action.uid === key ? { ...action, ...patch } : action)) }));
@@ -413,8 +484,8 @@ export function RoutineEditor({ id }: { id?: string }) {
     for (let n = 2; draft.actions.some((action) => action.key === key); n++) key = `${base}${n}`;
     // the API allows steps 1–50; beyond that a new action joins the last step (runs in parallel)
     const step = Math.min(MAX_STEP, Math.max(0, ...draft.actions.map((action) => action.step)) + 1);
-    const form = ACTION_FORMS[type];
-    const action: DraftAction = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}), runIf: null, forEach: '' };
+    const form = formOf(type);
+    const action: DraftAction = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}), runIf: null, forEach: '', timeout: null };
     setDraft((current) => ({ ...current, actions: [...current.actions, action] }));
     toggleExpanded(action.uid, true);
     // a freshly added card is below the fold on a long routine
@@ -555,7 +626,10 @@ export function RoutineEditor({ id }: { id?: string }) {
   const leaveHref = editing ? `#/routines/${id}` : '#/routines';
   const timezone = draft.timezone || 'Europe/Zurich';
   const blank = !editing && draft.actions.length === 0 && !draft.name;
-  const catalog = actionTypes.data ?? Object.keys(ACTION_FORMS).map((type) => ({ type, description: '', requiredParams: [], example: {} }));
+  // the catalog's steps – none until it has loaded (from the cache that is at once, after the first visit)
+  const lastStep = Math.max(0, ...draft.actions.map((action) => action.step));
+  const previousType = draft.actions.filter((action) => action.step === lastStep).at(-1)?.type;
+  const pickerGroupsShown = pickerGroups(catalog, { query: stepQuery, previousType });
 
   /** Literal names of variables set in steps before `action` – what {{vars.…}} can read there. */
   const variablesBefore = (action: DraftAction) => [
@@ -598,6 +672,37 @@ export function RoutineEditor({ id }: { id?: string }) {
     }
     const fid = fieldId(action.uid, field.name);
     const problem = invalid.get(fid);
+    if (field.kind === 'date' || (field.kind === 'select' && (field.options?.length ?? 0) <= 4)) {
+      // a group of buttons, not one control – a heading instead of a <label>
+      const headingId = `${fid}-label`;
+      return (
+        <div key={field.name} className={`field ${field.kind === 'date' ? 'span-2' : ''}`} role="group" aria-labelledby={headingId}>
+          <span id={headingId}>{field.label}</span>
+          {field.kind === 'date' ? (
+            <DateInput id={fid} label={field.label} value={value as string} required={field.required} onChange={apply} />
+          ) : (
+            <div className="segmented" role="radiogroup" aria-labelledby={headingId} id={fid} tabIndex={-1}>
+              {field.options?.map((option) => (
+                <button key={option} type="button" role="radio" aria-checked={value === option} className={value === option ? 'active' : ''} onClick={() => apply(option)}>
+                  {field.optionLabels?.[option] ?? option}
+                </button>
+              ))}
+            </div>
+          )}
+          {problem && <small className="field-error">{problem}</small>}
+          {field.hint && <small className="muted">{field.hint}</small>}
+        </div>
+      );
+    }
+    if (field.kind === 'boolean') {
+      return (
+        <label key={field.name} className="switch field-switch">
+          <input id={fid} type="checkbox" checked={value === 'true'} onChange={(event) => apply(String(event.target.checked))} />
+          <span className="switch-track" />
+          <span className="switch-label">{field.label}</span>
+        </label>
+      );
+    }
     const common = { id: fid, value: value as string, placeholder: field.placeholder, 'aria-invalid': problem ? true : undefined };
     return (
       <label key={field.name} className={`field ${field.kind === 'textarea' || field.kind === 'json' || field.name === 'url' ? 'span-2' : ''}`}>
@@ -620,6 +725,13 @@ export function RoutineEditor({ id }: { id?: string }) {
             {/* a list deleted since: say so instead of silently showing "default" */}
             {value && taskLists.data && !taskLists.data.some((list) => list.id === value) && <option value={value as string}>Deleted list – uses default</option>}
           </select>
+        ) : field.kind === 'duration' ? (
+          <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
+            <option value="">{field.required ? 'Choose…' : '–'}</option>
+            {field.options?.map((option) => <option key={option} value={option}>{field.optionLabels?.[option] ?? option}</option>)}
+            {/* a duration typed elsewhere (a template, the API) stays as it is */}
+            {value && !field.options?.includes(value as string) && <option value={value as string}>{value as string}</option>}
+          </select>
         ) : field.kind === 'select' ? (
           <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
             <option value="">Default</option>
@@ -629,7 +741,8 @@ export function RoutineEditor({ id }: { id?: string }) {
           <textarea {...common} rows={field.kind === 'json' ? 4 : 3} className={`${field.kind === 'json' ? 'mono' : ''} ${problem ? 'invalid' : ''}`}
             onChange={(event) => apply(event.target.value)} {...trackFocus(apply)} />
         ) : (
-          <input {...common} className={problem ? 'invalid' : ''} type={field.kind === 'number' ? 'number' : 'text'} min={field.kind === 'number' ? 0 : undefined}
+          <input {...common} className={problem ? 'invalid' : ''} type={field.kind === 'number' ? 'number' : field.kind === 'time' ? 'time' : 'text'} min={field.kind === 'number' ? field.min : undefined}
+            inputMode={field.kind === 'number' ? (field.integer ? 'numeric' : 'decimal') : undefined}
             onChange={(event) => apply(event.target.value)} {...(field.kind === 'text' || field.kind === 'value' ? trackFocus(apply) : {})} />
         )}
         {problem && <small className="field-error">{problem}</small>}
@@ -877,6 +990,10 @@ export function RoutineEditor({ id }: { id?: string }) {
             )}
           </section>
 
+          {draft.triggerType === 'manual' && (
+            <AskWhenRun questions={draft.questions} onChange={(questions) => update({ questions })} />
+          )}
+
           <section className="q-card" aria-labelledby="q-what">
             <div className="q-head">
               <span className="glyph tint-orange" aria-hidden="true"><Icon name="bolt" size={19} /></span>
@@ -918,7 +1035,12 @@ export function RoutineEditor({ id }: { id?: string }) {
 
                           {open && (
                             <div className="action-card-body" id={bodyId}>
-                              <div className="form-grid">{fieldsFor(action.type).map((field) => renderField(action, field))}</div>
+                              <div className="form-grid">{fieldsFor(action.type).filter((field) => !field.advanced).map((field) => renderField(action, field))}</div>
+                              {fieldsFor(action.type).some((field) => field.advanced) && (
+                                <Disclosure summary="More options">
+                                  <div className="form-grid">{fieldsFor(action.type).filter((field) => field.advanced).map((field) => renderField(action, field))}</div>
+                                </Disclosure>
+                              )}
 
                               <div className="references" role="group" aria-label="Insert value">
                                 <span className="references-label">Insert</span>
@@ -931,16 +1053,20 @@ export function RoutineEditor({ id }: { id?: string }) {
                                 {(() => {
                                   // a repeating step offers what all its runs produced, not one run's fields
                                   const chips = earlier.flatMap((candidate) =>
-                                    Object.entries(candidate.forEach ? LOOP_OUTPUTS : ACTION_FORMS[candidate.type]?.outputs ?? {})
+                                    Object.entries(candidate.forEach ? LOOP_OUTPUTS : formOf(candidate.type)?.outputs ?? {})
                                       .map(([output, name]) => ({ candidate, name, reference: `{{actions.${candidate.key}.${output}}}` })));
                                   // three If steps all offer "Result" – the step ID tells them apart
                                   const repeated = (name: string) => chips.filter((chip) => chip.name === name).length > 1;
-                                  return chips.map(({ candidate, name, reference }) => (
-                                    <button key={reference} type="button" className="ref-chip" title={reference}
-                                      onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
-                                      <ActionGlyph type={candidate.type} size={16} /> {name}{repeated(name) ? ` (${candidate.key})` : ''}
-                                    </button>
-                                  ));
+                                  return chips.map(({ candidate, name, reference }) => {
+                                    const example = examples[reference];
+                                    return (
+                                      <button key={reference} type="button" className="ref-chip" title={example === undefined ? reference : `${reference} · e.g. ${shortValue(example, 120)}`}
+                                        onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
+                                        <ActionGlyph type={candidate.type} size={16} /> {name}{repeated(name) ? ` (${candidate.key})` : ''}
+                                        {example !== undefined && <span className="ref-example">{shortValue(example, 18)}</span>}
+                                      </button>
+                                    );
+                                  });
                                 })()}
                                 {variablesBefore(action).map((name) => (
                                   <button key={name} type="button" className="ref-chip" title={`{{vars.${name}}}`}
@@ -949,7 +1075,12 @@ export function RoutineEditor({ id }: { id?: string }) {
                                   </button>
                                 ))}
                                 {/* a manual routine is what another routine calls as a function – offer what it is called with */}
-                                {Object.entries({ ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}), ...(draft.triggerType === 'manual' ? INPUT_REFERENCE : {}), ...GLOBAL_REFERENCES }).map(([reference, name]) => (
+                                {Object.entries({
+                                  ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}),
+                                  // the answers to the questions; without questions, what a calling routine passes
+                                  ...(draft.triggerType === 'manual' ? (draft.questions.length > 0 ? questionReferences(draft.questions) : INPUT_REFERENCE) : {}),
+                                  ...GLOBAL_REFERENCES,
+                                }).map(([reference, name]) => (
                                   <button key={reference} type="button" className="ref-chip" title={reference}
                                     onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
                                     {name}
@@ -959,6 +1090,15 @@ export function RoutineEditor({ id }: { id?: string }) {
 
                               <FlowControls action={action} earlier={earlier} variables={variablesBefore(action)} invalid={invalid.get(fieldId(action.uid, 'runIf'))}
                                 onChange={(patch) => updateAction(action.uid, patch)} />
+
+                              {catalog.capability(action.type)?.kind === 'human' && (
+                                <HumanTimeout action={action} onChange={(timeout) => updateAction(action.uid, { timeout })} />
+                              )}
+
+                              {/* a saved routine can try steps that only read or compute – nothing is sent or created */}
+                              {id && runsInTest(catalog.capability(action.type)) && (
+                                <TryStep routineId={id} action={definitionOf(action)} types={types} onOutput={rememberOutputs} />
+                              )}
 
                               {/* Shown whenever there is something to be parallel *with*, so the
                                   control survives its own toggle: merging into step 1 would
@@ -988,27 +1128,35 @@ export function RoutineEditor({ id }: { id?: string }) {
             )}
 
             <div>
-              <h3 style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 8 }}>
-                {draft.actions.length >= MAX_ACTIONS ? `At most ${MAX_ACTIONS} steps` : 'Add a step'}
-              </h3>
-              {[
-                { label: 'Actions', types: catalog.filter((type) => !ACTION_FORMS[type.type]?.scripting) },
-                { label: 'Scripting', types: catalog.filter((type) => ACTION_FORMS[type.type]?.scripting) },
-              ].filter((group) => group.types.length > 0).map((group) => (
-              <div key={group.label} className="palette-group">
-              <h4 className="palette-label">{group.label}</h4>
+              <div className="picker-head">
+                <h3>{draft.actions.length >= MAX_ACTIONS ? `At most ${MAX_ACTIONS} steps` : 'Add a step'}</h3>
+                <input type="search" className="picker-search" placeholder="Search" aria-label="Search steps" value={stepQuery}
+                  onChange={(event) => setStepQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Enter takes the first match – search, Enter, done
+                    const first = pickerGroupsShown[0]?.items[0];
+                    if (event.key !== 'Enter' || !first || draft.actions.length >= MAX_ACTIONS) return;
+                    event.preventDefault();
+                    addAction(first.type);
+                    setStepQuery('');
+                  }} />
+              </div>
+              {pickerGroupsShown.map((group) => (
+              <div key={group.id} className="palette-group" role="group" aria-labelledby={`picker-${group.id}`}>
+              <h4 className="palette-label" id={`picker-${group.id}`}>{group.label}</h4>
               <div className="palette">
-                {group.types.map((type) => (
-                  <button key={type.type} type="button" className="palette-item" onClick={() => addAction(type.type)}
-                    title={ACTION_FORMS[type.type]?.blurb ?? type.description} disabled={draft.actions.length >= MAX_ACTIONS}>
-                    <ActionGlyph type={type.type} size={30} />
-                    <span className="grow">{actionLabel(type.type)}</span>
+                {group.items.map((item) => (
+                  <button key={item.type} type="button" className="palette-item" onClick={() => addAction(item.type)}
+                    title={formOf(item.type)?.blurb ?? item.description} disabled={draft.actions.length >= MAX_ACTIONS}>
+                    <ActionGlyph type={item.type} size={30} />
+                    <span className="grow">{item.label}{item.hint && <span className="blurb">{item.hint}</span>}</span>
                     <Icon name="plus" size={15} />
                   </button>
                 ))}
               </div>
               </div>
               ))}
+              {stepQuery.trim() && pickerGroupsShown.length === 0 && <p className="muted">No matching steps</p>}
             </div>
           </section>
         </div>
@@ -1023,6 +1171,7 @@ export function RoutineEditor({ id }: { id?: string }) {
                 key: action.key, type: action.type, step: action.step, params: safeParams(action),
                 ...(action.runIf ? { runIf: { action: draft.actions.find((candidate) => candidate.uid === action.runIf?.uid)?.key ?? '', is: action.runIf.is } } : {}),
                 ...(action.forEach ? { forEach: action.forEach } : {}),
+                ...(action.timeout ? { timeout: action.timeout } : {}),
               }))}
                 trigger={{
                   icon: TRIGGER_ICONS[draft.triggerType],
@@ -1040,6 +1189,13 @@ export function RoutineEditor({ id }: { id?: string }) {
               <input type="checkbox" checked={draft.active} onChange={(event) => update({ active: event.target.checked })} />
               <span className="switch-track" />
               <span className="switch-label">Active</span>
+            </label>
+            <label className="alert-setting">
+              <span>Tell me</span>
+              <select className="compact-select" value={draft.alertAfterFailures ?? 'never'}
+                onChange={(event) => update({ alertAfterFailures: event.target.value === 'never' ? null : Number(event.target.value) })}>
+                {ALERT_CHOICES.map((choice) => <option key={choice.label} value={choice.value ?? 'never'}>{choice.label}</option>)}
+              </select>
             </label>
             <button type="button" className="btn primary large block" disabled={saving} onClick={save}>
               {saving ? <><span className="spinner" /> Saving</> : editing ? 'Save' : 'Create'}
@@ -1066,6 +1222,8 @@ export function RoutineEditor({ id }: { id?: string }) {
 
 const LOOP_REFERENCES: Record<string, string> = { '{{item}}': 'Item', '{{index}}': 'Index' };
 const INPUT_REFERENCE: Record<string, string> = { '{{input}}': 'Input' };
+const questionReferences = (questions: DraftQuestion[]) =>
+  Object.fromEntries(questions.filter((question) => question.name.trim()).map((question) => [`{{input.${question.name.trim()}}}`, question.label.trim() || question.name]));
 
 /**
  * The control flow of one step: "Only if" an earlier If step holds, and
@@ -1119,5 +1277,105 @@ function FlowControls({ action, earlier, variables, invalid, onChange }: {
         </label>
       )}
     </div>
+  );
+}
+
+/** How long a step you do yourself may wait – the choices of "If you don't get to it". */
+const WAIT_CHOICES = DURATION_CHOICES.filter((choice) => choice.value !== 'PT5M');
+
+/**
+ * "If you don't get to it" (02-experience §6): keep waiting, or skip / fail the step after a while.
+ * Only on steps you do yourself.
+ */
+function HumanTimeout({ action, onChange }: { action: DraftAction; onChange: (timeout: StepTimeout | null) => void }) {
+  const mode = action.timeout?.then ?? 'wait';
+  const after = action.timeout?.after ?? 'PT2H';
+  const custom = !WAIT_CHOICES.some((choice) => choice.value === after);
+  return (
+    <div className="flow-controls">
+      <label className="field">
+        <span><Icon name="clock" size={13} /> If you don&apos;t get to it</span>
+        <select value={mode} onChange={(event) => {
+          const then = event.target.value;
+          onChange(then === 'skip' || then === 'fail' ? stepTimeout(after, then) : null);
+        }}>
+          <option value="wait">Keep waiting</option>
+          <option value="skip">Skip it after …</option>
+          <option value="fail">Fail the run after …</option>
+        </select>
+      </label>
+      {action.timeout && (
+        <label className="field">
+          <span>After</span>
+          <select value={after} onChange={(event) => {
+            onChange(stepTimeout(event.target.value, action.timeout?.then ?? 'skip'));
+          }}>
+            {WAIT_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+            {custom && <option value={after}>{after}</option>}
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Ask when run?" (02-experience §6): questions a manual routine asks each time it is run by hand.
+ * Each row: the question, what kind of answer, required, a default – and its name for {{input.<name>}},
+ * which follows the question until it is edited by hand.
+ */
+function AskWhenRun({ questions, onChange }: { questions: DraftQuestion[]; onChange: (questions: DraftQuestion[]) => void }) {
+  const patch = (uid: string, change: Partial<DraftQuestion>) => onChange(questions.map((question) => (question.uid === uid ? { ...question, ...change } : question)));
+  const add = () => onChange([...questions, { uid: crypto.randomUUID(), name: '', label: '', type: 'text', required: false, default: '', options: '' }]);
+  return (
+    <section className="q-card" aria-labelledby="q-ask">
+      <div className="q-head">
+        <span className="glyph tint-indigo" aria-hidden="true"><Icon name="person" size={19} /></span>
+        <h2 id="q-ask" className="grow">Ask when run?</h2>
+        <button type="button" className="btn ghost small" onClick={add} disabled={questions.length >= 10}><Icon name="plus" size={14} /> Add a question</button>
+      </div>
+      {questions.map((question, index) => (
+        <fieldset key={question.uid} className="question-row">
+          <legend className="sr-only">Question {index + 1}</legend>
+          <label className="field grow">
+            <span>Question</span>
+            <input value={question.label} placeholder="Which city?" onChange={(event) => {
+              const label = event.target.value;
+              // the name follows the question while it is still the one made from it
+              const auto = question.name === '' || question.name === questionName(question.label);
+              patch(question.uid, { label, ...(auto && { name: questionName(label) }) });
+            }} />
+          </label>
+          <label className="field">
+            <span>Answer</span>
+            <select value={question.type} onChange={(event) => patch(question.uid, { type: event.target.value as DraftQuestion['type'] })}>
+              {QUESTION_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            </select>
+          </label>
+          {question.type === 'choice' && (
+            <label className="field grow">
+              <span>Choices</span>
+              <input value={question.options} placeholder="Bern, Basel, Zurich" onChange={(event) => patch(question.uid, { options: event.target.value })} />
+            </label>
+          )}
+          <label className="field">
+            <span>Default</span>
+            <input value={question.default} type={question.type === 'number' ? 'number' : question.type === 'date' ? 'date' : 'text'}
+              onChange={(event) => patch(question.uid, { default: event.target.value })} />
+          </label>
+          <label className="switch question-required">
+            <input type="checkbox" checked={question.required} onChange={(event) => patch(question.uid, { required: event.target.checked })} />
+            <span className="switch-track" />
+            <span className="switch-label">Required</span>
+          </label>
+          <label className="field question-name">
+            <span>Name</span>
+            <input className="mono" value={question.name} onChange={(event) => patch(question.uid, { name: event.target.value })} />
+          </label>
+          <IconButton icon="trash" label={`Remove "${question.label || `question ${index + 1}`}"`} className="danger"
+            onClick={() => onChange(questions.filter((candidate) => candidate.uid !== question.uid))} />
+        </fieldset>
+      ))}
+    </section>
   );
 }

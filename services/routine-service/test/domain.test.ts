@@ -161,4 +161,29 @@ describe('execution progress', () => {
     assert.equal(inFlightStatus([action('a', 1, 'DISPATCHED', new Date('2026-09-11T08:00:05Z'))], now, 10_000), 'WAITING');
     assert.equal(inFlightStatus([action('a', 1, 'RETRYING')], now, 10_000), 'WAITING');
   });
+
+  it('waits for human steps and timers like for workers (06 §1.1)', () => {
+    assert.deepEqual(decideNext([action('a', 1, 'AWAITING_USER'), action('b', 2, 'PENDING')]), { kind: 'wait' });
+    assert.deepEqual(decideNext([action('a', 1, 'SCHEDULED'), action('b', 2, 'PENDING')]), { kind: 'wait' });
+    assert.deepEqual(decideNext([action('a', 1, 'AWAITING_USER'), action('b', 1, 'FAILED')]), { kind: 'fail', failedKey: 'b' });
+    assert.deepEqual(decideNext([action('a', 1, 'COMPLETED'), action('b', 1, 'SKIPPED')]), { kind: 'complete' });
+  });
+
+  describe('in-flight status (06 §1.2) – machine first, then people, then timers', () => {
+    const now = new Date('2026-09-11T08:00:30Z');
+    const fresh = new Date('2026-09-11T08:00:25Z');
+    const stale = new Date('2026-09-11T08:00:05Z');
+    const cases: Array<[string, ActionProgress[], string]> = [
+      ['a retry beats a person', [action('a', 1, 'RETRYING'), action('b', 1, 'AWAITING_USER')], 'WAITING'],
+      ['an unanswered worker beats a timer', [action('a', 1, 'DISPATCHED', stale), action('b', 1, 'SCHEDULED')], 'WAITING'],
+      ['a busy worker beats a person', [action('a', 1, 'DISPATCHED', fresh), action('b', 1, 'AWAITING_USER')], 'RUNNING'],
+      ['a busy worker beats a timer', [action('a', 1, 'DISPATCHED', fresh), action('b', 1, 'SCHEDULED')], 'RUNNING'],
+      ['only people', [action('a', 1, 'AWAITING_USER'), action('b', 1, 'COMPLETED')], 'WAITING_FOR_YOU'],
+      ['a person beats a timer', [action('a', 1, 'AWAITING_USER'), action('b', 1, 'SCHEDULED')], 'WAITING_FOR_YOU'],
+      ['only timers', [action('a', 1, 'SCHEDULED'), action('b', 1, 'SKIPPED')], 'DELAYED'],
+    ];
+    for (const [name, actions, expected] of cases) {
+      it(name, () => assert.equal(inFlightStatus(actions, now, 10_000), expected));
+    }
+  });
 });

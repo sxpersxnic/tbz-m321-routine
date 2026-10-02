@@ -44,7 +44,31 @@
           ],
           "properties": {
             "code": {
-              "type": "string"
+              "description": "Error code of docs/v2/05-messaging.md §6. The last four values are what v1 producers sent (exception class names); consumers map unknown codes to INTERNAL.",
+              "enum": [
+                "NOT_FOUND",
+                "UNAUTHORIZED",
+                "FORBIDDEN_HOST",
+                "TIMEOUT",
+                "UNREACHABLE",
+                "RATE_LIMITED",
+                "INVALID_PARAMS",
+                "TEMPLATE_ERROR",
+                "NOT_AVAILABLE",
+                "REFERENCE_GONE",
+                "SUBROUTINE_FAILED",
+                "AWAIT_EXPIRED",
+                "QUOTA_EXCEEDED",
+                "AI_REFUSED",
+                "INPUT_TOO_LARGE",
+                "CONFLICT",
+                "CANCELLED",
+                "INTERNAL",
+                "PermanentError",
+                "TransientError",
+                "Error",
+                "SubRoutineFailed"
+              ]
             },
             "message": {
               "type": "string"

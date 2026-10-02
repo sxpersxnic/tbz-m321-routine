@@ -65,7 +65,8 @@ kit adds exact bindings for new capability types.
 
 ### ExecutionFailed v1
 
-New optional fields `errorCode` (of the failed action) and `failedActionType`.
+New optional fields `errorCode` (of the failed action), `failedActionType` and `resumeCount`
+(how often the run was resumed before this failure; 0 = first failure).
 
 ### RoutineTriggered v1
 
@@ -97,20 +98,21 @@ routine-service, when a human step expires or its run is cancelled.
 
 ```json
 { "actionId": "uuid", "executionId": "uuid", "actionType": "task.await", "ownerId": "uuid",
-  "reason": "expired" }           // expired | runCancelled
+  "reason": "expired" }           // expired | skipped | runCancelled
 ```
 
-The domain closes the item (task → `CANCELLED`, question → `EXPIRED`) and sends no result.
+`skipped`: the person skipped the step on the run page (06 §5.5). The domain closes the item
+(task → `CANCELLED`, question → `EXPIRED`) and sends no result.
 
 ### 4.2 Routine events
 
 | Type | Routing key | Data | Consumers |
 | --- | --- | --- | --- |
-| `ExecutionResumed` v1 | `execution.resumed` | `executionId, routineId, ownerId, fromActionKey, resumedBy` | notification-service (marks the failure notification resolved) |
+| `ExecutionResumed` v1 | `execution.resumed` | `executionId, routineId, ownerId, fromActionKey, resumedBy, resumeCount` | notification-service (marks the failure notification resolved) |
 | `ExecutionWaitingForYou` v1 | `execution.waitingForYou` | `executionId, routineId, ownerId, routineName, awaiting: [{actionKey, kind, refId, title, dueAt}]` | delivery-service (push) |
 | `RoutineSaved` v1 | `routine.saved` | `routineId, ownerId, version, active, name, trigger` (full trigger definition), `areaId` | trigger-service |
 | `RoutineDeleted` v1 | `routine.deleted` | `routineId, ownerId` | trigger-service |
-| `RoutineUnhealthy` v1 | `routine.unhealthy` | `routineId, ownerId, routineName, consecutiveFailures, lastErrorCode` | notification-service |
+| `RoutineUnhealthy` v1 | `routine.unhealthy` | `routineId, ownerId, routineName, consecutiveFailures, lastErrorCode, executionId` (the run that crossed the threshold) | notification-service |
 
 `RoutineSaved` is emitted on create, update, activate, deactivate and restore (event-carried
 state: consumers never call back).

@@ -165,14 +165,16 @@ secret.
    status → `AWAITING_USER`, store `awaiting` (jsonb) and `accepted_at`; if the definition has
    `timeout`, set `deadline_at = accepted_at + after`. Log: *"Waiting for you: {title}"*.
 2. `#advance` → `wait` → `inFlightStatus` → `WAITING_FOR_YOU`. When the execution *enters*
-   `WAITING_FOR_YOU`, enqueue `ExecutionWaitingForYou` and upsert the run's Today card (§11).
+   `WAITING_FOR_YOU`, enqueue `ExecutionWaitingForYou` and (from M5, with today-service) upsert the run's Today card (§11).
 3. Completion arrives as a normal `ActionCompleted` → v1 path.
 4. **Expiry:** the housekeeping loop (every 2 s, replica-safe with `FOR UPDATE SKIP LOCKED`)
    selects `AWAITING_USER` actions with `deadline_at < now()`. For each: lock the execution,
    mark `SKIPPED` (`skip_reason = 'expired'`) or `FAILED` (`AWAIT_EXPIRED`), enqueue
    `ActionCancelRequested { reason: 'expired' }`, then `#advance`.
 5. **Manual skip** (`POST /api/v1/executions/:id/actions/:key/skip`) does the same with
-   `skip_reason = 'user'`.
+   `skip_reason = 'user'` and `ActionCancelRequested { reason: 'skipped' }`.
+6. A person completing the item after it expired or was skipped: the action stays `SKIPPED`,
+   the log notes `ACTION_LATE` (*Skipped (done too late)*).
 
 ## 6. Resume from the failed step
 
@@ -182,11 +184,16 @@ secret.
    its parent).
 2. Reset it to `PENDING` (same `id`: workers' idempotency stores only remember *completed*
    actions, so a failed one runs again; external services see the same idempotency key).
-   Keep `attempts`. Clear `error`, `error_code`, `finished_at`.
+   Keep `attempts`. Clear `error`, `error_code`, `finished_at`. A reset step that still exists
+   in the routine with the same key and type takes its **current** params (a loop child: its
+   loop's params; a top-level step also its `runIf`/`forEach`), so *Edit step* followed by
+   *Retry from here* runs the fixed step. Steps added to the routine since the run started are
+   not added to it.
 3. Reset every action with `skip_reason = 'failure'` (skipped because of this failure) to
    `PENDING`. Actions skipped by a condition keep `SKIPPED`.
 4. Execution → `RUNNING`, clear `error`, `finished_at`. Increment `resume_count`. Log
-   `RESUMED`. Enqueue `ExecutionResumed`.
+   `RESUMED`. Enqueue `ExecutionResumed`. A later failure publishes `ExecutionFailed` with
+   `resumeCount`, so consumers keep one notification per failure.
 5. `#advance`.
 
 `skipPendingActions` (v1) sets `skip_reason = 'failure'`. Condition skips set `'condition'`.
@@ -198,6 +205,12 @@ execution). Resume is allowed any number of times, and the run page shows *"Resu
 - Table `routine_versions (routine_id, version, definition jsonb, created_at, created_by, origin)`,
   PK `(routine_id, version)`. Every write that bumps `routines.version` inserts a row in the
   same transaction. Migration backfills the current version of every routine.
+- `definition` = name, description, trigger, actions, icon, color and `active` (never the
+  webhook token). `origin` = the kind of write: `create`, `edit`, `appearance`, `activate`,
+  `deactivate`, `webhook` (URL rotated), `restore`, `backfill`. Activation and URL rotation bump
+  the version (it is the optimistic lock), so they appear in the history too.
+- `GET …/versions` returns the definitions as well, so the History page can diff neighbours
+  without one request per version.
 - `executions.routine_version` records the version a run used (set in `createExecution`).
 - Restore = a normal update whose definition is the old version's (new version number).
 
@@ -234,6 +247,9 @@ Domain **`scripting`** (engine-evaluated, `sideEffects: false`), registered in-p
 `flow.wait` is special: on dispatch it becomes `SCHEDULED` with `wake_at`. The housekeeping
 loop completes due `SCHEDULED` actions (`FOR UPDATE SKIP LOCKED`) and advances. Maximum wait:
 7 days.
+It is a `value` (no side effects), so *Try this step* runs it – a test run doesn't wait and
+completes it at once. A templated duration that turns out invalid or longer than 7 days fails
+the step with `INVALID_PARAMS`.
 
 Domain **`routines`** (owned by routine-service):
 
@@ -247,9 +263,12 @@ Domain **`routines`** (owned by routine-service):
 ## 10. Health counters
 
 Columns on `routines`: `consecutive_failures int`, `last_success_at`, `last_failure_at`,
-`runs_30d`, `failures_30d` (the last two refreshed by a nightly job). Updated in the
-`complete` / `fail` branches. When `consecutive_failures` reaches `alert_after_failures`,
-enqueue `RoutineUnhealthy` once (reset on the next success).
+`runs_30d`, `failures_30d`. Updated in the `complete` / `fail` branches (the 30-day counts
+count up there too, so a new routine shows its runs at once) and recomputed by a nightly job so
+old runs drop out (after 03:00 UTC, once per day: `pg_try_advisory_xact_lock` + `job_runs`).
+When `consecutive_failures` reaches `alert_after_failures`, enqueue `RoutineUnhealthy` once
+(reset on the next success). `alertAfterFailures` in a routine input: 1–10, `null` = never,
+omitted on update = unchanged (2 for a new routine).
 
 ## 11. Today cards from routine-service
 
@@ -263,9 +282,14 @@ Cards are removed when the condition ends.
 
 ## 12. Test runs
 
-`POST /api/v1/routines/test-step` `{ action, sampleExecutionId? }` creates an execution with
-`kind = 'test'` and one action. The template scope comes from `sampleExecutionId` (the last
-run by default), so references resolve to real values. The client polls
+`POST /api/v1/routines/test-step` `{ routineId, action, sampleExecutionId? }` creates an
+execution with `kind = 'test'` and one action (a run needs its routine, so only saved routines
+can try a step – the step itself may be unsaved). The template scope comes from
+`sampleExecutionId` (the routine's last run by default): its completed steps are copied into
+the test run as `COMPLETED` rows, so references, variables and loop items resolve to real
+values through the normal scope. What runs comes from the catalog (M2): values and
+side-effect-free steps as usual, actions with `preview` (their domain answers with a preview
+and changes nothing); everything else is `SKIPPED` (`test`). The client polls
 `GET /api/v1/executions/:id` (≤ 10 s). Test executions are excluded from lists, stats, health
 and events, and deleted after 1 hour.
 
@@ -291,6 +315,7 @@ ALTER TABLE executions ADD COLUMN depth integer NOT NULL DEFAULT 0;         -- e
 ALTER TABLE executions ADD COLUMN resume_count integer NOT NULL DEFAULT 0;
 ALTER TABLE executions ADD COLUMN inputs jsonb;
 ALTER TABLE executions ADD COLUMN trigger_event jsonb;                      -- event trigger data
+ALTER TABLE executions ADD COLUMN error_code text;                         -- CANCELLED: ended by the user
 
 ALTER TABLE execution_actions ADD COLUMN error_code text;
 ALTER TABLE execution_actions ADD COLUMN skip_reason text;                 -- condition | failure | expired | user | test

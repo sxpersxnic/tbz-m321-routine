@@ -74,6 +74,7 @@ const ICONS: Record<string, ReactNode> = {
   sparkles: <path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />,
   pause: <path d="M9 5v14M15 5v14" />,
   retry: <path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" />,
+  history: <path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5M12 8v4l3 2" />,
   inbox: <path d="M3 13l3-8h12l3 8v6H3zM3 13h5l1.5 2.5h5L16 13h5" />,
   flag: <path d="M5 21V4M5 4h11l-2 4 2 4H5" />,
   stack: <path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" />,
@@ -120,6 +121,12 @@ const ICONS: Record<string, ReactNode> = {
   ),
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
   back: <path d="M15 5l-7 7 7 7" />,
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20a7 7 0 0 1 14 0" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -198,6 +205,10 @@ const STATUS_LABELS: Record<string, string> = {
   PENDING: 'Starting',
   RUNNING: 'Running',
   WAITING: 'Waiting',
+  WAITING_FOR_YOU: 'Waiting for you',
+  DELAYED: 'Waiting',
+  AWAITING_USER: 'Waiting for you',
+  SCHEDULED: 'Waiting',
   COMPLETED: 'Succeeded',
   FAILED: 'Failed',
   DISPATCHED: 'In progress',
@@ -205,14 +216,17 @@ const STATUS_LABELS: Record<string, string> = {
   SKIPPED: 'Skipped',
   up: 'Online',
   down: 'Offline',
+  stale: 'Stale',
+  rejected: 'Rejected',
 };
 
 /** The one place a status enum becomes words – badges, pipeline and filters share it. */
 export const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 const BADGE_TONE: Record<string, string> = {
-  COMPLETED: 'ok', up: 'ok', FAILED: 'err', down: 'err',
+  COMPLETED: 'ok', up: 'ok', FAILED: 'err', down: 'err', rejected: 'err', stale: 'wait',
   RUNNING: 'busy', DISPATCHED: 'busy', PENDING: 'busy', WAITING: 'wait', RETRYING: 'wait',
+  WAITING_FOR_YOU: 'wait', AWAITING_USER: 'wait', DELAYED: 'wait', SCHEDULED: 'wait',
 };
 
 export function StatusBadge({ status }: { status: string }) {

@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { ACTION_FORMS, actionShort, actionTint } from '../action-forms.ts';
+import { formOf, actionShort, actionTint } from '../action-forms.ts';
 import { api } from '../api.ts';
 import { describeTrigger, TRIGGER_ICONS } from '../format.ts';
 import { navigate } from '../hooks.ts';
 import { startRoutine } from '../pages/Routines.tsx';
 import { TEMPLATES, type Template } from '../templates.ts';
-import type { ExecutionAction } from '../types.ts';
+import type { ExecutionAction, Routine, RoutineInput } from '../types.ts';
 import { useToast } from './toast.tsx';
 import { Icon, Section } from './ui.tsx';
 import { ActionGlyph, GlyphRow, StatusIcon } from './visual.tsx';
@@ -57,35 +57,52 @@ function chain(template: Template): string {
 }
 
 /**
+ * Creates a routine from a ready-made definition, activates it and – if asked – starts it.
+ * `busy` is the id of the one being created, so its button can show a spinner.
+ */
+export function useCreateRoutine() {
+  const toast = useToast();
+  const [busy, setBusy] = useState<string>();
+
+  async function create(id: string, input: RoutineInput, run: boolean): Promise<{ routine: Routine; executionId?: string } | undefined> {
+    setBusy(id);
+    try {
+      const routine = await api.createRoutine(input);
+      // routines are created inactive, and an inactive one cannot be triggered at
+      // all – not just on a schedule. Activating is what makes it runnable.
+      const active = await api.setActive(routine.id, true);
+      // a webhook routine is tried through its own URL, like the external system would
+      return { routine: active, executionId: run ? await startRoutine(active) : undefined };
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      return undefined;
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  return { busy, create };
+}
+
+/**
  * One click has to carry a new user all the way through the loop: create, start,
  * and land on the running execution. Reading about it does not produce the
  * moment where the model clicks.
  */
 export function TemplateGallery({ onCreated }: { onCreated?: () => void }) {
   const toast = useToast();
-  const [busy, setBusy] = useState<string>();
+  const { busy, create } = useCreateRoutine();
 
   async function use(template: Template, run: boolean) {
-    setBusy(template.id);
-    try {
-      const routine = await api.createRoutine(template.routine);
-      // routines are created inactive, and an inactive one cannot be triggered at
-      // all – not just on a schedule. Activating is what makes it runnable.
-      const active = await api.setActive(routine.id, true);
-      onCreated?.();
-      if (!run) {
-        toast(`"${routine.name}" created`);
-        navigate(`/routines/${routine.id}`);
-        return;
-      }
-      // a webhook template is tried through its own URL, like the external system would
-      const executionId = await startRoutine(active);
-      toast(`"${routine.name}" is running`);
-      navigate(`/executions/${executionId}`);
-    } catch (error) {
-      toast(error instanceof Error ? error.message : String(error), 'error');
-    } finally {
-      setBusy(undefined);
+    const created = await create(template.id, template.routine, run);
+    if (!created) return;
+    onCreated?.();
+    if (created.executionId) {
+      toast(`"${created.routine.name}" is running`);
+      navigate(`/executions/${created.executionId}`);
+    } else {
+      toast(`"${created.routine.name}" created`);
+      navigate(`/routines/${created.routine.id}`);
     }
   }
 
@@ -94,7 +111,6 @@ export function TemplateGallery({ onCreated }: { onCreated?: () => void }) {
       <div className={`template-cover tint-${templateTint(template)}`}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <GlyphRow types={template.routine.actions.map((action) => action.type)} size={30} max={4} />
-          {template.kind === 'demo' && <span className="demo-tag">Demo</span>}
         </div>
         <div>
           <h3>{template.label}</h3>
@@ -102,8 +118,7 @@ export function TemplateGallery({ onCreated }: { onCreated?: () => void }) {
         </div>
       </div>
       <div className="template-body">
-        {/* one line: what a starter does for you, or what a demo makes visible */}
-        <p className="template-does">{template.kind === 'demo' ? template.teaches : template.does}</p>
+        <p className="template-does">{template.does}</p>
         <span className="template-when">
           <Icon name={TRIGGER_ICONS[template.routine.trigger.type]} size={13} /> {describeTrigger(template.routine.trigger)}
         </span>
@@ -119,18 +134,11 @@ export function TemplateGallery({ onCreated }: { onCreated?: () => void }) {
     </li>
   );
 
-  const starters = TEMPLATES.filter((template) => template.kind === 'starter');
-  const demos = TEMPLATES.filter((template) => template.kind === 'demo');
-
   return (
     <div className="gallery">
       <Section id="gallery-starter" title="Templates"
         action={<a className="see-all" href="#/routines/new">Build your own <Icon name="chevron" size={14} /></a>}>
-        <ul className="template-grid">{starters.map(render)}</ul>
-      </Section>
-      <Section id="gallery-demo" title="Demos"
-        description={<>Each one makes a behaviour of the distributed system visible – best watched next to <a className="link" href="#/system">Infrastructure</a>.</>}>
-        <ul className="template-grid">{demos.map(render)}</ul>
+        <ul className="template-grid">{TEMPLATES.map(render)}</ul>
       </Section>
     </div>
   );
@@ -159,13 +167,14 @@ const text = (output: Record<string, unknown> | null, key: string) => {
 function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
   const base = { type: action.type };
   // scripting steps and the head of a loop only steer the run – what they lead to is the result
-  const steering = (ACTION_FORMS[action.type]?.scripting && action.type !== 'routine.run') || (action.forEach && !action.parentId);
+  const steering = (formOf(action.type)?.scripting && action.type !== 'routine.run') || (action.forEach && !action.parentId);
   if (action.status === 'FAILED') {
     return { ...base, text: `${actionShort(action.type)} failed`, detail: action.error ?? undefined, bad: true };
   }
   if (action.status === 'SKIPPED') {
-    // in a successful run a skip is an If that did not hold – nothing went wrong
-    if (runStatus === 'COMPLETED' || steering) return null;
+    // a skip is only bad news when an earlier failure caused it (runs before v2 have no reason: a
+    // skip in a successful run was an If that did not hold)
+    if (action.skipReason ? action.skipReason !== 'failure' : runStatus === 'COMPLETED' || steering) return null;
     return { ...base, text: `${actionShort(action.type)} skipped`, detail: 'An earlier step failed', bad: true };
   }
   if (action.status !== 'COMPLETED' || steering) return null;
@@ -175,6 +184,10 @@ function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
       return { ...base, text: 'New task', detail: text(action.output, 'title'), href: '#/tasks', linkLabel: 'Tasks' };
     case 'notification.send':
       return { ...base, text: 'Notification sent', detail: text(action.params as Record<string, unknown>, 'title'), href: '#/notifications', linkLabel: 'Notifications' };
+    case 'task.await':
+      return { ...base, text: 'You did it', detail: text(action.params as Record<string, unknown>, 'title') };
+    case 'notification.ask':
+      return { ...base, text: 'You answered', detail: text(action.output, 'label') };
     case 'weather.get':
       return { ...base, text: 'Weather', detail: text(action.output, 'summary') };
     case 'summary.generate':

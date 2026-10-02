@@ -15,6 +15,9 @@
   "failureFactor": 10,
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 7200,
+  "roles": {
+    "realm": [{ "name": "admin", "description": "System endpoints: DLQ replay, chaos switch, domain registry. Every signed-in user is a user." }]
+  },
   "clients": [
     {
       "clientId": "routine-web",
@@ -43,6 +46,19 @@
             "access.token.claim": "true",
             "id.token.claim": "false"
           }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
         }
       ]
     },
@@ -70,6 +86,48 @@
             "access.token.claim": "true",
             "id.token.claim": "false"
           }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "integration-worker",
+      "name": "Service account: integration-worker",
+      "description": "Service-to-service calls to /internal endpoints: client-credentials grant, 15-minute tokens for aud routine-internal only.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${INTEGRATION_WORKER_TOKEN_SECRET:dev-integration-worker-secret}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "900"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience routine-internal",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "routine-internal",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
         }
       ]
     }
@@ -82,7 +140,8 @@
       "firstName": "Demo",
       "lastName": "User",
       "enabled": true,
-      "credentials": [{ "type": "password", "value": "demo12345", "temporary": false }]
+      "credentials": [{ "type": "password", "value": "demo12345", "temporary": false }],
+      "realmRoles": ["default-roles-routine", "admin"]
     }
   ]
 }

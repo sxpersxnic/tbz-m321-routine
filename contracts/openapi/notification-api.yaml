@@ -19,6 +19,8 @@ paths:
       parameters:
         - { name: unread, in: query, schema: { type: boolean }, description: unread only }
         - { name: category, in: query, schema: { enum: [action, execution] }, description: 'action = sent by a routine step, execution = run outcome' }
+        - { name: kind, in: query, schema: { enum: [info, question] } }
+        - { name: state, in: query, schema: { enum: [open, answered, expired] } }
       responses:
         '200':
           description: notifications (newest first)
@@ -37,6 +39,23 @@ paths:
         '200': { description: marked, content: { application/json: { schema: { $ref: '#/components/schemas/Notification' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /api/v1/notifications/{notificationId}/answer:
+    post:
+      summary: Answer a question ("Ask me") – completes the routine step waiting for it
+      operationId: answerQuestion
+      parameters:
+        - { name: notificationId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [value], additionalProperties: false, properties: { value: { type: string, description: 'one of the question''s options[].value' } } }
+      responses:
+        '200': { description: answered (and read), content: { application/json: { schema: { $ref: '#/components/schemas/Notification' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: not an open question (answered, expired, or no question), $ref: '#/components/responses/Problem' }
+        '422': { description: not one of the answers, $ref: '#/components/responses/Problem' }
+
   /api/v1/notifications/{notificationId}:
     delete:
       summary: Delete a notification
@@ -46,6 +65,7 @@ paths:
       responses:
         '204': { description: deleted }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: an open question – answer it, or skip its step on the run, $ref: '#/components/responses/Problem' }
 
 components:
   securitySchemes:
@@ -75,3 +95,10 @@ components:
         executionId: { type: [string, 'null'], format: uuid }
         createdAt: { type: string, format: date-time }
         readAt: { type: [string, 'null'], format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time, description: 'set on a failure notification once its run was resumed (ExecutionResumed)' }
+        kind: { enum: [info, question] }
+        state: { enum: [open, answered, expired], description: 'questions: open until answered, expired when their step expired or was skipped' }
+        options: { type: [array, 'null'], items: { type: object, properties: { value: { type: string }, label: { type: string } } } }
+        answer: { type: [object, 'null'], properties: { value: { type: string }, label: { type: string }, answeredAt: { type: string, format: date-time } } }
+        routineId: { type: [string, 'null'], format: uuid }
+        expiresAt: { type: [string, 'null'], format: date-time }

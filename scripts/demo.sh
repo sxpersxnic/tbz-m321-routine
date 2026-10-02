@@ -13,6 +13,9 @@
 #   schedule     Time-based trigger (cron)
 #   webhook      External event: a public webhook URL starts a routine (idempotent, rotatable)
 #   evolution    Schema evolution with expand-and-contract, including a breaking-change demo
+#   resume       A failed run is fixed and resumed from its failed step ("Retry from here")
+#   registry     Domain platform: five domains registered, a task event on the broker, an incompatible manifest refused
+#   human-step   Humans in the loop: a checklist run finished by ticking tasks and answering, and the expiry path
 #   all          All scenarios in sequence (acceptance test)
 #   trace <id>   Logs of all services for a correlation or execution ID
 #   hook <routine> [json]  Call a webhook routine by ID or name, then follow the run (manual testing)
@@ -25,6 +28,7 @@ cd "$(dirname "$0")/.."
 GATEWAY=${GATEWAY:-http://localhost:8080}
 RABBIT=${RABBIT:-http://localhost:15672}
 RABBIT_AUTH=${RABBIT_AUTH:-routine:routine}
+MOCK=${MOCK:-http://localhost:8090}
 EMAIL=${DEMO_EMAIL:-demo@routine.local}
 PASSWORD=${DEMO_PASSWORD:-demo12345}
 TOKEN=""
@@ -186,6 +190,55 @@ scenario_retry() {
   [[ $(execution "$eid" | jq -r .status) == FAILED ]] || fail "expected: FAILED"
   info "Error: $(execution "$eid" | jq -r .error)"
   ok "FAILED immediately (1 attempt), follow-up action SKIPPED, user is notified"
+}
+
+scenario_resume() {
+  title "Resume: fix it, then retry from the failed step"
+  login
+  local name rid eid before after notification
+  name="backup-$(uuid)"
+  step "A routine whose second step calls an endpoint that does not exist (yet)"
+  rid=$(create_routine "$(jq -nc --arg url "http://mock-external:8090/switch/$name" '{name: "Backup Check", trigger: {type: "manual"}, actions: [
+      {key: "weather", type: "weather.get", params: {city: "Bern"}},
+      {key: "call", type: "http.request", step: 2, params: {url: $url}},
+      {key: "notify", type: "notification.send", step: 3, params: {title: "Backup checked ({{actions.weather.summary}})"}}]}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 FAILED COMPLETED
+  show_actions "$eid"
+  [[ $(execution "$eid" | jq -r .errorCode) == NOT_FOUND ]] || fail "expected errorCode NOT_FOUND"
+  before=$(execution "$eid" | jq -c '{weather: (.actions[] | select(.key=="weather") | {id, output}), call: (.actions[] | select(.key=="call") | .id)}')
+  ok "FAILED with errorCode NOT_FOUND – the web says \"The website said this page doesn't exist\""
+
+  step "Fix it at the source, then POST /api/v1/executions/$eid/resume"
+  curl -sS -f -X PUT "$MOCK/switch/$name" >/dev/null || fail "mock-external not reachable on $MOCK"
+  api POST "/api/v1/executions/$eid/resume" | jq -r '"  status after resume: \(.status), resumed \(.resumeCount)×"'
+  wait_for "$eid" 30 COMPLETED FAILED
+  show_actions "$eid"
+  after=$(execution "$eid" | jq -c '{weather: (.actions[] | select(.key=="weather") | {id, output}), call: (.actions[] | select(.key=="call") | .id)}')
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "expected COMPLETED after the resume"
+  [[ $before == "$after" ]] || fail "the completed step or the failed step's id changed: $before → $after"
+  ok "COMPLETED in the same run: weather kept its result, \"call\" ran again with the same actionId (idempotency key)"
+  show_log "$eid" | grep -E "FAILED|RESUMED|COMPLETED" || true
+  sleep 1
+  notification=$(api GET "/api/v1/notifications?category=execution" | jq -r --arg e "$eid" '[.items[] | select(.executionId==$e and (.title | test("failed")))][0].resolvedAt // empty')
+  [[ -n $notification ]] || fail "the failure notification was not marked resolved"
+  ok "the failure notification is resolved (ExecutionResumed → notification-service)"
+
+  step "Or fix the step itself: edit the routine, then resume"
+  rid=$(create_routine "$(jq -nc '{name: "Broken Endpoint", trigger: {type: "manual"}, actions: [
+      {key: "call", type: "http.request", params: {url: "http://mock-external:8090/status/404"}},
+      {key: "notify", type: "notification.send", params: {title: "fixed by editing the step"}}]}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 FAILED COMPLETED
+  api PUT "/api/v1/routines/$rid" "$(jq -nc '{name: "Broken Endpoint", trigger: {type: "manual"}, actions: [
+      {key: "call", type: "http.request", params: {url: "http://mock-external:8090/status/200"}},
+      {key: "notify", type: "notification.send", params: {title: "fixed by editing the step"}}]}')" >/dev/null
+  api POST "/api/v1/executions/$eid/resume" >/dev/null
+  wait_for "$eid" 30 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r '.actions[] | select(.key=="call") | .params.url') == *"/status/200" ]] || fail "the resumed step did not use the edited URL"
+  ok "the resumed step ran with the routine's current settings"
+  [[ $(api POST "/api/v1/executions/$eid/resume" | jq -r .status) == 409 ]] || fail "resuming a completed run must answer 409"
+  ok "a run that isn't failed can't be resumed (409)"
 }
 
 scenario_resilience() {
@@ -425,8 +478,8 @@ scenario_evolution() {
   step "Update the consumer – the tolerant reader reads v2 (only notification-service redeployed)"
   recreate notification-service COMPLETION_EVENT_READER=tolerant
   out=$(evolution_run); echo "$out"; [[ $out == *"All actions succeeded"* ]] || fail "the new consumer does not use the v2 fields"
-  info "Replay the event from the DLQ:"
-  scripts/replay-dlq.sh notification-service.execution-events | sed 's/^/    /'
+  info "Replay the event from the DLQ – what \"Replay\" on Infrastructure → Dead letters does (scripts/replay-dlq.sh does the same from a terminal):"
+  api POST /api/v1/system/dead-letters/notification-service.execution-events.dlq/replay | jq -r '"    \(.moved) message(s) moved back to notification-service.execution-events"'
 
   step "Contract – remove the old fields (the producer only sends v2)"
   recreate routine-service EXECUTION_COMPLETED_FORMAT=v2
@@ -453,6 +506,117 @@ scenario_hook() {
   wait_for "$eid" 60 COMPLETED FAILED
   show_actions "$eid"
   note "open in the UI: http://localhost:8080/#/executions/$eid"
+}
+
+registry() { api GET /api/v1/system/registry; }
+
+scenario_registry() {
+  title "Domain registry (M2)"
+  login
+  local names tick task event current manifest envelope before reason q=demo.task-events
+  step "a) Every domain registered its manifest – and keeps its heartbeat"
+  registry | jq -r '.items[] | "  \(.status | . + (" " * (9 - length))) \(.domain | . + (" " * (14 - length))) v\(.version)  \(.service)"'
+  names=$(registry | jq -r '[.items[] | select(.status == "up") | .domain] | sort | join(",")')
+  [[ $names == *connections*notifications*routines*scripting*tasks* ]] || fail "expected five domains online, got: $names"
+  ok "five domains online – the step picker and forms are built from these manifests"
+
+  step "b) Ticking a task publishes task.completed on the domain.events exchange"
+  # nothing consumes task events before M4 (event starts) – a queue of our own makes the message visible
+  curl -sS -f -u "$RABBIT_AUTH" -X PUT "$RABBIT/api/queues/%2F/$q" -H 'content-type: application/json' -d '{"durable":false,"auto_delete":false}' >/dev/null
+  curl -sS -f -u "$RABBIT_AUTH" -X POST "$RABBIT/api/bindings/%2F/e/domain.events/q/$q" -H 'content-type: application/json' -d '{"routing_key":"task.completed"}' >/dev/null
+  task=$(api POST /api/v1/tasks '{"title":"Registry demo – tick me"}' | jq -r .id)
+  api PATCH "/api/v1/tasks/$task" '{"status":"DONE"}' >/dev/null
+  info "task $task ticked"
+  for _ in $(seq 1 20); do
+    event=$(curl -sS -u "$RABBIT_AUTH" -X POST "$RABBIT/api/queues/%2F/$q/get" -H 'content-type: application/json' \
+      -d '{"count":1,"ackmode":"ack_requeue_false","encoding":"auto"}' | jq -c '.[0].payload // empty | fromjson')
+    [[ -n $event ]] && break
+    sleep 0.5
+  done
+  curl -sS -u "$RABBIT_AUTH" -X DELETE "$RABBIT/api/queues/%2F/$q" >/dev/null
+  [[ -n $event ]] || fail "no task.completed event arrived"
+  jq -r '"  \(.type) from \(.source): \(.data.title) (\(.data.listName))"' <<<"$event"
+  [[ $(jq -r .data.taskId <<<"$event") == "$task" ]] || fail "the event is about another task"
+  ok "domain event on the broker (RabbitMQ UI → Exchanges → domain.events)"
+
+  step "c) A new task-service version that drops a step without deprecating it first is refused"
+  current=$(api GET /api/v1/catalog | jq -c '.domains[] | select(.domain == "tasks") | del(.enabled)')
+  manifest=$(jq -c '.manifestVersion += 1 | .capabilities |= map(select(.type != "task.complete"))' <<<"$current")
+  envelope=$(jq -nc --arg mid "$(uuid)" --argjson manifest "$manifest" '{
+    messageId: $mid, type: "DomainRegistered", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $mid,
+    data: {manifest: $manifest, instance: "task-service@demo-fixture"}}')
+  before=$(registry | jq -r '.items[] | select(.domain == "tasks") | .rejected.at // ""')
+  rabbit_publish platform.registry domain.registered "$envelope"
+  for _ in $(seq 1 20); do
+    reason=$(registry | jq -r --arg before "$before" '.items[] | select(.domain == "tasks" and .rejected != null and .rejected.at != $before) | .rejected.reason')
+    [[ -n $reason ]] && break
+    sleep 0.5
+  done
+  [[ -n $reason ]] || fail "the incompatible manifest was not refused"
+  info "refused: $reason"
+  [[ $(registry | jq -r '.items[] | select(.domain == "tasks") | .version') == $(jq -r .manifestVersion <<<"$current") ]] || fail "the current version changed"
+  ok "the accepted version stays current – shown under Infrastructure → Registry"
+}
+
+# a checklist (3 "Do yourself") then "Ask me" – with an optional timeout on every human step
+checklist_routine() { # checklist_routine NAME [TIMEOUT_JSON]
+  local timeout=${2:-null}
+  jq -nc --arg name "$1" --argjson timeout "$timeout" '
+    def human(step): if $timeout == null then step else step + {timeout: $timeout} end;
+    {name: $name, trigger: {type: "manual"}, actions: [
+      human({key: "stretch", type: "task.await", step: 1, params: {title: "Stretch for 5 minutes"}}),
+      human({key: "water", type: "task.await", step: 1, params: {title: "Drink a glass of water"}}),
+      human({key: "plan", type: "task.await", step: 1, params: {title: "Pick the one thing for today"}}),
+      human({key: "mood", type: "notification.ask", step: 2, params: {question: "How did you sleep?", options: ["Well", "Badly"]}})
+    ]}'
+}
+
+step_tasks() { api GET /api/v1/tasks | jq -c --arg eid "$1" '[.items[] | select(.kind == "step" and .sourceExecutionId == $eid)]'; }
+question_of() { api GET '/api/v1/notifications?kind=question' | jq -c --arg eid "$1" '[.items[] | select(.executionId == $eid)][0] // empty'; }
+
+scenario_human_step() {
+  title "Humans in the loop (M3)"
+  login
+  local rid eid tasks question cancelled state skipped
+  step "a) A checklist run waits for you – its items appear as tasks"
+  rid=$(create_routine "$(checklist_routine "Morning checklist (demo)")")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 WAITING_FOR_YOU
+  for _ in $(seq 1 20); do tasks=$(step_tasks "$eid"); [[ $(jq length <<<"$tasks") == 3 ]] && break; sleep 0.5; done
+  jq -r '.[] | "    ☐ \(.title)  (\(.sourceRoutineName))"' <<<"$tasks"
+  [[ $(jq length <<<"$tasks") == 3 ]] || fail "expected 3 step tasks, got $(jq length <<<"$tasks")"
+  ok "three tasks on the Tasks page, grouped under \"Waiting for you\""
+
+  step "b) Ticking them moves the run on – then it asks a question"
+  for task in $(jq -r '.[].id' <<<"$tasks"); do api PATCH "/api/v1/tasks/$task" '{"status":"DONE"}' >/dev/null; done
+  for _ in $(seq 1 30); do question=$(question_of "$eid"); [[ -n $question ]] && break; sleep 0.5; done
+  [[ -n $question ]] || fail "the question was not asked"
+  info "asked: $(jq -r .title <<<"$question")  [$(jq -r '[.options[].label] | join("] [")' <<<"$question")]"
+  [[ $(execution "$eid" | jq -r .status) == WAITING_FOR_YOU ]] || fail "the run should wait for the answer"
+  ok "the run waits for the answer"
+
+  step "c) The answer completes the run, once"
+  api POST "/api/v1/notifications/$(jq -r .id <<<"$question")/answer" '{"value":"Well"}' >/dev/null
+  [[ $(api POST "/api/v1/notifications/$(jq -r .id <<<"$question")/answer" '{"value":"Badly"}' | jq -r .status) == 409 ]] || fail "a second answer must be refused"
+  wait_for "$eid" 30 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "run did not complete"
+  info "answer: $(execution "$eid" | jq -r '.actions[] | select(.key == "mood") | .output.label')"
+  ok "completed – a second answer was refused (409)"
+
+  step "d) Nobody gets to it: every human step skips after 3 s"
+  rid=$(create_routine "$(checklist_routine "Morning checklist (demo, expires)" '{"after":"PT3S","then":"skip"}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 WAITING_FOR_YOU
+  wait_for "$eid" 40 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "the expired run should complete"
+  show_actions "$eid"
+  skipped=$(execution "$eid" | jq '[.actions[] | select(.status == "SKIPPED" and .skipReason == "expired")] | length')
+  [[ $skipped == 4 ]] || fail "expected 4 expired steps, got $skipped"
+  for _ in $(seq 1 20); do cancelled=$(step_tasks "$eid" | jq '[.[] | select(.status == "CANCELLED")] | length'); [[ $cancelled == 3 ]] && break; sleep 0.5; done
+  [[ $cancelled == 3 ]] || fail "expected 3 cancelled tasks, got $cancelled"
+  for _ in $(seq 1 20); do state=$(question_of "$eid" | jq -r '.state // empty'); [[ $state == expired ]] && break; sleep 0.5; done
+  [[ $state == expired ]] || fail "the question should have expired, is: $state"
+  ok "completed with skipped steps; its tasks are cancelled and the question expired"
 }
 
 scenario_trace() {
@@ -484,11 +648,14 @@ case "${1:-}" in
   schedule) scenario_schedule ;;
   webhook) scenario_webhook ;;
   evolution) scenario_evolution ;;
+  resume) scenario_resume ;;
+  registry) scenario_registry ;;
+  human-step) scenario_human_step ;;
   trace) scenario_trace "${2:-}" ;;
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
+    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_human_step; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

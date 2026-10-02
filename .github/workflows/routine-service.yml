@@ -31,3 +31,4 @@ jobs:
     uses: ./.github/workflows/_node-service.yml
     with:
       service: routine-service
+      database: true # engine tests run against a real Postgres

@@ -46,8 +46,8 @@ sees old and new manifest versions side by side for a moment, and the rules in
 
 ## 5. Keeping the v1 hand-in clean
 
-- `main` stays at `v1.0.0` plus v1 fixes only. v2 lives on branch `v2` (see [10-quality.md §4](10-quality.md)).
+- `main` stays at `v1.0.0` plus v1 fixes only. v2 lives on branch `feat/v2-dev` (see [10-quality.md §4](10-quality.md)).
 - `docs/v2/` exists on `main` only as this plan. No v2 code lands on `main` before the course
   is graded.
-- v1 docs (`README.md`, `docs/*.md`) are not edited for v2 on `main`. On `v2` they're updated
+- v1 docs (`README.md`, `docs/*.md`) are not edited for v2 on `main`. On `feat/v2-dev` they're updated
   as milestones change behaviour.

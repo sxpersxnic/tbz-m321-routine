@@ -6,9 +6,12 @@ import {
   env,
   envInt,
   envList,
+  HttpError,
+  installAdminOnly,
   installAuth,
   onShutdown,
 } from '@routine/service-kit';
+import { DeadLetterError, discardDeadLetters, listDeadLetters, replayDeadLetters, type Management } from './dead-letters.ts';
 
 const SERVICE = 'gateway';
 const logger = createLogger(SERVICE);
@@ -26,6 +29,9 @@ const routes: Array<{ prefix: string; upstream: string }> = [
   { prefix: '/api/v1/routines', upstream: upstreams.routine },
   { prefix: '/api/v1/executions', upstream: upstreams.routine },
   { prefix: '/api/v1/action-types', upstream: upstreams.routine },
+  { prefix: '/api/v1/catalog', upstream: upstreams.routine },
+  // admin (installAdminOnly below covers it like every /api/v1/system path)
+  { prefix: '/api/v1/system/registry', upstream: upstreams.routine },
   // public: the secret token in the path is the credential, checked by the routine service
   { prefix: '/api/v1/hooks', upstream: upstreams.routine },
   { prefix: '/api/v1/tasks', upstream: upstreams.task },
@@ -44,6 +50,9 @@ const app = createHttpServer({ service: SERVICE, logger });
 
 // Reject unauthenticated calls at the edge; services still verify the token themselves (defense in depth).
 installAuth(app, createTokenVerifier(env('JWKS_URL')), PROTECTED_PREFIXES);
+// System endpoints (DLQ, chaos, registry) are for admins. The status stays readable for every user:
+// the Infrastructure page shows it read-only.
+installAdminOnly(app, ['/api/v1/system'], ['/api/v1/system/status']);
 
 // Upstreams run as several replicas behind one DNS name. A connection that breaks because a replica
 // went away is retried on a fresh connection – only for GET/HEAD/OPTIONS without a body, never for writes.
@@ -108,20 +117,33 @@ interface RabbitNode {
   running: boolean;
 }
 
-/** GET on the management API of the first cluster node that answers. */
-async function rabbitGet<T>(path: string): Promise<T> {
+/**
+ * A request to the management API of the first cluster node that answers. Only connection failures
+ * move on to the next node – an HTTP error is the cluster's answer (a POST must not run twice).
+ */
+async function rabbitRequest<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
   let lastError: unknown;
   for (const url of rabbit.urls) {
+    let response: Response;
     try {
-      const response = await fetch(`${url}${path}`, { headers: { authorization: rabbit.auth }, signal: AbortSignal.timeout(1_500) });
-      if (response.ok) return (await response.json()) as T;
-      lastError = new Error(`HTTP ${response.status}`);
+      response = await fetch(`${url}${path}`, {
+        method,
+        headers: { authorization: rabbit.auth, ...(body !== undefined && { 'content-type': 'application/json' }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(method === 'GET' ? 1_500 : 5_000),
+      });
     } catch (error) {
       lastError = error;
+      continue;
     }
+    if (response.ok) return (await response.json()) as T;
+    throw new Error(`RabbitMQ management API answered HTTP ${response.status} for ${method} ${path}`);
   }
   throw lastError;
 }
+
+const rabbitGet = <T>(path: string) => rabbitRequest<T>('GET', path);
+const management: Management = { get: rabbitGet, post: (path, body) => rabbitRequest('POST', path, body) };
 
 app.get('/api/v1/system/status', async () => {
   const services = Object.fromEntries(
@@ -149,6 +171,45 @@ app.get('/api/v1/system/status', async () => {
   }
   return { services, broker: queues ? 'up' : 'down', brokerNodes, queues: queues ?? [] };
 });
+
+// ---------------------------------------------------------------- dead letters (admin, services/gateway.md)
+
+/** Turns the module's refusals into problem responses; everything else stays a 500. */
+async function deadLetterCall<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof DeadLetterError) throw new HttpError(error.status, error.status === 400 ? 'bad_request' : 'conflict', error.message, { moved: error.moved });
+    throw error;
+  }
+}
+
+app.get('/api/v1/system/dead-letters', async () => ({ items: await listDeadLetters(management) }));
+
+app.post<{ Params: { queue: string } }>('/api/v1/system/dead-letters/:queue/replay', async (request) => {
+  const result = await deadLetterCall(() => replayDeadLetters(management, request.params.queue));
+  request.log.info({ queue: request.params.queue, moved: result.moved, admin: request.user?.id }, 'dead letters replayed');
+  return result;
+});
+
+app.post<{ Params: { queue: string }; Body: { messageIds: string[] } }>(
+  '/api/v1/system/dead-letters/:queue/discard',
+  {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['messageIds'],
+        additionalProperties: false,
+        properties: { messageIds: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'string', minLength: 1, maxLength: 200 } } },
+      },
+    },
+  },
+  async (request) => {
+    const result = await deadLetterCall(() => discardDeadLetters(management, request.params.queue, request.body.messageIds));
+    request.log.info({ queue: request.params.queue, discarded: result.discarded, admin: request.user?.id }, 'dead letters discarded');
+    return result;
+  },
+);
 
 // ---------------------------------------------------------------- web UI
 // Everything that is not an API route is served by the independent `web` service

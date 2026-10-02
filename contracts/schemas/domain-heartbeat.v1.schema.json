@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/domain-heartbeat.v1.schema.json",
+  "title": "DomainHeartbeat v1",
+  "description": "A domain replica is alive (every 30 s). Routing key: domain.heartbeat on platform.registry",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "DomainHeartbeat"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "domain",
+        "manifestVersion",
+        "digest",
+        "instance"
+      ],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*$"
+        },
+        "manifestVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "instance": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

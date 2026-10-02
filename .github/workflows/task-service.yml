@@ -31,3 +31,4 @@ jobs:
     uses: ./.github/workflows/_node-service.yml
     with:
       service: task-service
+      database: true # conformance tests of the tasks domain run against a real Postgres

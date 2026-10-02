@@ -62,8 +62,12 @@ export function Notifications({ onChange }: { onChange: () => void }) {
     return next;
   });
 
-  async function remove(ids: string[]) {
+  async function remove(requested: string[]) {
     setConfirmDelete(false);
+    // an open question is what a routine waits for – it goes once answered (or skipped on its run)
+    const ids = requested.filter((id) => !isOpenQuestion(all.find((item) => item.id === id)));
+    if (ids.length < requested.length) toast('Open questions stay until you answer them');
+    if (ids.length === 0) return;
     notifications.mutate((items) => items.filter((item) => !ids.includes(item.id)));
     setSelected(new Set());
     try {
@@ -90,11 +94,29 @@ export function Notifications({ onChange }: { onChange: () => void }) {
     }
   }
 
+  // optimistic: the answer shows at once; the routine waiting for it goes on server-side
+  async function answer(notification: Notification, value: string) {
+    const option = notification.options?.find((candidate) => candidate.value === value);
+    if (!option) return;
+    const at = new Date().toISOString();
+    notifications.mutate((items) => items.map((item) => (item.id === notification.id
+      ? { ...item, state: 'answered', answer: { value, label: option.label, answeredAt: at }, readAt: item.readAt ?? at }
+      : item)));
+    try {
+      await api.answer(notification.id, value);
+      onChange();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      notifications.reload();
+    }
+  }
+
   // Opening a notification only shows it – reading is marked on purpose, with the tick button.
   const card = (notification: Notification) => {
     const read = Boolean(notification.readAt);
     return (
-      <li key={notification.id} className={`notice ${read ? 'read' : ''} ${selected.has(notification.id) ? 'selected' : ''} prio-${notification.priority}`}>
+      <li key={notification.id} className={`notice ${read ? 'read' : ''} ${selected.has(notification.id) ? 'selected' : ''} ${notification.kind === 'question' ? 'question' : ''} prio-${notification.priority}`}>
         <input type="checkbox" className="notice-select" checked={selected.has(notification.id)}
           onChange={() => toggleSelected(notification.id)} aria-label={`Select "${notification.title}"`} />
         <button type="button" className="notice-main grow" onClick={() => setOpenId(notification.id)} aria-haspopup="dialog">
@@ -112,6 +134,7 @@ export function Notifications({ onChange }: { onChange: () => void }) {
             <IconButton icon="check" label={`Mark "${notification.title}" as read`} onClick={() => void markRead([notification.id])} />
           </span>
         )}
+        {notification.kind === 'question' && <QuestionAnswers notification={notification} onAnswer={(value) => void answer(notification, value)} />}
       </li>
     );
   };
@@ -217,10 +240,29 @@ export function Notifications({ onChange }: { onChange: () => void }) {
               {opened.priority !== 'normal' && <span>{PRIORITY_LABEL[opened.priority]} priority</span>}
               <span>{opened.readAt ? `Read ${relative(opened.readAt, now)}` : 'Unread'}</span>
             </p>
-            {opened.body ? <p className="notice-detail-body">{opened.body}</p> : <p>No message.</p>}
+            {opened.body ? <p className="notice-detail-body">{opened.body}</p> : opened.kind !== 'question' && <p>No message.</p>}
+            {opened.kind === 'question' && <QuestionAnswers notification={opened} onAnswer={(value) => void answer(opened, value)} />}
           </>
         )}
       </Modal>
     </div>
+  );
+}
+
+const isOpenQuestion = (notification: Notification | undefined) => notification?.kind === 'question' && notification.state === 'open';
+
+/** A question's answers as buttons (02-experience §13); once answered it shows the answer, read-only. */
+function QuestionAnswers({ notification, onAnswer }: { notification: Notification; onAnswer: (value: string) => void }) {
+  if (notification.state === 'answered') {
+    return <p className="notice-answer"><Icon name="check" size={14} /> {notification.answer?.label ?? notification.answer?.value}</p>;
+  }
+  if (notification.state === 'expired') return <p className="notice-answer muted">Expired</p>;
+  return (
+    <fieldset className="notice-answers">
+      <legend className="sr-only">Answer "{notification.title}"</legend>
+      {(notification.options ?? []).map((option) => (
+        <button key={option.value} type="button" className="btn small tinted" onClick={() => onAnswer(option.value)}>{option.label}</button>
+      ))}
+    </fieldset>
   );
 }

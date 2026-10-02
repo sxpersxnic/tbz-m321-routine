@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWK } from 'jose';
-import { createTokenVerifier, JWT_AUDIENCE } from '../src/auth.ts';
+import pino from 'pino';
+import { createTokenVerifier, installAdminOnly, installAuth, JWT_AUDIENCE, rolesOf } from '../src/auth.ts';
+import { createHttpServer } from '../src/http.ts';
 
 const ISSUER = 'http://localhost:8080/auth/realms/routine';
 const JWKS_URL = 'http://keycloak:8080/auth/realms/routine/protocol/openid-connect/certs';
@@ -11,8 +13,8 @@ async function signingKey(kid: string): Promise<{ privateKey: CryptoKey; jwk: JW
   return { privateKey, jwk: { ...(await exportJWK(publicKey)), kid, alg: 'RS256', use: 'sig' } };
 }
 
-const token = (key: { privateKey: CryptoKey; jwk: JWK }) =>
-  new SignJWT({ email: 'demo@routine.local' })
+const token = (key: { privateKey: CryptoKey; jwk: JWK }, claims: Record<string, unknown> = {}) =>
+  new SignJWT({ email: 'demo@routine.local', ...claims })
     .setProtectedHeader({ alg: 'RS256', kid: key.jwk.kid })
     .setSubject('user-1')
     .setIssuer(ISSUER)
@@ -88,5 +90,41 @@ describe('token verifier', () => {
     state.keys = [current.jwk];
     await assert.rejects(verifier.verify(await token(retired)), { code: 'ERR_JWKS_NO_MATCHING_KEY' });
     assert.equal((await verifier.verify(await token(current))).id, 'user-1');
+  });
+});
+
+describe('roles', () => {
+  it('makes every user `user`, and `admin` from the roles claim or Keycloak realm_access', () => {
+    assert.deepEqual(rolesOf({}), ['user']);
+    assert.deepEqual(rolesOf({ roles: ['default-roles-routine', 'offline_access'] }), ['user']);
+    assert.deepEqual(rolesOf({ roles: ['admin'] }), ['user', 'admin']);
+    assert.deepEqual(rolesOf({ realm_access: { roles: ['admin'] } }), ['user', 'admin']);
+    assert.deepEqual(rolesOf({ roles: 'admin' }), ['user'], 'a string is not a role list');
+  });
+
+  it('puts the roles on the verified user', async () => {
+    const key = await signingKey('k1');
+    const verifier = createTokenVerifier(JWKS_URL, { issuer: ISSUER, fetch: identity([key.jwk]).fetch });
+    assert.deepEqual((await verifier.verify(await token(key))).roles, ['user']);
+    assert.deepEqual((await verifier.verify(await token(key, { roles: ['admin'] }))).roles, ['user', 'admin']);
+  });
+
+  it('keeps admin routes to admins, and the status route open to every user', async () => {
+    const key = await signingKey('k1');
+    const app = createHttpServer({ service: 'test', logger: pino({ level: 'silent' }) });
+    installAuth(app, createTokenVerifier(JWKS_URL, { issuer: ISSUER, fetch: identity([key.jwk]).fetch }), ['/api/v1/system']);
+    installAdminOnly(app, ['/api/v1/system'], ['/api/v1/system/status']);
+    app.get('/api/v1/system/status', async () => ({ ok: true }));
+    app.get('/api/v1/system/dlq', async () => ({ ok: true }));
+
+    const call = async (url: string, claims?: Record<string, unknown>) =>
+      (await app.inject({ url, headers: claims ? { authorization: `Bearer ${await token(key, claims)}` } : {} })).statusCode;
+    assert.equal(await call('/api/v1/system/dlq'), 401);
+    assert.equal(await call('/api/v1/system/dlq', {}), 403);
+    assert.equal(await call('/api/v1/system/dlq?x=1', { roles: ['user'] }), 403);
+    assert.equal(await call('/api/v1/system/dlq', { roles: ['admin'] }), 200);
+    assert.equal(await call('/api/v1/system/status', {}), 200);
+    assert.equal(await call('/api/v1/system/status?refresh=1', {}), 200);
+    await app.close();
   });
 });

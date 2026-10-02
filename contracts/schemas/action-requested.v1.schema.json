@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://routine.example/contracts/schemas/action-requested.v1.schema.json",
   "title": "ActionRequested v1",
-  "description": "Command: execute one action of an execution. Routing key: action.<actionType>. `actionId` is the idempotency key.",
+  "description": "Command: execute one action of an execution. Routing key: action.<actionType>. `actionId` is the idempotency key. v2 adds the optional `context` (docs/v2/04-domain-platform.md §3.1) and widens `actionType` to `<prefix>.<name>` (every v1 type still matches).",
   "allOf": [
     {
       "$ref": "envelope.schema.json"
@@ -49,10 +49,54 @@
         },
         "actionType": {
           "type": "string",
-          "pattern": "^[a-z]+\\.[a-z]+$"
+          "pattern": "^[a-z][a-z0-9]*\\.[a-z][a-zA-Z0-9]*$"
         },
         "params": {
           "type": "object"
+        },
+        "context": {
+          "type": "object",
+          "description": "How and where the action runs. Optional: v1 producers don't send it, and consumers default to mode live.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "live",
+                "test"
+              ]
+            },
+            "timezone": {
+              "type": "string",
+              "description": "IANA time zone of the owner, e.g. Europe/Zurich"
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "routineName": {
+              "type": "string"
+            },
+            "stepIndex": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "stepCount": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "depth": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Loop-protection depth: 0 for runs not started by a routine-caused event"
+            },
+            "areaId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

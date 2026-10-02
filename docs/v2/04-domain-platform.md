@@ -302,7 +302,7 @@ CREATE TABLE domain_manifests (
 );
 CREATE TABLE domains (
   domain             text PRIMARY KEY,
-  current_version    integer     NOT NULL,
+  current_version    integer,               -- null: only rejected registrations so far (shown too)
   service            text        NOT NULL,
   last_heartbeat_at  timestamptz NOT NULL,
   rejected           jsonb                  -- last rejected registration and why (shown on Infrastructure)
@@ -371,10 +371,10 @@ integration-worker):
 | Module | Exports | Purpose |
 | --- | --- | --- |
 | `manifest.ts` | types of §2, `validateManifest`, `manifestDigest` | contract types |
-| `outbox.ts` | `enqueue(tx, message)`, `OutboxRelay`, `outboxMigrationSql` | moved from routine-service unchanged in behaviour |
-| `domain.ts` | `startDomain(options)` | topology, registration, heartbeat, command dispatch, idempotency, results |
-| `events.ts` | `emitEvent(tx, type, data, origin?)` | domain events through the outbox |
-| `today.ts` | `upsertCard(tx, card)`, `removeCard(tx, ownerId, cardId)`, `onResync(handler)` | Today cards |
+| `outbox.ts` | `enqueue(tx, message)`, `OutboxRelay` (table via `runKitMigrations(pool, ['outbox'], logger)` in `db.ts`) | moved from routine-service unchanged in behaviour |
+| `domain.ts` | `startDomain(options)`, `completeAwaiting(tx, service, actionId, output)` | topology, registration, heartbeat, command dispatch, idempotency, results (handlers get `emit` and `card` bound to the command, both no-ops in test mode) |
+| `events.ts` | `emitEvent(tx, source, type, data, origin?)` | domain events through the outbox |
+| `today.ts` | `upsertCard(tx, source, card)`, `removeCard(tx, source, ownerId, cardId, version)` | Today cards (the resync consumer arrives with today-service, M5) |
 | `internal-auth.ts` | `installServiceAuth(app, allowedServices)`, `serviceTokenProvider(name, secret)` | `/internal/**` endpoints and calling them |
 
 ### 6.1 `startDomain`

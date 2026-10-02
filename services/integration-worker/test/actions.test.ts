@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
-import { PermanentError, TransientError } from '@routine/service-kit';
+import { PermanentError, TransientError, validateManifest } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { executeAction, type ActionEnvironment } from '../src/actions.ts';
-import { actionCompleted } from '../src/messages.ts';
+import { executeAction, statusErrorCode, type ActionEnvironment } from '../src/actions.ts';
+import { actionCompleted, actionFailed } from '../src/messages.ts';
+import { CONNECTIONS_MANIFEST } from '../src/manifest.ts';
 
 let server: Server;
 let baseUrl: string;
@@ -24,6 +25,10 @@ before(async () => {
     if (url.pathname === '/mail/messages') {
       response.writeHead(202, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ messageId: 'msg-1', acceptedAt: '2026-09-19T08:00:00.000Z' }));
+      return;
+    }
+    if (url.pathname === '/slow') {
+      setTimeout(() => response.end('{}'), 300);
       return;
     }
     if (url.pathname === '/huge') {
@@ -48,6 +53,14 @@ describe('integration-worker actions', () => {
     assert.deepEqual(output, { messageId: 'msg-1', to: 'ada@example.com, bob@example.com', subject: 'Hi', sentAt: '2026-09-19T08:00:00.000Z' });
   });
 
+  it('answers a test run with a preview and sends nothing', async () => {
+    const before = seenKeys.length;
+    const output = await executeAction('email.send', { to: 'ada@example.com, bob@example.com', subject: 'Hi' }, { ...environment(), mode: 'test' });
+    assert.deepEqual(output, { preview: { to: 'ada@example.com, bob@example.com', subject: 'Hi' }, wouldDo: 'Send e-mail "Hi" to ada@example.com, bob@example.com' });
+    assert.equal(seenKeys.length, before, 'no request to the mail provider');
+    await assert.rejects(executeAction('email.send', { to: 'nope', subject: 'Hi' }, { ...environment(), mode: 'test' }), { code: 'INVALID_PARAMS' }, 'still validated');
+  });
+
   it('rejects unusable e-mails permanently', async () => {
     await assert.rejects(executeAction('email.send', { to: 'not-an-address', subject: 'Hi' }, environment()), PermanentError);
     await assert.rejects(executeAction('email.send', { to: 'ada@example.com' }, environment()), PermanentError);
@@ -70,6 +83,43 @@ describe('integration-worker actions', () => {
 
   it('treats unreachable hosts as transient', async () => {
     await assert.rejects(executeAction('http.request', { url: 'http://127.0.0.1:9/' }, environment()), TransientError);
+  });
+
+  it('maps HTTP statuses to error codes (05-messaging §6)', () => {
+    const table: Array<[number, string]> = [
+      [400, 'INVALID_PARAMS'],
+      [401, 'UNAUTHORIZED'],
+      [403, 'UNAUTHORIZED'],
+      [404, 'NOT_FOUND'],
+      [408, 'TIMEOUT'],
+      [410, 'NOT_FOUND'],
+      [422, 'INVALID_PARAMS'],
+      [429, 'RATE_LIMITED'],
+      [500, 'UNREACHABLE'],
+      [503, 'UNREACHABLE'],
+    ];
+    for (const [status, code] of table) assert.equal(statusErrorCode(status), code, String(status));
+  });
+
+  it('puts the code on the errors it throws', async () => {
+    const code = (status: number) => ({ code: statusErrorCode(status) });
+    await assert.rejects(executeAction('http.request', { url: `${baseUrl}/?status=404` }, environment()), code(404));
+    await assert.rejects(executeAction('http.request', { url: `${baseUrl}/?status=503` }, environment()), code(503));
+    await assert.rejects(executeAction('http.request', { url: `${baseUrl}/?status=429` }, environment()), { code: 'RATE_LIMITED' });
+    await assert.rejects(executeAction('http.request', { url: 'http://127.0.0.1:9/' }, environment()), { code: 'UNREACHABLE' });
+    await assert.rejects(executeAction('http.request', { url: `${baseUrl}/slow` }, { ...environment(), timeoutMs: 50 }), { code: 'TIMEOUT' });
+    await assert.rejects(executeAction('http.request', { url: 'http://routine-db:5432/' }, environment()), { code: 'FORBIDDEN_HOST' });
+    await assert.rejects(executeAction('http.request', { url: 'not a url' }, environment()), { code: 'INVALID_PARAMS' });
+    await assert.rejects(executeAction('email.send', { subject: 'Hi' }, environment()), { code: 'INVALID_PARAMS' });
+    await assert.rejects(executeAction('budget.record', {}, environment()), { code: 'NOT_AVAILABLE' });
+  });
+
+  it('reports the code in ActionFailed, INTERNAL for errors without one', () => {
+    const ref = { actionId: randomUUID(), executionId: randomUUID(), actionType: 'http.request' };
+    const failed = actionFailed(ref, new PermanentError('gone', { code: 'NOT_FOUND' }), 1, 'w@1');
+    assert.deepEqual(failed.data.error, { code: 'NOT_FOUND', message: 'gone' });
+    assert.deepEqual(contractErrors('action-failed.v1.schema.json', failed), []);
+    assert.equal((actionFailed(ref, new TypeError('x'), 1, 'w@1').data.error as { code: string }).code, 'INTERNAL');
   });
 
   it('blocks hosts outside the allow-list (SSRF protection)', async () => {
@@ -98,5 +148,16 @@ describe('integration-worker actions', () => {
   it('summary.generate renders sections', async () => {
     const output = await executeAction('summary.generate', { title: 'Week 37', sections: { Weather: 'sunny' }, lines: ['End'] }, environment());
     assert.equal(output.text, 'Week 37\n• Weather: sunny\n• End');
+  });
+});
+
+describe('connections manifest (04 §7)', () => {
+  it('validates, and the worker executes every capability it declares', async () => {
+    const result = validateManifest(CONNECTIONS_MANIFEST);
+    assert.equal(result.valid, true, result.valid ? '' : result.errors.join('; '));
+    for (const capability of CONNECTIONS_MANIFEST.capabilities) {
+      // empty params: every declared type is known – it fails on its params, never as NOT_AVAILABLE
+      await assert.rejects(executeAction(capability.type, {}, environment()), (error: PermanentError) => error.code === 'INVALID_PARAMS', capability.type);
+    }
   });
 });

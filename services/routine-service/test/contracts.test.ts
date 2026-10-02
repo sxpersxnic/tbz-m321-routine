@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { createEnvelope } from '@routine/service-kit';
+import { createEnvelope, manifestDigest, parseCommand } from '@routine/service-kit';
+import { BUILTIN_MANIFESTS } from '../src/domain/builtin-manifests.ts';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionRequested, executionCompleted, executionFailed, parseActionResult, routineTriggered, subRoutineResult } from '../src/messages.ts';
+import { actionCancelRequested, actionRequested, executionCompleted, executionFailed, executionResumed, executionWaitingForYou, parseActionResult, parseRegistryMessage, routineTriggered, routineUnhealthy, subRoutineResult } from '../src/messages.ts';
 
 const ids = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), correlationId: randomUUID() };
 
@@ -45,6 +46,43 @@ describe('routine-service produces valid messages', () => {
   it('ExecutionFailed v1', () => {
     const message = executionFailed({ ...ids, routineName: 'X', reason: 'boom', failedActionKey: 'a' });
     assert.deepEqual(contractErrors('execution-failed.v1.schema.json', message.envelope), []);
+    const again = executionFailed({ ...ids, routineName: 'X', reason: 'boom', failedActionKey: 'a', resumeCount: 2 });
+    assert.deepEqual(contractErrors('execution-failed.v1.schema.json', again.envelope), []);
+  });
+
+  it('RoutineUnhealthy v1', () => {
+    const message = routineUnhealthy({ ...ids, routineName: 'Backup', consecutiveFailures: 2, lastErrorCode: 'NOT_FOUND' });
+    assert.deepEqual(contractErrors('routine-unhealthy.v1.schema.json', message.envelope), []);
+    assert.equal(message.routingKey, 'routine.unhealthy');
+  });
+
+  it('ExecutionResumed v1', () => {
+    const message = executionResumed({ ...ids, fromActionKey: 'call', resumedBy: ids.ownerId, resumeCount: 1 });
+    assert.deepEqual(contractErrors('execution-resumed.v1.schema.json', message.envelope), []);
+    assert.equal(message.routingKey, 'execution.resumed');
+  });
+
+  it('ActionCancelRequested v1, routed like the step and readable by the domain kit', () => {
+    const message = actionCancelRequested({ ...ids, actionId: randomUUID(), actionKey: 'stretch', actionType: 'task.await', reason: 'expired' });
+    assert.deepEqual(contractErrors('action-cancel-requested.v1.schema.json', message.envelope), []);
+    assert.equal(message.exchange, 'routine.actions');
+    assert.equal(message.routingKey, 'action.task.await');
+    const command = parseCommand(message.envelope as never);
+    assert.deepEqual(command.cancel, { reason: 'expired' });
+    assert.equal(command.ownerId, ids.ownerId);
+  });
+
+  it('ExecutionWaitingForYou v1', () => {
+    const message = executionWaitingForYou({
+      ...ids,
+      routineName: 'Morning checklist',
+      awaiting: [
+        { actionKey: 'stretch', kind: 'task', refId: randomUUID(), title: 'Stretch', dueAt: new Date().toISOString() },
+        { actionKey: 'mood', kind: 'question', refId: randomUUID(), title: 'How did you sleep?' },
+      ],
+    });
+    assert.deepEqual(contractErrors('execution-waiting-for-you.v1.schema.json', message.envelope), []);
+    assert.equal(message.routingKey, 'execution.waitingForYou');
   });
 
   describe('ExecutionCompleted – expand and contract', () => {
@@ -70,6 +108,64 @@ describe('routine-service produces valid messages', () => {
   });
 });
 
+describe('v2 additions to the v1 contracts (05-messaging §3)', () => {
+  const requested = (actionType: string) =>
+    actionRequested({ ...ids, actionId: randomUUID(), actionKey: 'step', actionType, params: {} }).envelope as { data: Record<string, unknown> };
+
+  it('ActionRequested accepts every v1 type and <prefix>.<camelCaseName>', () => {
+    const types = ['task.create', 'notification.send', 'weather.get', 'http.request', 'summary.generate', 'email.send', 'routine.run'];
+    for (const type of [...types, 'budget.recordTransaction', 'health2.logEntry']) {
+      assert.deepEqual(contractErrors('action-requested.v1.schema.json', requested(type)), [], type);
+    }
+  });
+
+  it('ActionRequested rejects three segments, upper-case prefixes and upper-case names', () => {
+    for (const type of ['budget.transaction.record', 'Budget.record', 'budget.RecordTransaction', 'budget.', '1x.run']) {
+      assert.notDeepEqual(contractErrors('action-requested.v1.schema.json', requested(type)), [], type);
+    }
+  });
+
+  it('ActionRequested as produced, with its context', () => {
+    const message = actionRequested({
+      ...ids,
+      actionId: randomUUID(),
+      actionKey: 'weather',
+      actionType: 'weather.get',
+      params: { city: 'Bern' },
+      context: { mode: 'test', routineName: 'Morning', stepIndex: 1, stepCount: 2, depth: 0 },
+    });
+    assert.deepEqual(contractErrors('action-requested.v1.schema.json', message.envelope), []);
+  });
+
+  it('ActionRequested carries an optional context', () => {
+    const message = requested('budget.recordTransaction');
+    message.data.context = { mode: 'test', timezone: 'Europe/Zurich', currency: 'CHF', routineName: 'Lunch log', stepIndex: 2, stepCount: 4, depth: 0, areaId: null };
+    assert.deepEqual(contractErrors('action-requested.v1.schema.json', message), []);
+    message.data.context = { mode: 'dry-run' };
+    assert.notDeepEqual(contractErrors('action-requested.v1.schema.json', message), []);
+  });
+
+  it('ActionFailed accepts the error codes and the v1 class names, nothing else', () => {
+    const failed = (code: string) =>
+      createEnvelope({
+        type: 'ActionFailed',
+        version: 1,
+        source: 'test',
+        data: { actionId: randomUUID(), executionId: randomUUID(), actionType: 'http.request', error: { code, message: 'x' }, attempts: 1, processedBy: 'w1' },
+      });
+    for (const code of ['NOT_FOUND', 'TIMEOUT', 'INVALID_PARAMS', 'INTERNAL', 'PermanentError', 'TransientError', 'Error', 'SubRoutineFailed']) {
+      assert.deepEqual(contractErrors('action-failed.v1.schema.json', failed(code)), [], code);
+    }
+    assert.notDeepEqual(contractErrors('action-failed.v1.schema.json', failed('TypeError')), []);
+  });
+
+  it('ExecutionFailed carries the failed action\'s error code and type', () => {
+    const message = executionFailed({ ...ids, routineName: 'X', reason: 'boom', failedActionKey: 'a' }).envelope as { data: Record<string, unknown> };
+    Object.assign(message.data, { errorCode: 'NOT_FOUND', failedActionType: 'http.request' });
+    assert.deepEqual(contractErrors('execution-failed.v1.schema.json', message), []);
+  });
+});
+
 describe('routine-service reads results tolerantly', () => {
   it('ignores unknown fields in ActionCompleted', () => {
     const envelope = createEnvelope({
@@ -86,5 +182,19 @@ describe('routine-service reads results tolerantly', () => {
       processedBy: 'w1',
       duplicate: false,
     });
+  });
+});
+
+describe('registry messages (05-messaging §4.6)', () => {
+  it('DomainRegistered and DomainHeartbeat as the kit sends them validate and parse', () => {
+    for (const manifest of BUILTIN_MANIFESTS) {
+      const digest = manifestDigest(manifest);
+      const registered = createEnvelope({ type: 'DomainRegistered', version: 1, source: 'test', data: { manifest, digest, instance: 'x@1' } });
+      assert.deepEqual(contractErrors('domain-registered.v1.schema.json', registered), [], manifest.domain);
+      assert.deepEqual(parseRegistryMessage(registered), { kind: 'registered', manifest, digest, instance: 'x@1' });
+      const heartbeat = createEnvelope({ type: 'DomainHeartbeat', version: 1, source: 'test', data: { domain: manifest.domain, manifestVersion: 1, digest, instance: 'x@1' } });
+      assert.deepEqual(contractErrors('domain-heartbeat.v1.schema.json', heartbeat), []);
+      assert.equal(parseRegistryMessage(heartbeat).kind, 'heartbeat');
+    }
   });
 });

@@ -112,8 +112,8 @@ query, SSRF allow-list, webhook tokens). v2 adds:
 
 | Topic | Rule |
 | --- | --- |
-| **Roles** | `users.role` ∈ `user`, `admin`. Tokens carry `roles`. System endpoints (DLQ, chaos, registry) require `admin`. The demo user is admin. |
-| **Service accounts** | identity-service issues **service tokens** (client-credentials: `POST /api/v1/auth/service-token`, `aud: routine-internal`, `sub: service:<name>`, 15 min). `/internal/**` endpoints accept only service tokens from an allow-list. Secrets for service accounts come from env/Swarm secrets. |
+| **Roles** | `user` (everyone signed in) and `admin` (a Keycloak realm role). Tokens carry `roles`. System endpoints (DLQ, chaos, registry) require `admin`. The demo user is admin. |
+| **Service accounts** | Keycloak issues **service tokens** (a confidential client per service, client-credentials grant, `aud: routine-internal`, `azp: <service>`, 15 min; [identity-service.md §6](services/identity-service.md)). `/internal/**` endpoints accept only service tokens from an allow-list. Secrets for service accounts come from env/Swarm secrets. |
 | **Secrets** | Connection values are encrypted with AES-256-GCM (`CONNECTOR_MASTER_KEY`). Only workers resolve them, at execution time, per action. Values never enter routine definitions, run records, logs, outputs or Today cards. |
 | **Sensitive domains** | Budget and Health never log amounts, values or payees (log ids only). Their events carry values only where a trigger filter needs them. |
 | **AI** | Opt-in per user. Inputs above the size limit are rejected, not silently truncated. A token ledger enforces a monthly allowance. Mock provider in CI. |
