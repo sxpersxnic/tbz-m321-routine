@@ -19,7 +19,10 @@ describe('step picker', () => {
     assert.deepEqual(groups.map((group) => group.label), ['You', 'Tasks', 'Notifications', 'Connections', 'Scripting']);
     assert.deepEqual(groups[0].items.map((item) => item.label), ['Do yourself', 'Ask me'], 'human steps of every domain');
     assert.ok(!groups.find((group) => group.id === 'tasks')?.items.some((item) => item.type === 'task.await'), 'only in You');
-    assert.deepEqual(groups.at(-1)?.items.map((item) => item.type), ['routine.run', 'variable.set', 'condition.if', 'math.calculate', 'flow.wait']);
+    assert.deepEqual(groups.at(-1)?.items.map((item) => item.type), [
+      'routine.run', 'variable.set', 'condition.if', 'math.calculate', 'flow.wait',
+      'text.format', 'text.replace', 'text.split', 'list.get', 'list.count', 'list.filter', 'list.sort', 'json.parse',
+    ]);
   });
 
   it('suggests steps the previous step can fill – its own domain first, at most three', () => {

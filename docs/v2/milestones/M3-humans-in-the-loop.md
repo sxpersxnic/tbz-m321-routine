@@ -66,7 +66,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
   - Web: *Ask when run?* editor section. The run button opens an input dialog when the routine
     has inputs. Pills `{{input.<name>}}`.
 
-- [ ] **M3-10 · Text and list steps**
+- [x] **M3-10 · Text and list steps**
   - Built-ins `text.format`, `text.replace`, `text.split`, `list.get`, `list.count`,
     `list.filter`, `list.sort`, `json.parse` in `control.ts` (pure, unit-tested), added to the
     `scripting` manifest.

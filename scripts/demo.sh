@@ -15,6 +15,7 @@
 #   evolution    Schema evolution with expand-and-contract, including a breaking-change demo
 #   resume       A failed run is fixed and resumed from its failed step ("Retry from here")
 #   registry     Domain platform: five domains registered, a task event on the broker, an incompatible manifest refused
+#   human-step   Humans in the loop: a checklist run finished by ticking tasks and answering, and the expiry path
 #   all          All scenarios in sequence (acceptance test)
 #   trace <id>   Logs of all services for a correlation or execution ID
 #   hook <routine> [json]  Call a webhook routine by ID or name, then follow the run (manual testing)
@@ -557,6 +558,67 @@ scenario_registry() {
   ok "the accepted version stays current – shown under Infrastructure → Registry"
 }
 
+# a checklist (3 "Do yourself") then "Ask me" – with an optional timeout on every human step
+checklist_routine() { # checklist_routine NAME [TIMEOUT_JSON]
+  local timeout=${2:-null}
+  jq -nc --arg name "$1" --argjson timeout "$timeout" '
+    def human(step): if $timeout == null then step else step + {timeout: $timeout} end;
+    {name: $name, trigger: {type: "manual"}, actions: [
+      human({key: "stretch", type: "task.await", step: 1, params: {title: "Stretch for 5 minutes"}}),
+      human({key: "water", type: "task.await", step: 1, params: {title: "Drink a glass of water"}}),
+      human({key: "plan", type: "task.await", step: 1, params: {title: "Pick the one thing for today"}}),
+      human({key: "mood", type: "notification.ask", step: 2, params: {question: "How did you sleep?", options: ["Well", "Badly"]}})
+    ]}'
+}
+
+step_tasks() { api GET /api/v1/tasks | jq -c --arg eid "$1" '[.items[] | select(.kind == "step" and .sourceExecutionId == $eid)]'; }
+question_of() { api GET '/api/v1/notifications?kind=question' | jq -c --arg eid "$1" '[.items[] | select(.executionId == $eid)][0] // empty'; }
+
+scenario_human_step() {
+  title "Humans in the loop (M3)"
+  login
+  local rid eid tasks question cancelled state skipped
+  step "a) A checklist run waits for you – its items appear as tasks"
+  rid=$(create_routine "$(checklist_routine "Morning checklist (demo)")")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 WAITING_FOR_YOU
+  for _ in $(seq 1 20); do tasks=$(step_tasks "$eid"); [[ $(jq length <<<"$tasks") == 3 ]] && break; sleep 0.5; done
+  jq -r '.[] | "    ☐ \(.title)  (\(.sourceRoutineName))"' <<<"$tasks"
+  [[ $(jq length <<<"$tasks") == 3 ]] || fail "expected 3 step tasks, got $(jq length <<<"$tasks")"
+  ok "three tasks on the Tasks page, grouped under \"Waiting for you\""
+
+  step "b) Ticking them moves the run on – then it asks a question"
+  for task in $(jq -r '.[].id' <<<"$tasks"); do api PATCH "/api/v1/tasks/$task" '{"status":"DONE"}' >/dev/null; done
+  for _ in $(seq 1 30); do question=$(question_of "$eid"); [[ -n $question ]] && break; sleep 0.5; done
+  [[ -n $question ]] || fail "the question was not asked"
+  info "asked: $(jq -r .title <<<"$question")  [$(jq -r '[.options[].label] | join("] [")' <<<"$question")]"
+  [[ $(execution "$eid" | jq -r .status) == WAITING_FOR_YOU ]] || fail "the run should wait for the answer"
+  ok "the run waits for the answer"
+
+  step "c) The answer completes the run, once"
+  api POST "/api/v1/notifications/$(jq -r .id <<<"$question")/answer" '{"value":"Well"}' >/dev/null
+  [[ $(api POST "/api/v1/notifications/$(jq -r .id <<<"$question")/answer" '{"value":"Badly"}' | jq -r .status) == 409 ]] || fail "a second answer must be refused"
+  wait_for "$eid" 30 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "run did not complete"
+  info "answer: $(execution "$eid" | jq -r '.actions[] | select(.key == "mood") | .output.label')"
+  ok "completed – a second answer was refused (409)"
+
+  step "d) Nobody gets to it: every human step skips after 3 s"
+  rid=$(create_routine "$(checklist_routine "Morning checklist (demo, expires)" '{"after":"PT3S","then":"skip"}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 WAITING_FOR_YOU
+  wait_for "$eid" 40 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "the expired run should complete"
+  show_actions "$eid"
+  skipped=$(execution "$eid" | jq '[.actions[] | select(.status == "SKIPPED" and .skipReason == "expired")] | length')
+  [[ $skipped == 4 ]] || fail "expected 4 expired steps, got $skipped"
+  for _ in $(seq 1 20); do cancelled=$(step_tasks "$eid" | jq '[.[] | select(.status == "CANCELLED")] | length'); [[ $cancelled == 3 ]] && break; sleep 0.5; done
+  [[ $cancelled == 3 ]] || fail "expected 3 cancelled tasks, got $cancelled"
+  for _ in $(seq 1 20); do state=$(question_of "$eid" | jq -r '.state // empty'); [[ $state == expired ]] && break; sleep 0.5; done
+  [[ $state == expired ]] || fail "the question should have expired, is: $state"
+  ok "completed with skipped steps; its tasks are cancelled and the question expired"
+}
+
 scenario_trace() {
   local id=${1:?pass a correlation or execution ID}
   title "Logs for $id (all services)"
@@ -588,11 +650,12 @@ case "${1:-}" in
   evolution) scenario_evolution ;;
   resume) scenario_resume ;;
   registry) scenario_registry ;;
+  human-step) scenario_human_step ;;
   trace) scenario_trace "${2:-}" ;;
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
+    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_human_step; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

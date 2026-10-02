@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { calculate, conditionMet, ControlError, evaluateCondition, evaluateControlAction, setVariable } from '../src/domain/control.ts';
+import { calculate, conditionMet, ControlError, evaluateCondition, setVariable } from '../src/domain/control.ts';
+import { evaluateControlAction } from '../src/domain/scripting.ts';
 import { validateRoutine, type RoutineInput } from '../src/domain/definition.ts';
 
 const result = (left: unknown, operator: string, right?: unknown) => evaluateCondition({ left, operator, right }).result;

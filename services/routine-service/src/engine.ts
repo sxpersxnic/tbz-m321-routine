@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, enqueue, withTransaction, type ErrorCode, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
-import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
+import { conditionMet, ControlError } from './domain/control.ts';
+import { CONTROL_ACTION_TYPES, evaluateControlAction } from './domain/scripting.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES, type InFlightStatus } from './domain/progress.ts';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './domain/catalog.ts';
 import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
