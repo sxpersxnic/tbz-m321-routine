@@ -23,6 +23,13 @@ export interface ActionDefinition {
   runIf?: RunIf;
   /** A single `{{…}}` reference to a list: the step runs once per item, readable as {{item}} / {{index}}. */
   forEach?: string;
+  /** "If you don't get to it" – human steps only: after `after` (ISO 8601 duration) the step is skipped or fails. */
+  timeout?: StepTimeout;
+}
+
+export interface StepTimeout {
+  after: string;
+  then: 'skip' | 'fail';
 }
 
 /** Colours the client knows; icons are free-form names from the client's icon set. */
@@ -39,7 +46,7 @@ export interface RoutineInput extends Appearance {
   name: string;
   description?: string;
   trigger: { type: 'manual' } | { type: 'schedule'; cron: string; timezone?: string } | { type: 'webhook' };
-  actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string }>;
+  actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string; timeout?: StepTimeout }>;
   /** Tell the owner after this many failures in a row; null = never; omitted = unchanged (2 for a new routine). */
   alertAfterFailures?: number | null;
 }
@@ -156,6 +163,8 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
       params: action.params ?? {},
       ...(action.runIf ? { runIf: action.runIf } : {}),
       ...(action.forEach ? { forEach: action.forEach.trim() } : {}),
+      // biome-ignore lint/suspicious/noThenProperty: the field is named "then" in the routine definition (06-engine §2)
+      ...(action.timeout ? { timeout: { after: action.timeout.after, then: action.timeout.then } } : {}),
     };
   });
   // stable sort keeps the author's order within a step
@@ -183,6 +192,11 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
     }
     issues.push(...paramIssues(action, capability));
     issues.push(...scriptingIssues(action));
+    if (action.timeout) {
+      if (capability.kind !== 'human') issues.push(`action "${action.key}": only steps you do yourself can time out`);
+      else if (!DURATION.test(action.timeout.after)) issues.push(`action "${action.key}": the time to wait must be a duration like PT2H`);
+      else if (action.timeout.then !== 'skip' && action.timeout.then !== 'fail') issues.push(`action "${action.key}": after the wait the step is skipped or fails`);
+    }
     if (action.runIf) {
       const conditionStep = stepByKey.get(action.runIf.action);
       if (conditionStep === undefined) issues.push(`action "${action.key}": runs only if unknown action "${action.runIf.action}"`);

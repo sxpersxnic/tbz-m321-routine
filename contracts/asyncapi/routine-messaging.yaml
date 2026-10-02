@@ -198,7 +198,7 @@ components:
     ActionCancelRequested:
       name: ActionCancelRequested
       title: ActionCancelRequested v1
-      summary: 'A waiting human step expired or its run was cancelled: { actionId, executionId, actionType, ownerId, reason: expired | runCancelled } – the domain closes the item and sends no result'
+      summary: 'A waiting human step expired or its run was cancelled: { actionId, executionId, actionType, ownerId, reason: expired | skipped | runCancelled } – the domain closes the item and sends no result'
       payload: { $ref: '../schemas/action-cancel-requested.v1.schema.json' }
     ActionRetryScheduled:
       name: ActionRetryScheduled

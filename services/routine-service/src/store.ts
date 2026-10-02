@@ -1,7 +1,8 @@
 import { withTransaction, type ErrorCode, type Pool, type Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, TriggerDefinition } from './domain/definition.ts';
+import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, StepTimeout, TriggerDefinition } from './domain/definition.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
+import type { AwaitingItem } from './messages.ts';
 
 // ---------------------------------------------------------------- rows
 
@@ -51,7 +52,7 @@ export interface ExecutionRow {
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
-  /** Code of the failed action (lists only: joined in by listExecutions). */
+  /** Why the run ended without a failed step (CANCELLED); lists fall back to the failed action's code. */
   error_code?: ErrorCode | null;
 }
 
@@ -81,6 +82,11 @@ export interface ExecutionActionRow {
   parent_id: string | null;
   loop_item: unknown;
   loop_index: number | null;
+  /** Human steps: the item a person has to deal with, since when, and until when. */
+  awaiting: AwaitingItem | null;
+  accepted_at: Date | null;
+  deadline_at: Date | null;
+  timeout: StepTimeout | null;
 }
 
 export interface ExecutionLogRow {
@@ -343,8 +349,8 @@ export async function insertExecutionActions(
 ): Promise<void> {
   for (const [position, action] of actions.entries()) {
     await db.query(
-      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status, run_if, for_each)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9)`,
+      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status, run_if, for_each, timeout)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10)`,
       [
         action.id,
         executionId,
@@ -355,6 +361,7 @@ export async function insertExecutionActions(
         JSON.stringify(action.params),
         action.runIf ? JSON.stringify(action.runIf) : null,
         action.forEach ?? null,
+        action.timeout ? JSON.stringify(action.timeout) : null,
       ],
     );
   }
@@ -369,8 +376,8 @@ export async function insertLoopActions(db: Queryable, parent: ExecutionActionRo
   const rows: ExecutionActionRow[] = [];
   for (const [index, item] of items.entries()) {
     const { rows: inserted } = await db.query<ExecutionActionRow>(
-      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status, parent_id, loop_item, loop_index)
-       SELECT $1, execution_id, $2, type, step, (position + 1) * 1000 + $3, params, 'PENDING', id, $4, $3
+      `INSERT INTO execution_actions (id, execution_id, key, type, step, position, params, status, parent_id, loop_item, loop_index, timeout)
+       SELECT $1, execution_id, $2, type, step, (position + 1) * 1000 + $3, params, 'PENDING', id, $4, $3, timeout
          FROM execution_actions WHERE id = $5
        RETURNING *`,
       [randomUUID(), `${parent.key}[${index}]`, index, JSON.stringify(item ?? null), parent.id],
@@ -384,14 +391,44 @@ export async function markActionSkipped(db: Queryable, id: string, reason: SkipR
   await db.query(`UPDATE execution_actions SET status = 'SKIPPED', skip_reason = $2, finished_at = now(), updated_at = now() WHERE id = $1`, [id, reason]);
 }
 
+/**
+ * A human step's domain created its item (06-engine §5): the step waits for the person. With a
+ * timeout it expires `timeout.after` from now (Postgres reads the ISO 8601 duration).
+ */
+export async function markActionAwaiting(db: Queryable, id: string, awaiting: AwaitingItem, processedBy: string): Promise<{ accepted_at: Date; deadline_at: Date | null }> {
+  const { rows } = await db.query<{ accepted_at: Date; deadline_at: Date | null }>(
+    `UPDATE execution_actions
+        SET status = 'AWAITING_USER', awaiting = $2, processed_by = $3, accepted_at = now(),
+            deadline_at = CASE WHEN timeout IS NULL THEN NULL ELSE now() + (timeout->>'after')::interval END, updated_at = now()
+      WHERE id = $1
+      RETURNING accepted_at, deadline_at`,
+    [id, JSON.stringify(awaiting), processedBy],
+  );
+  return rows[0];
+}
+
+/** Human steps whose deadline passed, oldest first – the housekeeping loop expires them. */
+export async function dueAwaitingActions(db: Queryable, limit: number): Promise<Array<{ id: string; execution_id: string }>> {
+  const { rows } = await db.query<{ id: string; execution_id: string }>(
+    `SELECT id, execution_id FROM execution_actions
+      WHERE status = 'AWAITING_USER' AND deadline_at IS NOT NULL AND deadline_at < now()
+      ORDER BY deadline_at LIMIT $1`,
+    [limit],
+  );
+  return rows;
+}
+
 export async function findExecutionByIdempotencyKey(db: Queryable, routineId: string, key: string): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE routine_id = $1 AND idempotency_key = $2', [routineId, key]);
   return rows[0] ?? null;
 }
 
-/** Serialises all state changes of one execution (parallel results, several replicas). */
-export async function lockExecution(db: Queryable, id: string): Promise<ExecutionRow | null> {
-  const { rows } = await db.query<ExecutionRow>('SELECT * FROM executions WHERE id = $1 FOR UPDATE', [id]);
+/**
+ * Serialises all state changes of one execution (parallel results, several replicas). `skipLocked`:
+ * null instead of waiting when another transaction holds it – for background loops that retry anyway.
+ */
+export async function lockExecution(db: Queryable, id: string, skipLocked = false): Promise<ExecutionRow | null> {
+  const { rows } = await db.query<ExecutionRow>(`SELECT * FROM executions WHERE id = $1 FOR UPDATE ${skipLocked ? 'SKIP LOCKED' : ''}`, [id]);
   return rows[0] ?? null;
 }
 
@@ -407,9 +444,9 @@ export async function listExecutions(
 ): Promise<ExecutionRow[]> {
   const { rows } = await db.query<ExecutionRow>(
     `SELECT e.*,
-            (SELECT a.error_code FROM execution_actions a
+            COALESCE(e.error_code, (SELECT a.error_code FROM execution_actions a
               WHERE a.execution_id = e.id AND a.status = 'FAILED'
-              ORDER BY a.finished_at DESC NULLS LAST LIMIT 1) AS error_code
+              ORDER BY a.finished_at DESC NULLS LAST LIMIT 1)) AS error_code
        FROM executions e
       WHERE e.owner_id = $1 AND e.kind = 'live'
         AND ($2::uuid IS NULL OR e.routine_id = $2)
@@ -446,18 +483,19 @@ export async function updateExecutionStatus(
   db: Queryable,
   id: string,
   status: ExecutionStatus,
-  fields: { error?: string | null; currentStep?: number } = {},
+  fields: { error?: string | null; currentStep?: number; errorCode?: ErrorCode } = {},
 ): Promise<void> {
   await db.query(
     `UPDATE executions
         SET status = $2,
             error = COALESCE($3, error),
             current_step = COALESCE($4, current_step),
+            error_code = COALESCE($5, error_code),
             started_at = CASE WHEN $2 = 'RUNNING' AND started_at IS NULL THEN now() ELSE started_at END,
             finished_at = CASE WHEN $2 IN ('COMPLETED', 'FAILED') THEN now() ELSE finished_at END,
             updated_at = now()
       WHERE id = $1`,
-    [id, status, fields.error ?? null, fields.currentStep ?? null],
+    [id, status, fields.error ?? null, fields.currentStep ?? null, fields.errorCode ?? null],
   );
 }
 
@@ -549,6 +587,7 @@ export interface CurrentStep {
   params: Record<string, unknown>;
   runIf: RunIf | null;
   forEach: string | null;
+  timeout: StepTimeout | null;
 }
 
 /**
@@ -561,7 +600,8 @@ export async function resetForResume(db: Queryable, executionId: string, current
   const { rows } = await db.query<ExecutionActionRow>(
     `UPDATE execution_actions
         SET status = 'PENDING', error = NULL, error_code = NULL, skip_reason = NULL, output = NULL,
-            resolved_params = NULL, dispatched_at = NULL, finished_at = NULL, updated_at = now()
+            resolved_params = NULL, dispatched_at = NULL, finished_at = NULL,
+            awaiting = NULL, accepted_at = NULL, deadline_at = NULL, updated_at = now()
       WHERE execution_id = $1 AND (status = 'FAILED' OR (status = 'SKIPPED' AND skip_reason = 'failure'))
       RETURNING *`,
     [executionId],
@@ -574,13 +614,14 @@ export async function resetForResume(db: Queryable, executionId: string, current
     // a loop child keeps its item; only a top-level step takes over its condition and loop
     const runIf = parent ? row.run_if : step.runIf;
     const forEach = parent ? row.for_each : step.forEach;
-    await db.query('UPDATE execution_actions SET params = $2, run_if = $3, for_each = $4 WHERE id = $1', [
+    await db.query('UPDATE execution_actions SET params = $2, run_if = $3, for_each = $4, timeout = $5 WHERE id = $1', [
       row.id,
       JSON.stringify(step.params),
       runIf ? JSON.stringify(runIf) : null,
       forEach,
+      step.timeout ? JSON.stringify(step.timeout) : null,
     ]);
-    Object.assign(row, { params: step.params, run_if: runIf, for_each: forEach });
+    Object.assign(row, { params: step.params, run_if: runIf, for_each: forEach, timeout: step.timeout });
   }
   return rows;
 }
@@ -588,9 +629,24 @@ export async function resetForResume(db: Queryable, executionId: string, current
 /** FAILED → RUNNING for a resume: error and end cleared, one more resume counted. */
 export async function markExecutionResumed(db: Queryable, id: string): Promise<void> {
   await db.query(
-    `UPDATE executions SET status = 'RUNNING', error = NULL, finished_at = NULL, resume_count = resume_count + 1, updated_at = now() WHERE id = $1`,
+    `UPDATE executions SET status = 'RUNNING', error = NULL, error_code = NULL, finished_at = NULL, resume_count = resume_count + 1, updated_at = now() WHERE id = $1`,
     [id],
   );
+}
+
+/**
+ * A cancelled run (services/routine-service.md §3): everything not finished is skipped by the user.
+ * Returns the human steps that were waiting – their domains are asked to close the items.
+ */
+export async function skipUnfinishedActions(db: Queryable, executionId: string): Promise<ExecutionActionRow[]> {
+  const { rows } = await db.query<ExecutionActionRow>(
+    `UPDATE execution_actions a SET status = 'SKIPPED', skip_reason = 'user', finished_at = now(), updated_at = now()
+       FROM execution_actions prev
+      WHERE a.id = prev.id AND a.execution_id = $1 AND a.status NOT IN ('COMPLETED', 'FAILED', 'SKIPPED')
+      RETURNING a.*, prev.status AS previous_status`,
+    [executionId],
+  );
+  return rows.filter((row) => (row as ExecutionActionRow & { previous_status: string }).previous_status === 'AWAITING_USER');
 }
 
 /** After a failure: everything not run yet is skipped *because of* it – resume runs these again. */
@@ -735,7 +791,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     currentStep: row.current_step,
     error: row.error,
     /** Why the run failed (error code of its failed step), null when it didn't or failed before v2. */
-    errorCode: row.status === 'FAILED' ? (failed?.error_code ?? row.error_code ?? null) : null,
+    errorCode: row.status === 'FAILED' ? (row.error_code ?? failed?.error_code ?? null) : null,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -763,6 +819,8 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
         ...(action.run_if && { runIf: action.run_if }),
         ...(action.for_each && { forEach: action.for_each }),
         ...(action.parent_id && { parentId: action.parent_id, loopIndex: action.loop_index }),
+        ...(action.timeout && { timeout: action.timeout }),
+        ...(action.awaiting && { awaiting: action.awaiting, acceptedAt: action.accepted_at, deadlineAt: action.deadline_at }),
       })),
     }),
     ...(log && {

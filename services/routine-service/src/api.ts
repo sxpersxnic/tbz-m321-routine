@@ -47,6 +47,13 @@ const actionSchema = {
       properties: { action: { type: 'string', minLength: 1 }, is: { type: 'boolean' } },
     },
     forEach: { type: 'string', minLength: 1, maxLength: 200 },
+    timeout: {
+      type: 'object',
+      required: ['after', 'then'],
+      additionalProperties: false,
+      // biome-ignore lint/suspicious/noThenProperty: the field is named "then" in the routine definition (06-engine §2)
+      properties: { after: { type: 'string', minLength: 2, maxLength: 40 }, then: { type: 'string', enum: ['skip', 'fail'] } },
+    },
   },
 } as const;
 
@@ -470,4 +477,45 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
       return executionDto(execution, actions, log);
     },
   );
+
+  // a waiting human step the person won't do: the run goes on without it (06-engine §5.5)
+  app.post<{ Params: { executionId: string; actionKey: string } }>(
+    '/api/v1/executions/:executionId/actions/:actionKey/skip',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['executionId', 'actionKey'],
+          properties: { executionId: { type: 'string', format: 'uuid' }, actionKey: { type: 'string', minLength: 1, maxLength: 60 } },
+        },
+      },
+    },
+    async (request) => {
+      const user = requireUser(request);
+      const outcome = await engine.skipAwaitingAction(request.params.executionId, user.id, request.params.actionKey);
+      if (outcome === 'not_found') throw notFound('Step');
+      if (outcome === 'not_waiting') throw conflict('Only a step that waits for you can be skipped');
+      return executionDetail(request.params.executionId, user.id);
+    },
+  );
+
+  // stop a run that hasn't finished: it ends as cancelled, waiting items are closed
+  app.post<{ Params: { executionId: string } }>(
+    '/api/v1/executions/:executionId/cancel',
+    { schema: { params: executionParams } },
+    async (request) => {
+      const user = requireUser(request);
+      const outcome = await engine.cancel(request.params.executionId, user.id);
+      if (outcome === 'not_found') throw notFound('Execution');
+      if (outcome === 'finished') throw conflict('The run has finished already');
+      return executionDetail(request.params.executionId, user.id);
+    },
+  );
+
+  async function executionDetail(executionId: string, ownerId: string) {
+    const execution = await getExecution(pool, ownerId, executionId);
+    if (!execution) throw notFound('Execution');
+    const [actions, log] = await Promise.all([listExecutionActions(pool, execution.id), listLog(pool, execution.id)]);
+    return executionDto(execution, actions, log);
+  }
 }

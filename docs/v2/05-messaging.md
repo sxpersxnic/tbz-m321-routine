@@ -98,10 +98,11 @@ routine-service, when a human step expires or its run is cancelled.
 
 ```json
 { "actionId": "uuid", "executionId": "uuid", "actionType": "task.await", "ownerId": "uuid",
-  "reason": "expired" }           // expired | runCancelled
+  "reason": "expired" }           // expired | skipped | runCancelled
 ```
 
-The domain closes the item (task → `CANCELLED`, question → `EXPIRED`) and sends no result.
+`skipped`: the person skipped the step on the run page (06 §5.5). The domain closes the item
+(task → `CANCELLED`, question → `EXPIRED`) and sends no result.
 
 ### 4.2 Routine events
 

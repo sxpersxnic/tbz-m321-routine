@@ -370,7 +370,37 @@ paths:
       responses:
         '200': { description: the resumed execution (RUNNING), content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
         '404': { $ref: '#/components/responses/Problem' }
-        '409': { description: the execution is not FAILED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '409': { description: the execution is not FAILED (or was cancelled), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /api/v1/executions/{executionId}/actions/{actionKey}/skip:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: actionKey, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Skip a human step that waits for you – the run goes on without it
+      description: |
+        The step becomes SKIPPED (skipReason user), its item is closed (ActionCancelRequested with
+        reason skipped) and the run continues (docs/v2/06-engine.md §5).
+      operationId: skipStep
+      responses:
+        '200': { description: the execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the step does not wait for a person, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /api/v1/executions/{executionId}/cancel:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Cancel a run that hasn't finished
+      description: |
+        Every unfinished step becomes SKIPPED (skipReason user), waiting human items are closed
+        (ActionCancelRequested, reason runCancelled), and the run ends FAILED with errorCode CANCELLED.
+        No ExecutionFailed is published and the routine's health is unchanged. A cancelled run can't be resumed.
+      operationId: cancelExecution
+      responses:
+        '200': { description: the cancelled execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the run has finished already, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
 
 components:
   securitySchemes:
@@ -476,6 +506,14 @@ components:
           type: string
           maxLength: 200
           description: 'One {{…}} reference to a list. The action runs once per item (in parallel, at most 50), each run reads {{item}} and {{index}}. Later steps read {{actions.<key>.items}} and {{actions.<key>.count}}.'
+        timeout:
+          type: object
+          description: '"If you don''t get to it" – only on steps you do yourself (capability kind human): after `after` the step is skipped or fails (AWAIT_EXPIRED).'
+          required: [after, then]
+          additionalProperties: false
+          properties:
+            after: { type: string, description: 'ISO 8601 duration, e.g. PT2H' }
+            then: { enum: [skip, fail] }
 
     RoutineInput:
       type: object
@@ -616,6 +654,10 @@ components:
                   forEach: { type: string, description: 'as defined in the routine; the action is then expanded into child actions' }
                   parentId: { type: string, format: uuid, description: 'set on the actions a forEach step was expanded into' }
                   loopIndex: { type: integer, description: 'position of the item this child action works on' }
+                  timeout: { type: object, description: 'as defined in the routine (human steps)' }
+                  awaiting: { type: object, description: 'a human step''s item: { kind: task | question | checkIn, refId, title }' }
+                  acceptedAt: { type: [string, 'null'], format: date-time, description: 'since when the step waits for a person' }
+                  deadlineAt: { type: [string, 'null'], format: date-time, description: 'when it expires (with a timeout)' }
                   dispatchedAt: { type: [string, 'null'], format: date-time }
                   finishedAt: { type: [string, 'null'], format: date-time }
             log:

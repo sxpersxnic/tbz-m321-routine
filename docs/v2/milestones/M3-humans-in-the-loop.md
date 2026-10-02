@@ -23,7 +23,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
     `inFlightStatus` rules of [06 §1](../06-engine.md). Unit tests for every row.
   - `web/src/types.ts` + status icons/labels (*Waiting for you*, *Waiting until …*).
 
-- [ ] **M3-03 · Engine: awaiting results, expiry, skip, cancel**
+- [x] **M3-03 · Engine: awaiting results, expiry, skip, cancel**
   - Migration: `awaiting`, `accepted_at`, `deadline_at`, `timeout` + index. `parseActionResult`
     kind `awaiting`. Housekeeping expiry ([06 §5](../06-engine.md)). Endpoints: skip a human step,
     cancel a run. `ExecutionWaitingForYou` on entering the status. Definition field `timeout`

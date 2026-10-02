@@ -271,6 +271,9 @@ export interface AwaitingItem {
   dueAt?: string | null;
 }
 
+/** Why a human step's item is closed: it expired, the person skipped it on the run, or the run was cancelled. */
+export type CancelReason = 'expired' | 'skipped' | 'runCancelled';
+
 /**
  * A waiting human step is not needed any more (05-messaging §4.1): it expired, or its run was
  * cancelled. Routed like the step's ActionRequested, so the domain that holds the item gets it.
@@ -282,7 +285,7 @@ export function actionCancelRequested(input: {
   ownerId: string;
   actionKey: string;
   actionType: string;
-  reason: 'expired' | 'runCancelled';
+  reason: CancelReason;
   correlationId: string;
 }): OutgoingMessage {
   return {
@@ -339,7 +342,22 @@ export function executionWaitingForYou(input: {
 export type ActionResult =
   | { kind: 'completed'; actionId: string; executionId: string; output: Record<string, unknown>; processedBy: string; duplicate: boolean }
   | { kind: 'failed'; actionId: string; executionId: string; error: string; code: ErrorCode; attempts: number; processedBy: string }
-  | { kind: 'retry'; actionId: string; executionId: string; attempt: number; nextAttemptInMs: number; error: string; processedBy: string };
+  | { kind: 'retry'; actionId: string; executionId: string; attempt: number; nextAttemptInMs: number; error: string; processedBy: string }
+  | { kind: 'awaiting'; actionId: string; executionId: string; awaiting: AwaitingItem; processedBy: string };
+
+const AWAITING_KINDS = new Set(['task', 'question', 'checkIn']);
+
+/** ActionAwaitingUser.awaiting – a kind this service doesn't know is still something a person does. */
+function awaitingItem(value: unknown): AwaitingItem {
+  const item = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const kind = typeof item.kind === 'string' && AWAITING_KINDS.has(item.kind) ? (item.kind as AwaitingItem['kind']) : 'task';
+  return {
+    kind,
+    refId: typeof item.refId === 'string' ? item.refId : '',
+    title: typeof item.title === 'string' && item.title !== '' ? item.title : 'A step for you',
+    ...(typeof item.dueAt === 'string' && { dueAt: item.dueAt }),
+  };
+}
 
 function requireString(data: Record<string, unknown>, field: string): string {
   const value = data[field];
@@ -388,6 +406,8 @@ export function parseActionResult(envelope: Envelope): ActionResult {
         attempt: Number(data.attempt ?? 1),
         nextAttemptInMs: Number(data.nextAttemptInMs ?? 0),
       };
+    case 'ActionAwaitingUser':
+      return { kind: 'awaiting', actionId, executionId, processedBy, awaiting: awaitingItem(data.awaiting) };
     default:
       throw new PermanentError(`unsupported message type ${envelope.type}`);
   }

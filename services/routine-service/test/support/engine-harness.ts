@@ -10,13 +10,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { createHttpServer, createPool, runKitMigrations, runMigrations, withTransaction, type ErrorCode, type Pool, type Role } from '@routine/service-kit';
+import { createHttpServer, createPool, manifestDigest, runKitMigrations, runMigrations, withTransaction, type DomainManifest, type ErrorCode, type Pool, type Role } from '@routine/service-kit';
 import pg from 'pg';
 import pino from 'pino';
 import { registerRoutes } from '../../src/api.ts';
 import { CatalogStore } from '../../src/catalog-store.ts';
 import { validateRoutine, type RoutineInput } from '../../src/domain/definition.ts';
 import { ExecutionEngine, type TriggerRequest } from '../../src/engine.ts';
+import { applyRegistration } from '../../src/registry.ts';
+import type { AwaitingItem } from '../../src/messages.ts';
 import { getExecution, insertRoutine, listExecutionActions, listLog, setRoutineActive, type ExecutionActionRow, type RoutineRow } from '../../src/store.ts';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
@@ -57,7 +59,7 @@ export async function engineHarness() {
 
     /** Creates an active routine from a (v1-style) input. */
     async routine(input: Partial<RoutineInput> & Pick<RoutineInput, 'actions'>): Promise<RoutineRow> {
-      const definition = validateRoutine({ name: 'Test', trigger: { type: 'manual' }, ...input });
+      const definition = validateRoutine({ name: 'Test', trigger: { type: 'manual' }, ...input }, await catalogStore.get());
       const routine = await insertRoutine(pool, randomUUID(), ownerId, definition);
       return setRoutineActive(pool, routine.id, true, null, ownerId);
     },
@@ -95,6 +97,17 @@ export async function engineHarness() {
       );
       return rows.map((row) => row.payload);
     },
+
+    /** Registers a (fixture) domain, as its DomainRegistered would; the catalog sees it at once. */
+    async register(manifest: DomainManifest): Promise<void> {
+      const outcome = await applyRegistration(pool, { manifest, digest: manifestDigest(manifest), instance: 'test' });
+      if (outcome.kind === 'rejected') throw new Error(`fixture manifest rejected: ${outcome.reason}`);
+      catalogStore.invalidate();
+    },
+
+    /** The domain created a human step's item (ActionAwaitingUser). */
+    awaiting: (executionId: string, actionId: string, awaiting: AwaitingItem) =>
+      engine.applyResult({ kind: 'awaiting', actionId, executionId, awaiting, processedBy: 'test-domain' }),
 
     complete: (executionId: string, actionId: string, output: Record<string, unknown> = {}) =>
       engine.applyResult({ kind: 'completed', actionId, executionId, output, processedBy: 'test-worker', duplicate: false }),

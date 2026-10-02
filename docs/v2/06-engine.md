@@ -165,14 +165,16 @@ secret.
    status → `AWAITING_USER`, store `awaiting` (jsonb) and `accepted_at`; if the definition has
    `timeout`, set `deadline_at = accepted_at + after`. Log: *"Waiting for you: {title}"*.
 2. `#advance` → `wait` → `inFlightStatus` → `WAITING_FOR_YOU`. When the execution *enters*
-   `WAITING_FOR_YOU`, enqueue `ExecutionWaitingForYou` and upsert the run's Today card (§11).
+   `WAITING_FOR_YOU`, enqueue `ExecutionWaitingForYou` and (from M5, with today-service) upsert the run's Today card (§11).
 3. Completion arrives as a normal `ActionCompleted` → v1 path.
 4. **Expiry:** the housekeeping loop (every 2 s, replica-safe with `FOR UPDATE SKIP LOCKED`)
    selects `AWAITING_USER` actions with `deadline_at < now()`. For each: lock the execution,
    mark `SKIPPED` (`skip_reason = 'expired'`) or `FAILED` (`AWAIT_EXPIRED`), enqueue
    `ActionCancelRequested { reason: 'expired' }`, then `#advance`.
 5. **Manual skip** (`POST /api/v1/executions/:id/actions/:key/skip`) does the same with
-   `skip_reason = 'user'`.
+   `skip_reason = 'user'` and `ActionCancelRequested { reason: 'skipped' }`.
+6. A person completing the item after it expired or was skipped: the action stays `SKIPPED`,
+   the log notes `ACTION_LATE` (*Skipped (done too late)*).
 
 ## 6. Resume from the failed step
 
@@ -310,6 +312,7 @@ ALTER TABLE executions ADD COLUMN depth integer NOT NULL DEFAULT 0;         -- e
 ALTER TABLE executions ADD COLUMN resume_count integer NOT NULL DEFAULT 0;
 ALTER TABLE executions ADD COLUMN inputs jsonb;
 ALTER TABLE executions ADD COLUMN trigger_event jsonb;                      -- event trigger data
+ALTER TABLE executions ADD COLUMN error_code text;                         -- CANCELLED: ended by the user
 
 ALTER TABLE execution_actions ADD COLUMN error_code text;
 ALTER TABLE execution_actions ADD COLUMN skip_reason text;                 -- condition | failure | expired | user | test

@@ -6,14 +6,17 @@ import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './domain/
 import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import {
+  actionCancelRequested,
   actionRequested,
   executionCompleted,
   executionFailed,
   executionResumed,
+  executionWaitingForYou,
   routineUnhealthy,
   routineTriggered,
   subRoutineResult,
   type ActionResult,
+  type CancelReason,
   type CompletionEventFormat,
 } from './messages.ts';
 import {
@@ -25,10 +28,12 @@ import {
   listExecutionActions,
   lockExecution,
   copySampleActions,
+  dueAwaitingActions,
   insertExecution,
   markExecutionResumed,
   recordRunOutcome,
   resetForResume,
+  markActionAwaiting,
   markActionCompleted,
   markActionDispatched,
   markActionFailed,
@@ -36,6 +41,7 @@ import {
   markActionSkipped,
   markStaleExecutionsWaiting,
   skipPendingActions,
+  skipUnfinishedActions,
   updateExecutionStatus,
   type ExecutionActionRow,
   type ExecutionRow,
@@ -220,7 +226,15 @@ export class ExecutionEngine {
         return;
       }
       if (TERMINAL_ACTION_STATUSES.has(action.status)) {
+        // a person who acts in the moment their step expired or was skipped: the first transition won (05 §5 rule 4)
+        if (result.kind === 'completed' && action.status === 'SKIPPED' && action.awaiting && !result.duplicate) {
+          await appendLog(client, execution.id, 'ACTION_LATE', 'Done too late – the step was skipped already', action.key);
+        }
         this.#logger.info({ actionKey: action.key, status: action.status, resultKind: result.kind }, 'duplicate result ignored (action already finished)');
+        return;
+      }
+      if (result.kind === 'awaiting' && action.status === 'AWAITING_USER') {
+        this.#logger.info({ actionKey: action.key }, 'duplicate awaiting result ignored (step waits already)');
         return;
       }
 
@@ -249,6 +263,13 @@ export class ExecutionEngine {
           Object.assign(action, { status: 'RETRYING' });
           this.#logger.info({ actionKey: action.key, attempt: result.attempt }, 'action retry scheduled');
           break;
+        case 'awaiting': {
+          const { accepted_at, deadline_at } = await markActionAwaiting(client, action.id, result.awaiting, result.processedBy);
+          await appendLog(client, execution.id, 'ACTION_AWAITING', `Waiting for you: ${result.awaiting.title}`, action.key);
+          Object.assign(action, { status: 'AWAITING_USER', awaiting: result.awaiting, accepted_at, deadline_at, processed_by: result.processedBy });
+          this.#logger.info({ actionKey: action.key, kind: result.awaiting.kind, deadlineAt: deadline_at }, 'action waiting for a person');
+          break;
+        }
       }
 
       // Late results of a finished execution are recorded but change nothing else.
@@ -295,11 +316,12 @@ export class ExecutionEngine {
     return withTransaction(this.#pool, async (client) => {
       const execution = await lockExecution(client, executionId);
       if (!execution || execution.owner_id !== ownerId) return 'not_found';
-      if (execution.status !== 'FAILED') return 'not_failed';
+      // a cancelled run was ended on purpose – there is no failed step to go on from
+      if (execution.status !== 'FAILED' || execution.error_code === 'CANCELLED') return 'not_failed';
 
       const routine = await getRoutine(client, ownerId, execution.routine_id);
       const current = new Map(
-        (routine?.actions ?? []).map((action) => [action.key, { type: action.type, params: action.params, runIf: action.runIf ?? null, forEach: action.forEach ?? null }]),
+        (routine?.actions ?? []).map((action) => [action.key, { type: action.type, params: action.params, runIf: action.runIf ?? null, forEach: action.forEach ?? null, timeout: action.timeout ?? null }]),
       );
       const from = (await listExecutionActions(client, execution.id)).filter((action) => action.status === 'FAILED').sort((a, b) => a.step - b.step)[0];
       await resetForResume(client, execution.id, current);
@@ -322,6 +344,95 @@ export class ExecutionEngine {
       await this.#advance(client, execution, await listExecutionActions(client, execution.id));
       return 'resumed';
     });
+  }
+
+  /**
+   * Housekeeping (06-engine §5.4): human steps whose deadline passed are skipped or fail, as their
+   * timeout says, and their items closed. Replica-safe: an execution another replica holds is left
+   * for the next round. Returns how many steps expired.
+   */
+  async expireAwaitingActions(limit = 50): Promise<number> {
+    let expired = 0;
+    for (const due of await dueAwaitingActions(this.#pool, limit)) {
+      const done = await withTransaction(this.#pool, async (client) => {
+        const execution = await lockExecution(client, due.execution_id, true);
+        if (!execution) return false;
+        const actions = await listExecutionActions(client, execution.id);
+        const action = actions.find((candidate) => candidate.id === due.id);
+        // completed, skipped or cancelled meanwhile – whoever committed first wins
+        if (action?.status !== 'AWAITING_USER' || !action.deadline_at || action.deadline_at.getTime() > Date.now()) return false;
+        if (action.timeout?.then === 'fail') {
+          const message = `Nobody did "${action.awaiting?.title ?? action.key}" in time`;
+          await markActionFailed(client, action.id, { error: message, code: 'AWAIT_EXPIRED' }, null);
+          await appendLog(client, execution.id, 'ACTION_FAILED', message, action.key);
+          Object.assign(action, { status: 'FAILED', error: message, error_code: 'AWAIT_EXPIRED' });
+        } else {
+          await markActionSkipped(client, action.id, 'expired');
+          await appendLog(client, execution.id, 'ACTION_SKIPPED', 'Skipped – nobody got to it in time', action.key);
+          Object.assign(action, { status: 'SKIPPED', skip_reason: 'expired' });
+        }
+        await this.#cancelItem(client, execution, action, 'expired');
+        this.#logger.info({ executionId: execution.id, actionKey: action.key, outcome: action.timeout?.then ?? 'skip' }, 'human step expired');
+        if (!TERMINAL_EXECUTION_STATUSES.has(execution.status)) await this.#advance(client, execution, actions);
+        return true;
+      });
+      if (done) expired++;
+    }
+    return expired;
+  }
+
+  /** "Skip" on a waiting human step (06-engine §5.5): the run goes on without it. */
+  async skipAwaitingAction(executionId: string, ownerId: string, actionKey: string): Promise<'skipped' | 'not_found' | 'not_waiting'> {
+    return withTransaction(this.#pool, async (client) => {
+      const execution = await lockExecution(client, executionId);
+      if (!execution || execution.owner_id !== ownerId) return 'not_found';
+      const actions = await listExecutionActions(client, execution.id);
+      const action = actions.find((candidate) => candidate.key === actionKey);
+      if (!action) return 'not_found';
+      if (action.status !== 'AWAITING_USER') return 'not_waiting';
+      await markActionSkipped(client, action.id, 'user');
+      await appendLog(client, execution.id, 'ACTION_SKIPPED', 'Skipped by you', action.key);
+      Object.assign(action, { status: 'SKIPPED', skip_reason: 'user' });
+      await this.#cancelItem(client, execution, action, 'skipped');
+      if (!TERMINAL_EXECUTION_STATUSES.has(execution.status)) await this.#advance(client, execution, actions);
+      return 'skipped';
+    });
+  }
+
+  /**
+   * Cancels a run that hasn't finished (services/routine-service.md §3): everything not finished is
+   * skipped, waiting items are closed, and the run ends FAILED with CANCELLED – no ExecutionFailed
+   * and no health count, it was the owner's choice. A calling routine.run step fails.
+   */
+  async cancel(executionId: string, ownerId: string): Promise<'cancelled' | 'not_found' | 'finished'> {
+    return withTransaction(this.#pool, async (client) => {
+      const execution = await lockExecution(client, executionId);
+      if (!execution || execution.owner_id !== ownerId) return 'not_found';
+      if (TERMINAL_EXECUTION_STATUSES.has(execution.status)) return 'finished';
+      for (const action of await skipUnfinishedActions(client, execution.id)) await this.#cancelItem(client, execution, action, 'runCancelled');
+      await updateExecutionStatus(client, execution.id, 'FAILED', { error: 'Cancelled', errorCode: 'CANCELLED' });
+      await appendLog(client, execution.id, 'CANCELLED', 'Cancelled by you');
+      await this.#reportToCaller(client, execution, { ok: false, error: `Routine "${execution.routine_name}" was cancelled` });
+      this.#logger.info({ executionId }, 'execution cancelled');
+      return 'cancelled';
+    });
+  }
+
+  /** Asks the domain holding a human step's item to close it (05-messaging §4.1) – through the outbox. */
+  async #cancelItem(client: PoolClient, execution: ExecutionRow, action: ExecutionActionRow, reason: CancelReason): Promise<void> {
+    await enqueue(
+      client,
+      actionCancelRequested({
+        actionId: action.id,
+        executionId: execution.id,
+        routineId: execution.routine_id,
+        ownerId: execution.owner_id,
+        actionKey: action.key,
+        actionType: action.type,
+        reason,
+        correlationId: execution.correlation_id,
+      }),
+    );
   }
 
   /** Periodic check: executions waiting for an unresponsive worker become WAITING. */
@@ -474,6 +585,7 @@ export class ExecutionEngine {
             Object.assign(action, { status: 'DISPATCHED', dispatched_at: new Date() });
           }
           await updateExecutionStatus(client, execution.id, 'RUNNING', { currentStep: decision.step });
+          execution.status = 'RUNNING';
           if (toSend.length === 0) continue; // handled entirely here (skipped, scripting, expanded loop) → on to what is next
           this.#logger.info({ executionId: execution.id, step: decision.step, actions: toSend.map(({ action }) => action.key) }, 'step dispatched');
           return;
@@ -560,6 +672,22 @@ export class ExecutionEngine {
           if (status !== execution.status) {
             await updateExecutionStatus(client, execution.id, status);
             await appendLog(client, execution.id, status, IN_FLIGHT_LOG[status]);
+            execution.status = status;
+            // entering "Waiting for you" is worth telling (push from M8) – staying in it is not
+            if (status === 'WAITING_FOR_YOU' && execution.kind === 'live') {
+              const awaiting = actions.filter((action) => action.status === 'AWAITING_USER' && action.awaiting);
+              await enqueue(
+                client,
+                executionWaitingForYou({
+                  executionId: execution.id,
+                  routineId: execution.routine_id,
+                  ownerId: execution.owner_id,
+                  routineName: execution.routine_name,
+                  awaiting: awaiting.map((action) => ({ actionKey: action.key, ...(action.awaiting as NonNullable<typeof action.awaiting>), dueAt: action.deadline_at?.toISOString() ?? null })),
+                  correlationId: execution.correlation_id,
+                }),
+              );
+            }
           }
           return;
         }
