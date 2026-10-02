@@ -421,7 +421,7 @@ export async function listExecutions(
   return rows;
 }
 
-const IN_FLIGHT_STATUSES: ExecutionStatus[] = ['PENDING', 'RUNNING', 'WAITING'];
+const IN_FLIGHT_STATUSES: ExecutionStatus[] = ['PENDING', 'RUNNING', 'WAITING', 'WAITING_FOR_YOU', 'DELAYED'];
 
 /** Counts per status: executions created since `since`, plus all still in flight (however old). */
 export async function executionStats(

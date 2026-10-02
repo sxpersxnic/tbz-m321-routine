@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, enqueue, withTransaction, type ErrorCode, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
 import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction } from './domain/control.ts';
-import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES } from './domain/progress.ts';
+import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES, type InFlightStatus } from './domain/progress.ts';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './domain/catalog.ts';
 import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
@@ -91,6 +91,13 @@ const MAX_LOOP_ITEMS = 50;
 /** routine.run nesting: A → B → C … at most this deep, so a routine calling itself stops. */
 const MAX_CALL_DEPTH = 5;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const IN_FLIGHT_LOG: Record<InFlightStatus, string> = {
+  WAITING: 'Waiting for an action to be retried',
+  RUNNING: 'Processing resumed',
+  WAITING_FOR_YOU: 'Waiting for you',
+  DELAYED: 'Waiting for a timer',
+};
 
 const TRIGGER_LOG: Record<ExecutionTrigger, (trigger: TriggerRequest) => string> = {
   manual: () => 'Started manually',
@@ -552,12 +559,7 @@ export class ExecutionEngine {
           );
           if (status !== execution.status) {
             await updateExecutionStatus(client, execution.id, status);
-            await appendLog(
-              client,
-              execution.id,
-              status,
-              status === 'WAITING' ? 'Waiting for an action to be retried' : 'Processing resumed',
-            );
+            await appendLog(client, execution.id, status, IN_FLIGHT_LOG[status]);
           }
           return;
         }

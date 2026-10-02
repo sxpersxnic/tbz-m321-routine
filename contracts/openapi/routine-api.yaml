@@ -419,6 +419,8 @@ components:
         PENDING: { type: integer }
         RUNNING: { type: integer }
         WAITING: { type: integer }
+        WAITING_FOR_YOU: { type: integer }
+        DELAYED: { type: integer }
         COMPLETED: { type: integer }
         FAILED: { type: integer }
 
@@ -544,10 +546,12 @@ components:
 
     ExecutionStatus:
       type: string
-      enum: [PENDING, RUNNING, WAITING, COMPLETED, FAILED]
+      enum: [PENDING, RUNNING, WAITING, WAITING_FOR_YOU, DELAYED, COMPLETED, FAILED]
       description: |
         PENDING → RUNNING → COMPLETED; RUNNING → WAITING (retry scheduled or no
-        worker responding) → RUNNING; any time → FAILED on a permanent error.
+        worker responding) → RUNNING; RUNNING → WAITING_FOR_YOU (only human steps
+        in flight) or DELAYED (only "Wait" steps in flight) → RUNNING; any time →
+        FAILED on a permanent error (docs/v2/06-engine.md §1).
 
     ErrorCode:
       description: Why an action failed (docs/v2/05-messaging.md §6, contracts/schemas/action-failed.v1.schema.json).
@@ -600,7 +604,7 @@ components:
                   key: { type: string }
                   type: { type: string }
                   step: { type: integer }
-                  status: { enum: [PENDING, DISPATCHED, RETRYING, COMPLETED, FAILED, SKIPPED] }
+                  status: { enum: [PENDING, DISPATCHED, RETRYING, AWAITING_USER, SCHEDULED, COMPLETED, FAILED, SKIPPED], description: 'AWAITING_USER = a human step waits for a person; SCHEDULED = a Wait step sleeps until wakeAt' }
                   attempts: { type: integer }
                   params: { type: object, description: resolved parameters (after dispatch) }
                   output: { type: [object, 'null'] }

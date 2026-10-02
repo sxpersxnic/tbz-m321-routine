@@ -121,6 +121,12 @@ const ICONS: Record<string, ReactNode> = {
   ),
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />,
   back: <path d="M15 5l-7 7 7 7" />,
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20a7 7 0 0 1 14 0" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="12" cy="12" r="9" />
@@ -199,6 +205,10 @@ const STATUS_LABELS: Record<string, string> = {
   PENDING: 'Starting',
   RUNNING: 'Running',
   WAITING: 'Waiting',
+  WAITING_FOR_YOU: 'Waiting for you',
+  DELAYED: 'Waiting',
+  AWAITING_USER: 'Waiting for you',
+  SCHEDULED: 'Waiting',
   COMPLETED: 'Succeeded',
   FAILED: 'Failed',
   DISPATCHED: 'In progress',
@@ -216,6 +226,7 @@ export const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 const BADGE_TONE: Record<string, string> = {
   COMPLETED: 'ok', up: 'ok', FAILED: 'err', down: 'err', rejected: 'err', stale: 'wait',
   RUNNING: 'busy', DISPATCHED: 'busy', PENDING: 'busy', WAITING: 'wait', RETRYING: 'wait',
+  WAITING_FOR_YOU: 'wait', AWAITING_USER: 'wait', DELAYED: 'wait', SCHEDULED: 'wait',
 };
 
 export function StatusBadge({ status }: { status: string }) {

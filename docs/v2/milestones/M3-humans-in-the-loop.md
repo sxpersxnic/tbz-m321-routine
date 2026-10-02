@@ -18,7 +18,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
   - Schemas + AsyncAPI + contract tests: `ActionAwaitingUser`, `ActionCancelRequested`,
     `ExecutionWaitingForYou`.
 
-- [ ] **M3-02 · Engine: new statuses (pure)**
+- [x] **M3-02 · Engine: new statuses (pure)**
   - `progress.ts`: `AWAITING_USER`, `SCHEDULED`, `WAITING_FOR_YOU`, `DELAYED`, `decideNext` and
     `inFlightStatus` rules of [06 §1](../06-engine.md). Unit tests for every row.
   - `web/src/types.ts` + status icons/labels (*Waiting for you*, *Waiting until …*).

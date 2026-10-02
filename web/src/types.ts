@@ -1,8 +1,10 @@
 // Client-side model of the API responses (see contracts/openapi). The web
 // client owns these types – it shares no code with the services.
 
-export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'COMPLETED' | 'FAILED';
-export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+/** WAITING_FOR_YOU: only human steps are in flight; DELAYED: only "Wait" steps (docs/v2/06-engine.md §1). */
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'WAITING_FOR_YOU' | 'DELAYED' | 'COMPLETED' | 'FAILED';
+/** AWAITING_USER: a human step waits for a person; SCHEDULED: a "Wait" step sleeps. */
+export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'AWAITING_USER' | 'SCHEDULED' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
 
 /** Why a step was skipped: its condition, an earlier failure, expiry, the user, or a test run. */
 export type SkipReason = 'condition' | 'failure' | 'expired' | 'user' | 'test';

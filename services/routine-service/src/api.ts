@@ -112,7 +112,7 @@ const executionParams = {
 const executionQuery = {
   type: 'object',
   properties: {
-    status: { type: 'string', enum: ['PENDING', 'RUNNING', 'WAITING', 'COMPLETED', 'FAILED'] },
+    status: { type: 'string', enum: ['PENDING', 'RUNNING', 'WAITING', 'WAITING_FOR_YOU', 'DELAYED', 'COMPLETED', 'FAILED'] },
     limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
   },
 } as const;

@@ -49,6 +49,7 @@ const FILTERS: Array<{ label: string; status?: ExecutionStatus }> = [
   { label: 'All' },
   { label: 'Running', status: 'RUNNING' },
   { label: 'Waiting', status: 'WAITING' },
+  { label: 'Waiting for you', status: 'WAITING_FOR_YOU' },
   { label: 'Succeeded', status: 'COMPLETED' },
   { label: 'Failed', status: 'FAILED' },
 ];
@@ -126,6 +127,8 @@ const HEADLINE: Record<ExecutionStatus, string> = {
   PENDING: 'Starting …',
   RUNNING: 'Running …',
   WAITING: 'Waiting to retry',
+  WAITING_FOR_YOU: 'Waiting for you',
+  DELAYED: 'Waiting',
   COMPLETED: 'Succeeded',
   FAILED: 'Failed',
 };

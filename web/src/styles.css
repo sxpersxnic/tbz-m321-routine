@@ -734,6 +734,7 @@ a.outcome-card:hover { background: var(--surface-2); }
 .stage.current .stage-dot { box-shadow: 0 0 0 4px var(--busy-soft); background: var(--busy-fill); }
 .stage.current.stage-RUNNING .stage-dot, .stage.current.stage-WAITING .stage-dot, .stage.current.stage-PENDING .stage-dot { animation: pulse 1.2s ease-in-out infinite; }
 .stage.current.stage-WAITING .stage-dot { background: var(--warn-fill); box-shadow: 0 0 0 4px var(--warn-soft); }
+.stage.current.stage-WAITING_FOR_YOU .stage-dot, .stage.current.stage-DELAYED .stage-dot { background: var(--warn-fill); box-shadow: 0 0 0 4px var(--warn-soft); }
 .stage.current.stage-COMPLETED .stage-dot { background: var(--ok-fill); box-shadow: 0 0 0 4px var(--ok-soft); }
 .stage.current.stage-FAILED .stage-dot { background: var(--err-fill); box-shadow: 0 0 0 4px var(--err-soft); }
 
