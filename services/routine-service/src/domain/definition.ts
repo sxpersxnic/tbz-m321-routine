@@ -1,6 +1,7 @@
 import type { ParamSpec } from '@routine/service-kit';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './catalog.ts';
 import { VARIABLE_NAME } from './control.ts';
+import { inputSpecIssues, type RoutineInputSpec } from './inputs.ts';
 import { waitIssue } from './wait.ts';
 import { DEFAULT_TIMEZONE, validateSchedule } from './schedule.ts';
 import { referencedActionKeys, templatePaths } from './templates.ts';
@@ -50,6 +51,8 @@ export interface RoutineInput extends Appearance {
   actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string; timeout?: StepTimeout }>;
   /** Tell the owner after this many failures in a row; null = never; omitted = unchanged (2 for a new routine). */
   alertAfterFailures?: number | null;
+  /** "Ask when run?" – manual routines only. */
+  inputs?: RoutineInputSpec[] | null;
 }
 
 export interface RoutineDefinition extends Appearance {
@@ -59,6 +62,8 @@ export interface RoutineDefinition extends Appearance {
   actions: ActionDefinition[];
   /** undefined = leave as it is (on create: 2). */
   alertAfterFailures?: number | null;
+  /** Questions asked when the routine is run by hand; absent = none. */
+  inputs?: RoutineInputSpec[];
 }
 
 export class DefinitionError extends Error {
@@ -157,6 +162,11 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
   const name = input.name.trim();
   if (name === '') issues.push('name must not be blank');
 
+  const inputs = input.inputs ?? [];
+  const questions = new Set(inputs.map((spec) => spec.name));
+  issues.push(...inputSpecIssues(inputs));
+  if (inputs.length > 0 && input.trigger.type !== 'manual') issues.push('questions are only asked when a routine is run by hand');
+
   let previousStep = 0;
   const actions: ActionDefinition[] = input.actions.map((action) => {
     const step = action.step ?? previousStep + 1;
@@ -215,6 +225,11 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
     for (const path of paths) {
       const root = path.split('.')[0];
       if (!TEMPLATE_ROOTS.has(root)) issues.push(`action "${action.key}": unknown template root in "{{${path}}}"`);
+      // with questions, {{input.<name>}} must be one of them; without, {{input}} is what a calling routine passes (v1)
+      if (root === 'input' && questions.size > 0) {
+        const name = path.split('.')[1];
+        if (name !== undefined && !questions.has(name)) issues.push(`action "${action.key}": "${name}" is not a question of this routine`);
+      }
       if (LOOP_ROOTS.has(root) && !action.forEach) issues.push(`action "${action.key}": "{{${path}}}" is only available in a step that repeats for each item`);
       if (LOOP_ROOTS.has(root) && action.forEach && templatePaths(action.forEach).includes(path)) {
         issues.push(`action "${action.key}": the list to repeat over cannot be the item itself`);
@@ -263,5 +278,6 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
     icon: input.icon,
     color: input.color,
     ...(alert !== undefined && { alertAfterFailures: alert }),
+    ...(inputs.length > 0 && { inputs: inputs.map((spec) => ({ ...spec, label: spec.label.trim() })) }),
   };
 }

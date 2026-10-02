@@ -778,6 +778,10 @@ a.outcome-card:hover { background: var(--surface-2); }
 .q-head { display: flex; align-items: center; gap: 12px; }
 .q-head .glyph { width: 34px; height: 34px; border-radius: 10px; }
 .q-head h2 { font-size: 21px; }
+.question-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin: 0; padding: 12px 0 0; min-width: 0; border: 0; border-top: 1px solid var(--surface-3); }
+.question-row .grow { flex: 1 1 180px; }
+.question-name { flex: 0 1 140px; }
+.question-required { padding-bottom: 8px; }
 .q-head p { color: var(--muted); font-size: 14px; }
 
 .choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }

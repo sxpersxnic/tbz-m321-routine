@@ -67,6 +67,8 @@ export interface TriggerRequest {
   payload?: Record<string, unknown>;
   /** The routine.run step that called this routine. */
   parent?: { actionId: string; executionId: string; depth: number };
+  /** The answers to the routine's questions (validated by the caller). */
+  inputs?: Record<string, unknown>;
 }
 
 /** Values of the `variable.set` steps that ran, in run order – a later assignment wins. */
@@ -157,6 +159,7 @@ export class ExecutionEngine {
       correlationId,
       traceId: currentTraceId(),
       parent: trigger.parent,
+      inputs: trigger.inputs ?? null,
     });
     if (!execution) {
       // Lost an insert race: a concurrent request with the same key won (the caller's routine
@@ -299,6 +302,7 @@ export class ExecutionEngine {
         correlationId: currentContext().correlationId ?? randomUUID(),
         traceId: currentTraceId(),
         kind: 'test',
+        inputs: sample?.inputs ?? null,
       });
       if (!execution) throw new Error('test run could not be created');
       if (sample) await copySampleActions(client, execution.id, sample.id, action.key);
@@ -787,7 +791,12 @@ export class ExecutionEngine {
       actions: outputs,
       vars,
       ...(action.loop_index !== null && action.loop_index !== undefined ? { item: action.loop_item, index: action.loop_index } : {}),
-      ...(execution.trigger_type === 'routine' ? { input: (execution.trigger_payload as { input?: unknown } | null)?.input ?? null } : {}),
+      // a called routine reads what its caller passed (v1), a routine run by hand its answers
+      ...(execution.trigger_type === 'routine'
+        ? { input: (execution.trigger_payload as { input?: unknown } | null)?.input ?? null }
+        : execution.inputs
+          ? { input: execution.inputs }
+          : {}),
       now: new Date().toISOString(),
     };
   }

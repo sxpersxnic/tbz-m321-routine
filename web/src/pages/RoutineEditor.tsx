@@ -8,6 +8,7 @@ import { useCatalog } from '../catalog/store.ts';
 import { shortValue, TryStep } from '../components/try-step.tsx';
 import { DateInput } from '../forms/date-input.tsx';
 import { DURATION_CHOICES } from '../forms/durations.ts';
+import { fromSpec, QUESTION_TYPES, questionName, toSpec, type DraftQuestion } from '../forms/questions.ts';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
@@ -49,6 +50,8 @@ interface Draft {
   actions: DraftAction[];
   /** "Tell me after N failures in a row" – null = never. */
   alertAfterFailures: number | null;
+  /** "Ask when run?" – manual routines only. */
+  questions: DraftQuestion[];
 }
 
 const RAW_FIELD: ParamField = { name: '__raw', label: 'Parameters (JSON)', kind: 'json' };
@@ -146,6 +149,7 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
     alertAfterFailures: routine.alertAfterFailures === undefined ? 2 : routine.alertAfterFailures,
+    questions: (routine.inputs ?? []).map((spec) => fromSpec(spec, uid())),
     actions: routine.actions.map((action) => ({
       uid: uids.get(action.key) ?? uid(),
       key: action.key,
@@ -192,6 +196,8 @@ function toInput(draft: Draft): RoutineInput {
     icon: draft.icon,
     color: draft.color,
     alertAfterFailures: draft.alertAfterFailures,
+    // questions are asked only when run by hand – another trigger drops them
+    inputs: draft.triggerType === 'manual' && draft.questions.length > 0 ? draft.questions.map(toSpec) : null,
   };
 }
 
@@ -315,7 +321,7 @@ const TIMEZONES: string[] = (() => {
 })();
 
 const EMPTY: Draft = {
-  name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [], alertAfterFailures: 2,
+  name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [], alertAfterFailures: 2, questions: [],
 };
 
 // ---------------------------------------------------------------- component
@@ -984,6 +990,10 @@ export function RoutineEditor({ id }: { id?: string }) {
             )}
           </section>
 
+          {draft.triggerType === 'manual' && (
+            <AskWhenRun questions={draft.questions} onChange={(questions) => update({ questions })} />
+          )}
+
           <section className="q-card" aria-labelledby="q-what">
             <div className="q-head">
               <span className="glyph tint-orange" aria-hidden="true"><Icon name="bolt" size={19} /></span>
@@ -1065,7 +1075,12 @@ export function RoutineEditor({ id }: { id?: string }) {
                                   </button>
                                 ))}
                                 {/* a manual routine is what another routine calls as a function – offer what it is called with */}
-                                {Object.entries({ ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}), ...(draft.triggerType === 'manual' ? INPUT_REFERENCE : {}), ...GLOBAL_REFERENCES }).map(([reference, name]) => (
+                                {Object.entries({
+                                  ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}),
+                                  // the answers to the questions; without questions, what a calling routine passes
+                                  ...(draft.triggerType === 'manual' ? (draft.questions.length > 0 ? questionReferences(draft.questions) : INPUT_REFERENCE) : {}),
+                                  ...GLOBAL_REFERENCES,
+                                }).map(([reference, name]) => (
                                   <button key={reference} type="button" className="ref-chip" title={reference}
                                     onMouseDown={(event) => event.preventDefault()} onClick={() => insertReference(reference)}>
                                     {name}
@@ -1207,6 +1222,8 @@ export function RoutineEditor({ id }: { id?: string }) {
 
 const LOOP_REFERENCES: Record<string, string> = { '{{item}}': 'Item', '{{index}}': 'Index' };
 const INPUT_REFERENCE: Record<string, string> = { '{{input}}': 'Input' };
+const questionReferences = (questions: DraftQuestion[]) =>
+  Object.fromEntries(questions.filter((question) => question.name.trim()).map((question) => [`{{input.${question.name.trim()}}}`, question.label.trim() || question.name]));
 
 /**
  * The control flow of one step: "Only if" an earlier If step holds, and
@@ -1299,5 +1316,66 @@ function HumanTimeout({ action, onChange }: { action: DraftAction; onChange: (ti
         </label>
       )}
     </div>
+  );
+}
+
+/**
+ * "Ask when run?" (02-experience §6): questions a manual routine asks each time it is run by hand.
+ * Each row: the question, what kind of answer, required, a default – and its name for {{input.<name>}},
+ * which follows the question until it is edited by hand.
+ */
+function AskWhenRun({ questions, onChange }: { questions: DraftQuestion[]; onChange: (questions: DraftQuestion[]) => void }) {
+  const patch = (uid: string, change: Partial<DraftQuestion>) => onChange(questions.map((question) => (question.uid === uid ? { ...question, ...change } : question)));
+  const add = () => onChange([...questions, { uid: crypto.randomUUID(), name: '', label: '', type: 'text', required: false, default: '', options: '' }]);
+  return (
+    <section className="q-card" aria-labelledby="q-ask">
+      <div className="q-head">
+        <span className="glyph tint-indigo" aria-hidden="true"><Icon name="person" size={19} /></span>
+        <h2 id="q-ask" className="grow">Ask when run?</h2>
+        <button type="button" className="btn ghost small" onClick={add} disabled={questions.length >= 10}><Icon name="plus" size={14} /> Add a question</button>
+      </div>
+      {questions.map((question, index) => (
+        <fieldset key={question.uid} className="question-row">
+          <legend className="sr-only">Question {index + 1}</legend>
+          <label className="field grow">
+            <span>Question</span>
+            <input value={question.label} placeholder="Which city?" onChange={(event) => {
+              const label = event.target.value;
+              // the name follows the question while it is still the one made from it
+              const auto = question.name === '' || question.name === questionName(question.label);
+              patch(question.uid, { label, ...(auto && { name: questionName(label) }) });
+            }} />
+          </label>
+          <label className="field">
+            <span>Answer</span>
+            <select value={question.type} onChange={(event) => patch(question.uid, { type: event.target.value as DraftQuestion['type'] })}>
+              {QUESTION_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            </select>
+          </label>
+          {question.type === 'choice' && (
+            <label className="field grow">
+              <span>Choices</span>
+              <input value={question.options} placeholder="Bern, Basel, Zurich" onChange={(event) => patch(question.uid, { options: event.target.value })} />
+            </label>
+          )}
+          <label className="field">
+            <span>Default</span>
+            <input value={question.default} type={question.type === 'number' ? 'number' : question.type === 'date' ? 'date' : 'text'}
+              onChange={(event) => patch(question.uid, { default: event.target.value })} />
+          </label>
+          <label className="switch question-required">
+            <input type="checkbox" checked={question.required} onChange={(event) => patch(question.uid, { required: event.target.checked })} />
+            <span className="switch-track" />
+            <span className="switch-label">Required</span>
+          </label>
+          <label className="field question-name">
+            <span>Name</span>
+            <input className="mono" value={question.name} onChange={(event) => patch(question.uid, { name: event.target.value })} />
+          </label>
+          <IconButton icon="trash" label={`Remove "${question.label || `question ${index + 1}`}"`} className="danger"
+            onClick={() => onChange(questions.filter((candidate) => candidate.uid !== question.uid))} />
+        </fieldset>
+      ))}
+    </section>
   );
 }

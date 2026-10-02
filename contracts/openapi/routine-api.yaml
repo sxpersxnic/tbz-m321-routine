@@ -144,6 +144,12 @@ paths:
           in: header
           required: false
           schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: false
+        description: 'The answers to the routine''s questions ("Ask when run?"): checked against its inputs, defaults filled in; readable as {{input.<name>}}.'
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, properties: { inputs: { type: object } } }
       responses:
         '202':
           description: execution accepted
@@ -154,6 +160,7 @@ paths:
         '200':
           description: already triggered with this Idempotency-Key
           content: { application/json: { schema: { $ref: '#/components/schemas/Execution' } } }
+        '422': { description: 'the answers don''t fit the questions (errors lists why), or answers for a routine without questions', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
@@ -527,6 +534,11 @@ components:
         icon: { $ref: '#/components/schemas/RoutineIcon' }
         color: { $ref: '#/components/schemas/RoutineColor' }
         alertAfterFailures: { type: [integer, 'null'], minimum: 1, maximum: 10, description: 'notify after this many failures in a row; null = never; omitted = unchanged (2 for a new routine)' }
+        inputs:
+          type: [array, 'null']
+          maxItems: 10
+          description: '"Ask when run?" – manual routines only; each answer is {{input.<name>}}'
+          items: { $ref: '#/components/schemas/RunInputSpec' }
 
     RoutineIcon:
       type: [string, 'null']
@@ -570,6 +582,7 @@ components:
         color: { type: [string, 'null'], description: 'chosen colour; null = derived from the first action' }
         version: { type: integer }
         alertAfterFailures: { type: [integer, 'null'], description: 'RoutineUnhealthy after this many failures in a row; null = never' }
+        inputs: { type: array, items: { $ref: '#/components/schemas/RunInputSpec' }, description: 'questions asked when run by hand; empty = none' }
         health:
           type: object
           description: 'counters updated when a run finishes; the 30-day ones also recomputed nightly'
@@ -581,6 +594,19 @@ components:
             failures30d: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    RunInputSpec:
+      type: object
+      required: [name, label, type]
+      additionalProperties: false
+      properties:
+        name: { type: string, pattern: '^[a-z][a-zA-Z0-9]*$' }
+        label: { type: string }
+        type: { enum: [text, number, date, choice, ref] }
+        required: { type: boolean }
+        default: { description: 'used when the question is left empty' }
+        options: { type: array, items: { type: object, properties: { value: { type: string }, label: { type: string } } }, description: 'choice: at least 2' }
+        ref: { type: object, properties: { domain: { type: string }, collection: { type: string } } }
 
     ExecutionStatus:
       type: string
@@ -617,6 +643,7 @@ components:
         resumeCount: { type: integer, minimum: 0, description: 'how often the execution was resumed ("Retry from here")' }
         routineVersion: { type: [integer, 'null'], description: 'the routine version the run used; null for runs before v2' }
         kind: { enum: [live, test], description: 'test = a "Try this step" run (only returned by GET /executions/{id})' }
+        inputs: { type: object, description: 'the answers to the routine''s questions (runs by hand only)' }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: shared ID in all logs and messages of this execution }
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }

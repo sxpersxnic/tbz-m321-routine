@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.ts';
 import { TemplateGallery } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
+import { RunDialog } from '../components/run-dialog.tsx';
 import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Menu, Section, Skeleton } from '../components/ui.tsx';
 import { ActionFlow, AppearanceDialog, routineLook, RunHistory, StatusIcon, type Appearance } from '../components/visual.tsx';
 import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
@@ -14,19 +15,27 @@ import { ExecutionRow } from './Executions.tsx';
  * Starts a routine the way its trigger would: a webhook routine gets a test event through its
  * own URL – so the run has a body to work with – everything else a manual trigger.
  */
-export async function startRoutine(routine: Pick<Routine, 'id' | 'webhookPath'>, payload?: Record<string, unknown>): Promise<string> {
+export async function startRoutine(routine: Pick<Routine, 'id' | 'webhookPath'>, payload?: Record<string, unknown>, inputs?: Record<string, unknown>): Promise<string> {
   if (routine.webhookPath) return (await api.callWebhook(routine.webhookPath, payload ?? testPayload())).executionId;
-  return (await api.trigger(routine.id)).id;
+  return (await api.trigger(routine.id, inputs)).id;
 }
 
 /** "Run now" or, for webhook routines, "Send test". */
 export const runLabel = (routine: Pick<Routine, 'webhookPath'>) => (routine.webhookPath ? 'Send test' : 'Run now');
 
-/** Shared "run now" behaviour: trigger, then jump to the live execution view. `running` drives the button spinner. */
+/**
+ * Shared "run now" behaviour: trigger, then jump to the live execution view. `running` drives the
+ * button spinner. A routine with questions asks them first – render `dialog` next to the button.
+ */
 export function useRunRoutine() {
   const toast = useToast();
   const [running, setRunning] = useState(false);
+  const [asking, setAsking] = useState<Routine | null>(null);
   const run = async (routine: Routine) => {
+    if (routine.inputs?.length && !routine.webhookPath) {
+      setAsking(routine);
+      return;
+    }
     setRunning(true);
     try {
       navigate(`/executions/${await startRoutine(routine)}`);
@@ -35,7 +44,16 @@ export function useRunRoutine() {
       setRunning(false);
     }
   };
-  return Object.assign(run, { running });
+  // keyed by routine: a new question form each time it opens, with the defaults filled in
+  const dialog = asking ? (
+    <RunDialog key={asking.id} open name={asking.name} inputs={asking.inputs} onClose={() => setAsking(null)}
+      onRun={async (answers) => {
+        // the dialog shows what the server didn't accept, so errors are thrown to it
+        navigate(`/executions/${await startRoutine(asking, undefined, answers)}`);
+        setAsking(null);
+      }} />
+  ) : null;
+  return Object.assign(run, { running, dialog });
 }
 
 /**
@@ -102,6 +120,7 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
             Activate
           </button>
         )}
+        {run.dialog}
       </div>
     </article>
   );
@@ -324,6 +343,7 @@ export function RoutineDetail({ id }: { id: string }) {
         </div>
       </header>
 
+      {run.dialog}
       <AppearanceDialog open={pickingLook} value={{ icon: r.icon, color: r.color }} actions={r.actions}
         onClose={() => setPickingLook(false)} onSave={(next) => void saveAppearance(next)} />
 

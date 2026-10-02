@@ -1,6 +1,7 @@
 import { withTransaction, type ErrorCode, type Pool, type Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, StepTimeout, TriggerDefinition } from './domain/definition.ts';
+import type { RoutineInputSpec } from './domain/inputs.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 import type { AwaitingItem } from './messages.ts';
 
@@ -20,6 +21,8 @@ export interface RoutineRow {
   color: string | null;
   version: number;
   alert_after_failures: number | null;
+  /** "Ask when run?" questions; null = none. */
+  inputs: RoutineInputSpec[] | null;
   consecutive_failures: number;
   last_success_at: Date | null;
   last_failure_at: Date | null;
@@ -49,6 +52,8 @@ export interface ExecutionRow {
   routine_version: number | null;
   /** `test` = a "Try this step" run: not listed, counted or announced. */
   kind: 'live' | 'test';
+  /** The answers to the routine's questions ("Ask when run?"). */
+  inputs: Record<string, unknown> | null;
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -149,6 +154,7 @@ export function versionDefinition(row: RoutineRow): VersionDefinition {
     icon: row.icon,
     color: row.color as RoutineColor | null,
     alertAfterFailures: row.alert_after_failures,
+    ...(row.inputs && row.inputs.length > 0 && { inputs: row.inputs }),
     active: row.active,
   };
 }
@@ -184,8 +190,8 @@ export function versionDto(row: RoutineVersionRow, withDefinition = true) {
 
 export async function insertRoutine(db: Queryable, id: string, ownerId: string, definition: RoutineDefinition, by: string = ownerId): Promise<RoutineRow> {
   const { rows } = await db.query<RoutineRow>(
-    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token, icon, color, alert_after_failures)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $10 THEN $11::int ELSE 2 END) RETURNING *`,
+    `INSERT INTO routines (id, owner_id, name, description, trigger, actions, webhook_token, icon, color, alert_after_failures, inputs)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CASE WHEN $10 THEN $11::int ELSE 2 END, $12) RETURNING *`,
     [
       id,
       ownerId,
@@ -198,6 +204,7 @@ export async function insertRoutine(db: Queryable, id: string, ownerId: string, 
       definition.color ?? null,
       definition.alertAfterFailures !== undefined,
       definition.alertAfterFailures ?? null,
+      definition.inputs ? JSON.stringify(definition.inputs) : null,
     ],
   );
   return recordVersion(db, rows[0], 'create', by);
@@ -217,6 +224,7 @@ export async function updateRoutine(
             icon = CASE WHEN $8 THEN $9 ELSE icon END,
             color = CASE WHEN $10 THEN $11 ELSE color END,
             alert_after_failures = CASE WHEN $12 THEN $13::int ELSE alert_after_failures END,
+            inputs = $14,
             version = version + 1, updated_at = now()
       WHERE id = $1 RETURNING *`,
     [
@@ -233,6 +241,7 @@ export async function updateRoutine(
       definition.color ?? null,
       definition.alertAfterFailures !== undefined,
       definition.alertAfterFailures ?? null,
+      definition.inputs ? JSON.stringify(definition.inputs) : null,
     ],
   );
   return recordVersion(db, rows[0], change.origin ?? 'edit', change.by);
@@ -315,12 +324,13 @@ export async function insertExecution(
     /** Set when a `routine.run` step started this execution. */
     parent?: { actionId: string; executionId: string; depth: number };
     kind?: 'live' | 'test';
+    inputs?: Record<string, unknown> | null;
   },
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
     `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload,
-                             parent_action_id, parent_execution_id, call_depth, routine_version, kind)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14, $15)
+                             parent_action_id, parent_execution_id, call_depth, routine_version, kind, inputs)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14, $15, $16)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -339,6 +349,7 @@ export async function insertExecution(
       execution.parent?.depth ?? 0,
       execution.routine.version,
       execution.kind ?? 'live',
+      execution.inputs ? JSON.stringify(execution.inputs) : null,
     ],
   );
   return rows[0] ?? null;
@@ -734,6 +745,7 @@ export function routineDto(row: RoutineRow) {
     color: row.color,
     version: row.version,
     alertAfterFailures: row.alert_after_failures,
+    inputs: row.inputs ?? [],
     health: {
       consecutiveFailures: row.consecutive_failures,
       lastSuccessAt: row.last_success_at,
@@ -820,6 +832,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     resumeCount: row.resume_count,
     routineVersion: row.routine_version,
     kind: row.kind,
+    ...(row.inputs && { inputs: row.inputs }),
     ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({

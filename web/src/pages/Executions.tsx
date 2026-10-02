@@ -183,12 +183,12 @@ export function ExecutionDetail({ id }: { id: string }) {
   const e = execution.data;
   const routine = routineInfo.data;
 
-  // Same routine, same input: a webhook run is replayed with the body it received.
+  // Same routine, same input: a webhook run is replayed with the body it received, a run by hand with its answers.
   async function runAgain() {
     if (!routine) return;
     setRerunning(true);
     try {
-      navigate(`/executions/${await startRoutine(routine, e.triggerPayload ?? undefined)}`);
+      navigate(`/executions/${await startRoutine(routine, e.triggerPayload ?? undefined, e.inputs)}`);
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), 'error');
     } finally {

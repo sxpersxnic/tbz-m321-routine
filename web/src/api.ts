@@ -149,9 +149,9 @@ export const api = {
     send<Routine>('PATCH', `/api/v1/routines/${id}`, appearance),
   deleteRoutine: (id: string) => send<null>('DELETE', `/api/v1/routines/${id}`),
   setActive: (id: string, active: boolean) => send<Routine>('POST', `/api/v1/routines/${id}/${active ? 'activate' : 'deactivate'}`),
-  async trigger(id: string): Promise<Execution> {
+  async trigger(id: string, inputs?: Record<string, unknown>): Promise<Execution> {
     // a fresh idempotency key per click: a network retry of this request never starts a second run
-    const { data } = await request<Execution>('POST', `/api/v1/routines/${id}/executions`, undefined, {
+    const { data } = await request<Execution>('POST', `/api/v1/routines/${id}/executions`, inputs ? { inputs } : undefined, {
       'idempotency-key': crypto.randomUUID(),
     });
     return data;

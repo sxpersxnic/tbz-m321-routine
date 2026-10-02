@@ -59,7 +59,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
     computed in the owner's time zone (`Europe/Zurich` until M5 provides profiles).
   - Web: *Wait* step form (*for* duration or *until* time).
 
-- [ ] **M3-09 · Run inputs**
+- [x] **M3-09 · Run inputs**
   - Definition `inputs`, validation, `POST …/executions { inputs }`, stored on the execution,
     template root `input.<name>` ([06 §3](../06-engine.md)). `routine.run` passes an object input
     through unchanged.

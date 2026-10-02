@@ -68,9 +68,23 @@ export interface Routine {
   version: number;
   /** Notify after this many failures in a row; null = never. */
   alertAfterFailures: number | null;
+  /** Questions asked when it is run by hand; empty = none. */
+  inputs: RunInputSpec[];
   health: RoutineHealth;
   createdAt: string;
   updatedAt: string;
+}
+
+/** "Ask when run?" – a question a manual routine asks each time it is run (06-engine §2). */
+export interface RunInputSpec {
+  /** Read as {{input.<name>}}. */
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'choice' | 'ref';
+  required?: boolean;
+  default?: unknown;
+  options?: Array<{ value: string; label: string }>;
+  ref?: { domain: string; collection: string };
 }
 
 export interface RoutineHealth {
@@ -92,6 +106,7 @@ export interface RoutineInput {
   color?: string | null;
   /** Omitted = unchanged (2 for a new routine), null = never. */
   alertAfterFailures?: number | null;
+  inputs?: RunInputSpec[] | null;
   version?: number;
 }
 
@@ -220,6 +235,8 @@ export interface Execution {
   resumeCount: number;
   /** The routine version the run used – null for runs before v2. */
   routineVersion: number | null;
+  /** The answers to the routine's questions. */
+  inputs?: Record<string, unknown>;
   scheduledFor: string | null;
   correlationId: string;
   traceId: string | null;

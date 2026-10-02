@@ -5,6 +5,7 @@ import type { CatalogStore } from './catalog-store.ts';
 import { BUILTIN_MANIFESTS } from './domain/builtin-manifests.ts';
 import type { Catalog } from './domain/catalog.ts';
 import { DefinitionError, ROUTINE_COLORS, validateRoutine, type Appearance, type RoutineDefinition, type RoutineInput } from './domain/definition.ts';
+import { InputError, INPUT_TYPES, resolveInputs } from './domain/inputs.ts';
 import { nextRun } from './domain/schedule.ts';
 import type { ExecutionEngine } from './engine.ts';
 import {
@@ -71,6 +72,25 @@ const triggerSchema = {
   then: { required: ['type', 'cron'] },
 } as const;
 
+const inputSpecSchema = {
+  type: 'object',
+  required: ['name', 'label', 'type'],
+  additionalProperties: false,
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 40 },
+    label: { type: 'string', minLength: 1, maxLength: 120 },
+    type: { type: 'string', enum: INPUT_TYPES },
+    required: { type: 'boolean' },
+    default: {},
+    options: {
+      type: 'array',
+      maxItems: 20,
+      items: { type: 'object', required: ['value', 'label'], additionalProperties: false, properties: { value: { type: 'string', minLength: 1 }, label: { type: 'string', minLength: 1 } } },
+    },
+    ref: { type: 'object', required: ['domain', 'collection'], additionalProperties: false, properties: { domain: { type: 'string' }, collection: { type: 'string' } } },
+  },
+} as const;
+
 const appearanceProperties = {
   icon: { type: ['string', 'null'], pattern: '^[a-z][a-z0-9-]{0,39}$' },
   color: { anyOf: [{ type: 'string', enum: ROUTINE_COLORS }, { type: 'null' }] },
@@ -94,6 +114,7 @@ const routineBodySchema = {
     actions: { type: 'array', minItems: 1, maxItems: 20, items: actionSchema },
     ...appearanceProperties,
     alertAfterFailures: { type: ['integer', 'null'], minimum: 1, maximum: 10 },
+    inputs: { type: ['array', 'null'], maxItems: 10, items: inputSpecSchema },
     version: { type: 'integer', minimum: 1, description: 'Optimistic locking: expected current version' },
   },
 } as const;
@@ -345,9 +366,16 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
 
   // ------------------------------------------------------------ executions
 
-  app.post<{ Params: { routineId: string }; Headers: { 'idempotency-key'?: string } }>(
+  app.post<{ Params: { routineId: string }; Headers: { 'idempotency-key'?: string }; Body: { inputs?: Record<string, unknown> } | null }>(
     '/api/v1/routines/:routineId/executions',
-    { schema: { params: routineParams, headers: triggerHeaders } },
+    {
+      schema: {
+        params: routineParams,
+        headers: triggerHeaders,
+        // v1 sends no body; v2 may send the answers to the routine's questions
+        body: { anyOf: [{ type: 'object', additionalProperties: false, properties: { inputs: { type: 'object' } } }, { type: 'null' }] },
+      },
+    },
     async (request, reply) => {
       const user = requireUser(request);
       const idempotencyKey = request.headers['idempotency-key'] || undefined;
@@ -356,7 +384,17 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
         const routine = await getRoutine(client, user.id, request.params.routineId, true);
         if (!routine) throw notFound('Routine');
         if (!routine.active) throw conflict('Routine is not active – activate it before triggering');
-        return withContext({ routineId: routine.id }, () => engine.createExecution(client, routine, { type: 'manual', idempotencyKey }));
+        let inputs: Record<string, unknown> | undefined;
+        try {
+          inputs = routine.inputs?.length ? resolveInputs(routine.inputs, request.body?.inputs ?? {}) : undefined;
+        } catch (error) {
+          if (error instanceof InputError) throw new HttpError(422, 'invalid_inputs', 'The answers do not fit the questions', error.issues);
+          throw error;
+        }
+        if (!routine.inputs?.length && request.body?.inputs && Object.keys(request.body.inputs).length > 0) {
+          throw new HttpError(422, 'invalid_inputs', 'This routine asks no questions');
+        }
+        return withContext({ routineId: routine.id }, () => engine.createExecution(client, routine, { type: 'manual', idempotencyKey, inputs }));
       });
       if (!result) throw conflict('Execution could not be created');
       return reply
