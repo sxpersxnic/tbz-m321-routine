@@ -86,17 +86,23 @@ export async function insertTask(db: Queryable, task: NewTask): Promise<{ row: T
   return { row: existing[0], created: false };
 }
 
-/** A step a person does (task.await): its task, or – asked again after a resume – the same task reopened. */
+/**
+ * A step a person does (task.await): its task, or – asked again after a resume – the same task
+ * reopened. The steps of one run form a checklist: `step_group` = the run, `step_position` = the
+ * order they were asked in (task-service.md §5).
+ */
 export async function upsertStepTask(
   db: Queryable,
   step: { ownerId: string; listId: string; title: string; description: string; actionId: string; executionId: string; routineId: string | null; routineName: string | null },
 ): Promise<{ row: TaskRow; created: boolean }> {
   const { rows } = await db.query<TaskRow & { inserted: boolean }>(
-    `INSERT INTO tasks (id, owner_id, list_id, title, description, kind, awaiting_action_id, source_execution_id, source_routine_id, source_routine_name)
-     VALUES ($1, $2, $3, $4, $5, 'step', $6, $7, $8, $9)
+    `INSERT INTO tasks (id, owner_id, list_id, title, description, kind, awaiting_action_id, source_execution_id, source_routine_id, source_routine_name,
+                        step_group, step_position)
+     VALUES ($1, $2, $3, $4, $5, 'step', $6, $7, $8, $9, $10,
+             (SELECT COALESCE(max(step_position) + 1, 0) FROM tasks WHERE step_group = $10))
      ON CONFLICT (awaiting_action_id) DO UPDATE SET status = 'OPEN', completed_at = NULL
      RETURNING *, (xmax = 0) AS inserted`,
-    [randomUUID(), step.ownerId, step.listId, step.title, step.description, step.actionId, step.executionId, step.routineId, step.routineName],
+    [randomUUID(), step.ownerId, step.listId, step.title, step.description, step.actionId, step.executionId, step.routineId, step.routineName, step.executionId],
   );
   const { inserted, ...row } = rows[0];
   return { row, created: inserted };

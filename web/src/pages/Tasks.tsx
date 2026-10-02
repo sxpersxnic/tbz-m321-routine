@@ -6,6 +6,7 @@ import { ColorPicker, IconPicker } from '../components/visual.tsx';
 import { date } from '../format.ts';
 import { usePolling } from '../hooks.ts';
 import type { Priority, Task, TaskList, TaskListInput } from '../types.ts';
+import { stepChecklists } from '../lib/checklists.ts';
 
 const PRIORITY_LABEL: Record<Priority, string> = { low: 'Low', normal: 'Normal', high: 'High' };
 
@@ -58,7 +59,9 @@ export function Tasks() {
   const all = tasks.data ?? [];
   const allLists = lists.data ?? [];
   const listById = new Map(allLists.map((list) => [list.id, list]));
-  const open = all.filter((task) => task.status === 'OPEN' || lingering.has(task.id));
+  // steps that wait for you are shown once, in their run's checklist – not again in the lists below
+  const checklists = stepChecklists(all, lingering);
+  const open = all.filter((task) => task.kind !== 'step' && (task.status === 'OPEN' || lingering.has(task.id)));
   const smart: Record<SmartKey, Task[]> = {
     today: open.filter((task) => task.dueDate && task.dueDate <= today),
     scheduled: open.filter((task) => task.dueDate),
@@ -121,7 +124,7 @@ export function Tasks() {
   // with a single list, naming it on every row says nothing
   const showListTag = smartKey !== null && allLists.length > 1;
 
-  const row = (task: Task) => {
+  const row = (task: Task, inChecklist = false) => {
     const due = dueText(task, today, tomorrow);
     const done = task.status === 'DONE';
     const list = listById.get(task.listId);
@@ -138,9 +141,9 @@ export function Tasks() {
             {task.title}
           </span>
           {task.description && <span className="muted small block">{task.description}</span>}
-          {(due || (showListTag && list) || task.kind === 'step') && (
+          {(due || (showListTag && list) || (task.kind === 'step' && !inChecklist)) && (
             <span className="task-meta">
-              {task.kind === 'step' && <RoutineBadge task={task} />}
+              {task.kind === 'step' && !inChecklist && <RoutineBadge task={task} />}
               {due && <span className={due.tone}>{due.text}</span>}
               {showListTag && list && <span className={`list-tag tint-${list.color}`}><i aria-hidden="true" />{list.name}</span>}
             </span>
@@ -188,6 +191,21 @@ export function Tasks() {
           })()}
         </p>
       </ConfirmDialog>
+
+      {checklists.length > 0 && (
+        <section aria-labelledby="waiting-title" className="section">
+          <h2 id="waiting-title" className="group-label">Waiting for you</h2>
+          {checklists.map((checklist) => (
+            <div key={checklist.executionId} className="checklist">
+              <div className="checklist-head">
+                <a href={`#/executions/${checklist.executionId}`} className="row-title checklist-title">{checklist.routineName}</a>
+                <span className="row-meta tabular">{checklist.done} of {checklist.items.length}</span>
+              </div>
+              <ul className="list" aria-label={checklist.routineName}>{checklist.items.map((task) => row(task, true))}</ul>
+            </div>
+          ))}
+        </section>
+      )}
 
       <div className="smart-lists" role="group" aria-label="Smart lists">
         {SMART.map((item) => (
@@ -262,7 +280,7 @@ export function Tasks() {
             {groups.map((group) => (
               <div key={group.label || 'all'}>
                 {group.label && <h3 className="group-label">{group.label}</h3>}
-                <ul className="list">{group.items.map(row)}</ul>
+                <ul className="list">{group.items.map((task) => row(task))}</ul>
               </div>
             ))}
           </>

@@ -15,6 +15,24 @@ export interface Template {
 /** Starting points for a person's own routines. The systems demos live in demo-scenarios.ts. */
 export const TEMPLATES: Template[] = [
   {
+    // a checklist: step 1 is a few things you do yourself, side by side; ticking the last one ends the run
+    id: 'checklist',
+    does: 'Three things to do – ticking them off finishes the run.',
+    outcome: '3 tasks waiting for you',
+    label: 'Checklist',
+    hint: 'Manual · things you tick off',
+    routine: {
+      name: 'Morning checklist',
+      description: 'Tick these off to finish the run',
+      trigger: { type: 'manual' },
+      actions: [
+        { key: 'stretch', type: 'task.await', step: 1, params: { title: 'Stretch for 5 minutes' } },
+        { key: 'water', type: 'task.await', step: 1, params: { title: 'Drink a glass of water' } },
+        { key: 'plan', type: 'task.await', step: 1, params: { title: 'Pick the one thing for today' } },
+      ],
+    },
+  },
+  {
     id: 'weekly-review',
     does: 'Weather and a task, summed up in one notification.',
     outcome: '1 task and 1 notification',

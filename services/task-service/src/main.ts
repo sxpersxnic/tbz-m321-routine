@@ -63,6 +63,8 @@ const taskDto = (row: TaskRow) => ({
   sourceRoutineId: row.source_routine_id,
   sourceRoutineName: row.source_routine_name,
   awaitingActionId: row.awaiting_action_id,
+  stepGroup: row.step_group,
+  stepPosition: row.step_position,
   createdAt: row.created_at,
   completedAt: row.completed_at,
 });

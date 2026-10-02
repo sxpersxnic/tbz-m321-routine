@@ -185,6 +185,17 @@ describe('tasks domain (04 §7)', { skip: needsDatabase }, () => {
       assert.equal((await resultsOf(envelope, 'action.completed')).length, 1);
     });
 
+    it('groups the steps of one run into a checklist, in the order they were asked', async () => {
+      const executionId = randomUUID();
+      const first = command('task.await', { title: 'One' });
+      const second = command('task.await', { title: 'Two' });
+      for (const envelope of [first, second]) envelope.data.executionId = executionId;
+      await run(first);
+      await run(second);
+      const { rows } = await pool.query<{ title: string; step_group: string; step_position: number }>('SELECT title, step_group, step_position FROM tasks WHERE step_group = $1 ORDER BY step_position', [executionId]);
+      assert.deepEqual(rows.map((row) => [row.title, row.step_position]), [['One', 0], ['Two', 1]]);
+    });
+
     it('cancel before the tick closes the task; ticking it then is refused and sends nothing', async () => {
       const envelope = awaitCommand();
       await run(envelope);

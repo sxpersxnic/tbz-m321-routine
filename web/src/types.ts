@@ -317,6 +317,9 @@ export interface Task {
   kind: 'task' | 'step';
   sourceRoutineId: string | null;
   sourceRoutineName: string | null;
+  /** Step tasks of one run form a checklist: the run, and the order they were asked in. */
+  stepGroup: string | null;
+  stepPosition: number | null;
   createdAt: string;
   completedAt: string | null;
 }

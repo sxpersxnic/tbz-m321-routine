@@ -48,7 +48,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
     … · skips at …*, *Do it now*, *Skip*. Notifications page: question cards with option buttons,
     answered/expired states. Tasks page: step tasks with the routine badge.
 
-- [ ] **M3-07 · Checklists (interim, before Today)**
+- [x] **M3-07 · Checklists (interim, before Today)**
   - task-service groups `task.await` tasks per run (`step_group`, `step_position`). Until Today
     exists (M5), the Tasks page shows a *Waiting for you* section at the top: one group per run
     with its items. The editor offers a *Checklist* starting point: a routine whose step 1 is N

@@ -172,5 +172,7 @@ components:
         sourceRoutineId: { type: [string, 'null'], format: uuid }
         sourceRoutineName: { type: [string, 'null'], description: 'the routine waiting for a step task' }
         awaitingActionId: { type: [string, 'null'], format: uuid, description: 'the run step a step task completes' }
+        stepGroup: { type: [string, 'null'], description: 'step tasks of one run form a checklist: the run (executionId)' }
+        stepPosition: { type: [integer, 'null'], description: 'order within the checklist' }
         createdAt: { type: string, format: date-time }
         completedAt: { type: [string, 'null'], format: date-time }

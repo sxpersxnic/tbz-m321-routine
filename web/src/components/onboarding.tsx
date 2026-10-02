@@ -184,6 +184,10 @@ function outcomeOf(action: ExecutionAction, runStatus: string): Outcome | null {
       return { ...base, text: 'New task', detail: text(action.output, 'title'), href: '#/tasks', linkLabel: 'Tasks' };
     case 'notification.send':
       return { ...base, text: 'Notification sent', detail: text(action.params as Record<string, unknown>, 'title'), href: '#/notifications', linkLabel: 'Notifications' };
+    case 'task.await':
+      return { ...base, text: 'You did it', detail: text(action.params as Record<string, unknown>, 'title') };
+    case 'notification.ask':
+      return { ...base, text: 'You answered', detail: text(action.output, 'label') };
     case 'weather.get':
       return { ...base, text: 'Weather', detail: text(action.output, 'summary') };
     case 'summary.generate':

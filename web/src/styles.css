@@ -966,6 +966,10 @@ input.task-check.prio-high:not(:checked) { border-color: var(--err-fill); }
 .task-title { display: block; }
 .task-row.done .task-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .task-title { transition: color var(--soft) var(--ease); }
+.checklist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.checklist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 0 4px; }
+.checklist-title { color: var(--text); text-decoration: none; }
+.checklist-title:hover { text-decoration: underline; }
 .routine-badge {
   display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
   background: var(--accent-soft); color: var(--accent); text-decoration: none;
