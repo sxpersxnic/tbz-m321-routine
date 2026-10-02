@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { api } from './api.ts';
+import { useCatalog } from './catalog/store.ts';
 import { signOut } from './auth.ts';
 import { Icon, ThemeToggle } from './components/ui.tsx';
 import { matchRoute, useReachable, useRoute, usePolling, useSession } from './hooks.ts';
@@ -86,6 +87,8 @@ function Shell() {
   const path = route.split('?')[0];
   const session = useSession();
   const reachable = useReachable();
+  // loaded once after sign-in (07 §4): every page names steps by their manifest, not only the editor
+  useCatalog();
   const unread = usePolling(() => api.notifications(true), 5000);
   const unreadCount = unread.data?.length ?? 0;
   const section = NAV.slice(1).find((item) => path.startsWith(item.path))?.path ?? '/';

@@ -176,6 +176,8 @@ export const api = {
   testStep: (routineId: string, action: ActionDefinition) => send<ExecutionDetail>('POST', '/api/v1/routines/test-step', { routineId, action }),
   /** "Retry from here": a failed run goes on from its failed step. */
   resume: (id: string) => send<ExecutionDetail>('POST', `/api/v1/executions/${id}/resume`),
+  /** Skips a step that waits for you – the run goes on without it. */
+  skipStep: (id: string, actionKey: string) => send<ExecutionDetail>('POST', `/api/v1/executions/${id}/actions/${encodeURIComponent(actionKey)}/skip`),
   executionStats: (hours = 24) => get<ExecutionStats>(`/api/v1/executions/stats?hours=${hours}`),
 
   tasks: async (status?: Task['status']) => (await get<{ items: Task[] }>(`/api/v1/tasks${status ? `?status=${status}` : ''}`)).items,
@@ -186,7 +188,7 @@ export const api = {
   updateTaskList: (id: string, input: Partial<TaskListInput>) => send<TaskList>('PATCH', `/api/v1/task-lists/${id}`, input),
   /** Deletes the list's tasks too. */
   deleteTaskList: (id: string) => send<null>('DELETE', `/api/v1/task-lists/${id}`),
-  setTaskStatus: (id: string, status: Task['status']) => send<Task>('PATCH', `/api/v1/tasks/${id}`, { status }),
+  setTaskStatus: (id: string, status: 'OPEN' | 'DONE') => send<Task>('PATCH', `/api/v1/tasks/${id}`, { status }),
 
   /** Only what routine steps sent – run outcomes live on the Runs page, not in the inbox. */
   notifications: async (unread = false) => {
@@ -194,6 +196,8 @@ export const api = {
     return (await get<{ items: Notification[] }>(`/api/v1/notifications?${query}`)).items;
   },
   markRead: (id: string) => send<Notification>('POST', `/api/v1/notifications/${id}/read`),
+  /** Answers a question – the routine waiting for it goes on. */
+  answer: (id: string, value: string) => send<Notification>('POST', `/api/v1/notifications/${id}/answer`, { value }),
   deleteNotification: (id: string) => send<null>('DELETE', `/api/v1/notifications/${id}`),
 
   system: () => get<SystemStatus>('/api/v1/system/status'),

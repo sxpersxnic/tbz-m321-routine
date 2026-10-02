@@ -36,6 +36,20 @@ export interface ActionDefinition {
   runIf?: RunIf;
   /** One `{{…}}` reference to a list: the step runs once per item ({{item}}, {{index}}). */
   forEach?: string;
+  /** "If you don't get to it" – steps you do yourself only: skip or fail after `after` (ISO 8601 duration). */
+  timeout?: StepTimeout;
+}
+
+export interface StepTimeout {
+  after: string;
+  then: 'skip' | 'fail';
+}
+
+/** What a step you do yourself waits for: a task to tick, a question to answer. */
+export interface AwaitingItem {
+  kind: 'task' | 'question' | 'checkIn';
+  refId: string;
+  title: string;
 }
 
 export interface Routine {
@@ -249,6 +263,11 @@ export interface ExecutionAction {
   /** Set on the actions a "repeat for each" step was expanded into. */
   parentId?: string;
   loopIndex?: number;
+  timeout?: StepTimeout;
+  /** A step you do yourself, once its item exists: what it waits for, since and until when. */
+  awaiting?: AwaitingItem;
+  acceptedAt?: string | null;
+  deadlineAt?: string | null;
 }
 
 export interface ExecutionLogEntry {
@@ -290,9 +309,14 @@ export interface Task {
   title: string;
   description: string;
   priority: Priority;
-  status: 'OPEN' | 'DONE';
+  /** CANCELLED: a step task whose step expired, was skipped or whose run was cancelled. */
+  status: 'OPEN' | 'DONE' | 'CANCELLED';
   dueDate: string | null;
   sourceExecutionId: string | null;
+  /** `step`: a routine waits for it ("Do yourself") – ticking it moves the routine on. */
+  kind: 'task' | 'step';
+  sourceRoutineId: string | null;
+  sourceRoutineName: string | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -306,6 +330,12 @@ export interface Notification {
   executionId: string | null;
   createdAt: string;
   readAt: string | null;
+  /** `question`: "Ask me" – answered with one of `options`. */
+  kind: 'info' | 'question';
+  state: 'open' | 'answered' | 'expired';
+  options: Array<{ value: string; label: string }> | null;
+  answer: { value: string; label: string; answeredAt: string } | null;
+  routineId: string | null;
 }
 
 export interface DeadLetter {

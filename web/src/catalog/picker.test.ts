@@ -14,11 +14,12 @@ const catalog = buildCatalog(DOMAINS);
 const outline = (groups: ReturnType<typeof pickerGroups>) => groups.map((group) => `${group.label}: ${group.items.map((item) => item.label).join(', ')}`);
 
 describe('step picker', () => {
-  it('groups by domain in domain order, scripting last', () => {
+  it('groups by domain in domain order, steps you do first, scripting last', () => {
     const groups = pickerGroups(catalog);
-    assert.deepEqual(groups.map((group) => group.label), ['Tasks', 'Notifications', 'Connections', 'Scripting']);
+    assert.deepEqual(groups.map((group) => group.label), ['You', 'Tasks', 'Notifications', 'Connections', 'Scripting']);
+    assert.deepEqual(groups[0].items.map((item) => item.label), ['Do yourself', 'Ask me'], 'human steps of every domain');
+    assert.ok(!groups.find((group) => group.id === 'tasks')?.items.some((item) => item.type === 'task.await'), 'only in You');
     assert.deepEqual(groups.at(-1)?.items.map((item) => item.type), ['routine.run', 'variable.set', 'condition.if', 'math.calculate']);
-    assert.equal(groups.find((group) => group.id === 'you'), undefined, 'no human steps before M3');
   });
 
   it('suggests steps the previous step can fill – its own domain first, at most three', () => {
@@ -29,13 +30,13 @@ describe('step picker', () => {
   });
 
   it('suggests nothing when nothing fits', () => {
-    assert.equal(pickerGroups(catalog, { previousType: 'email.send' })[0].label, 'Tasks');
+    assert.equal(pickerGroups(catalog, { previousType: 'email.send' })[0].label, 'You');
   });
 
   it('searches label, description and domain name, without suggestions', () => {
     assert.deepEqual(outline(pickerGroups(catalog, { query: 'mail', previousType: 'task.create' })), ['Connections: Send e-mail']);
-    assert.deepEqual(outline(pickerGroups(catalog, { query: 'TICK' })), ['Tasks: Complete task, Get done tasks']); // "Ticks off a task.", "What you ticked off"
-    assert.deepEqual(outline(pickerGroups(catalog, { query: 'notifications' })), ['Notifications: Send notification']);
+    assert.deepEqual(outline(pickerGroups(catalog, { query: 'TICK' })), ['You: Do yourself', 'Tasks: Complete task, Get done tasks']); // "… until you tick it", "Ticks off a task.", "What you ticked off"
+    assert.deepEqual(outline(pickerGroups(catalog, { query: 'notifications' })), ['You: Ask me', 'Notifications: Send notification']);
     assert.deepEqual(pickerGroups(catalog, { query: 'nothing like this' }), []);
   });
 

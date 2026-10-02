@@ -43,7 +43,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
   - Migration, handler, `POST /notifications/:id/answer`, cancel → `expired`,
     `notification.answered` event. Manifest bump.
 
-- [ ] **M3-06 · Human steps in the web**
+- [x] **M3-06 · Human steps in the web**
   - Step picker *You* group. *If you don't get to it* setting. Run detail: *Waiting for you since
     … · skips at …*, *Do it now*, *Skip*. Notifications page: question cards with option buttons,
     answered/expired states. Tasks page: step tasks with the routine badge.

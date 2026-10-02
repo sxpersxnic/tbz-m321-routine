@@ -125,9 +125,12 @@ export function Tasks() {
     const due = dueText(task, today, tomorrow);
     const done = task.status === 'DONE';
     const list = listById.get(task.listId);
+    // a ticked step moved its routine on – there is no taking it back
+    const final = done && task.kind === 'step';
     return (
       <li key={task.id} className={`task-row ${done ? 'done' : ''}`}>
-        <input type="checkbox" className={`task-check prio-${task.priority}`} checked={done}
+        <input type="checkbox" className={`task-check prio-${task.priority}`} checked={done} disabled={final}
+          title={final ? 'Done – its routine has moved on' : undefined}
           onChange={() => void toggle(task)} aria-label={`${task.title} ${done ? 'reopen' : 'complete'}`} />
         <div className="task-body">
           <span className="task-title">
@@ -135,15 +138,16 @@ export function Tasks() {
             {task.title}
           </span>
           {task.description && <span className="muted small block">{task.description}</span>}
-          {(due || (showListTag && list)) && (
+          {(due || (showListTag && list) || task.kind === 'step') && (
             <span className="task-meta">
+              {task.kind === 'step' && <RoutineBadge task={task} />}
               {due && <span className={due.tone}>{due.text}</span>}
               {showListTag && list && <span className={`list-tag tint-${list.color}`}><i aria-hidden="true" />{list.name}</span>}
             </span>
           )}
         </div>
-        {/* the source is a quiet icon – a sentence on every row drowned the titles */}
-        {task.sourceExecutionId && (
+        {/* the source is a quiet icon – a sentence on every row drowned the titles; a step says it with its badge */}
+        {task.sourceExecutionId && task.kind !== 'step' && (
           <a className="task-source" href={`#/executions/${task.sourceExecutionId}`} title="Created by a routine – view run" aria-label={`${task.title}: view run`}>
             <Icon name="routines" size={15} />
           </a>
@@ -428,5 +432,15 @@ function ListDialog({ list, onClose, onSaved }: {
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** A step task belongs to a routine that waits for it: the badge names the routine and opens its run. */
+function RoutineBadge({ task }: { task: Task }) {
+  const name = task.sourceRoutineName ?? 'A routine';
+  return (
+    <a className="routine-badge" href={`#/executions/${task.sourceExecutionId}`} title={`"${name}" waits for this – view run`}>
+      <Icon name="routines" size={13} />{name}
+    </a>
   );
 }

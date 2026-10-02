@@ -426,6 +426,13 @@ a.list-row:active, button.list-row:active { background: var(--surface-3); }
 }
 .failure-step { display: flex; align-items: center; gap: 10px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .failure-card p { margin: 0; }
+/* a step that waits for you: calm, not alarming – the warn tint only as a hairline */
+.waiting { display: flex; flex-direction: column; gap: 10px; }
+.waiting-card {
+  background: var(--surface); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow), inset 0 0 0 1.5px var(--warn-fill);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.waiting-line { margin: 0; }
 .contents { display: contents; }
 
 /* dead letters (Infrastructure, admins) */
@@ -959,6 +966,11 @@ input.task-check.prio-high:not(:checked) { border-color: var(--err-fill); }
 .task-title { display: block; }
 .task-row.done .task-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
 .task-title { transition: color var(--soft) var(--ease); }
+.routine-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent); text-decoration: none;
+}
+.routine-badge:hover { text-decoration: underline; }
 .task-source { flex: none; color: var(--faint); padding: 3px; border-radius: 6px; display: grid; place-items: center; }
 .task-source:hover { color: var(--accent); background: var(--accent-soft); }
 .task-meta { display: flex; gap: 4px 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 2px; }
@@ -987,6 +999,12 @@ button.notice-main { cursor: pointer; }
 .notice-detail-body { white-space: pre-wrap; color: var(--text); overflow-wrap: anywhere; }
 .notice.read { background: color-mix(in srgb, var(--surface) 70%, transparent); box-shadow: none; }
 .notice.read .notice-body { color: var(--muted); }
+/* a question: its answers on their own row under the text, lined up with it */
+.notice.question { flex-wrap: wrap; row-gap: 10px; }
+.notice.question .notice-main { width: auto; flex: 1 1 200px; }
+.notice-answers, .notice-answer { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; border: 0; padding: 0; min-width: 0; }
+.notice-answer { align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.notice .notice-answers, .notice .notice-answer { margin-left: 32px; }
 
 /* ================================================================== system */
 .explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }

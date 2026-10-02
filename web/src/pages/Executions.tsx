@@ -6,10 +6,11 @@ import { RunOutcome } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
 import { CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton, StatusBadge } from '../components/ui.tsx';
 import { startRoutine } from './Routines.tsx';
-import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusTone } from '../components/visual.tsx';
+import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusSymbol, statusTone } from '../components/visual.tsx';
 import { between, clock, dateTime, groupByDay, JAEGER_URL, relative, splitInstance, TRIGGER_WORDS } from '../format.ts';
 import { navigate, useNow, usePolling, useRouteParam } from '../hooks.ts';
 import { FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine } from '../lib/failure-copy.ts';
+import { doItHref, doneTooLate, waitingLine, waitingSteps } from '../lib/waiting.ts';
 import { TERMINAL_STATUSES, type Execution, type ExecutionAction, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
 
 /** One run as a list row. `routine`, when known, gives the row its routine's colour and symbol. */
@@ -138,6 +139,7 @@ export function ExecutionDetail({ id }: { id: string }) {
   const now = useNow(500);
   const [rerunning, setRerunning] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [skipping, setSkipping] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const execution = usePolling(
@@ -204,6 +206,20 @@ export function ExecutionDetail({ id }: { id: string }) {
     }
   }
 
+  // the run goes on without the step; the server's answer shows where it went
+  async function skip(key: string) {
+    setSkipping(key);
+    try {
+      const after = await api.skipStep(e.id, key);
+      execution.mutate(() => after);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error), 'error');
+      execution.reload();
+    } finally {
+      setSkipping(null);
+    }
+  }
+
   const action = e.actions.find((candidate) => candidate.key === selected) ?? null;
   const workers = [...new Set(e.actions.map((candidate) => candidate.processedBy).filter(Boolean))];
   const done = e.actions.filter((candidate) => TERMINAL_ACTION.has(candidate.status)).length;
@@ -217,11 +233,11 @@ export function ExecutionDetail({ id }: { id: string }) {
 
       <header className="run-hero">
         <span className={`big-status tone-${tone}`} aria-hidden="true">
-          {tone === 'busy' ? <span className="status-spin" /> : <Icon name={tone === 'ok' ? 'check' : tone === 'err' ? 'x' : 'retry'} size={34} />}
+          {tone === 'busy' ? <span className="status-spin" /> : <Icon name={statusSymbol(e.status)} size={34} />}
         </span>
         <div className="grow">
           <span className="eyebrow">{e.routineName}</span>
-          <h1 aria-live="polite">{HEADLINE[e.status]}</h1>
+          <h1 aria-live="polite">{e.errorCode === 'CANCELLED' ? 'Cancelled' : HEADLINE[e.status]}</h1>
           <p>
             {e.calledBy ? <a href={`#/executions/${e.calledBy}`}>{started}</a> : started} · {dateTime(e.createdAt)} · <span className="tabular">{between(e.startedAt ?? e.createdAt, e.finishedAt, now)}</span>
             {e.resumeCount > 0 && <> · Resumed {e.resumeCount}×</>}
@@ -244,6 +260,7 @@ export function ExecutionDetail({ id }: { id: string }) {
       )}
 
       {e.status === 'FAILED' && <FailureCard e={e} onResume={() => void resume()} resuming={resuming} />}
+      {waitingSteps(e).length > 0 && <WaitingCard e={e} now={now} skipping={skipping} onSkip={(key) => void skip(key)} />}
       <RunOutcome actions={e.actions} status={e.status} />
 
       <Section id="flow-title" title="Steps">
@@ -363,6 +380,8 @@ function calledRun(e: Detail, action: ExecutionAction): string | undefined {
  * to do about it (02-experience §7, §8). Runs from before v2 have no code and keep their raw error.
  */
 function FailureCard({ e, onResume, resuming }: { e: Detail; onResume: () => void; resuming: boolean }) {
+  // ended on purpose: nothing to fix, nothing to retry
+  if (e.errorCode === 'CANCELLED') return null;
   const failed = failedActions(e).sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
   const copy = failed && failureCopy(failed.errorCode, failed, typesOf(e));
   const retry = (primary: boolean) => (
@@ -403,6 +422,33 @@ function FailureCard({ e, onResume, resuming }: { e: Detail; onResume: () => voi
   );
 }
 
+/**
+ * The steps that wait for you (02-experience §7): since when and until when, *Do it now* where the
+ * item is, and *Skip* to let the run go on without it.
+ */
+function WaitingCard({ e, now, skipping, onSkip }: { e: Detail; now: number; skipping: string | null; onSkip: (key: string) => void }) {
+  return (
+    // the headline says "Waiting for you" already – the cards say since when and what to do
+    <section className="waiting" aria-label="Steps waiting for you">
+      {waitingSteps(e).map((action) => (
+        <div key={action.id} className="waiting-card">
+          <div className="failure-step">
+            <StatusIcon status="AWAITING_USER" size={24} />
+            <span>{action.awaiting?.title ?? actionLabel(action.type)}</span>
+          </div>
+          <p className="muted waiting-line">{waitingLine(action, new Date(now))}</p>
+          <div className="row">
+            <a className="btn tinted" href={doItHref(action)}>Do it now</a>
+            <button type="button" className="btn" disabled={skipping !== null} onClick={() => onSkip(action.key)}>
+              {skipping === action.key ? <span className="spinner" /> : <Icon name="x" size={16} />} Skip
+            </button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function ActionFlowForRun({ e, now, selected, onSelect }: { e: Detail; now: number; selected: string | null; onSelect: (key: string) => void }) {
   return (
     <ActionFlow
@@ -413,6 +459,7 @@ function ActionFlowForRun({ e, now, selected, onSelect }: { e: Detail; now: numb
       aside={(action) => (
         <span className="aside">
           <StatusIcon status={action.status} size={20} label={action.status !== 'COMPLETED'} />
+          {action.status === 'SKIPPED' && doneTooLate(e, action.key) && <span className="muted small">done too late</span>}
           <span className="muted small tabular">
             {action.attempts > 1 && <>attempt {action.attempts} · </>}
             {action.dispatchedAt ? between(action.dispatchedAt, action.finishedAt, now) : ''}

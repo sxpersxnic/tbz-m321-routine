@@ -204,6 +204,9 @@ const TONE_ICON: Record<Tone, string> = { ok: 'check', err: 'x', busy: '', wait:
 /** Waiting for a person or a timer is not a retry: its own symbol (02-experience §7). */
 const STATUS_ICON: Record<string, string> = { WAITING_FOR_YOU: 'person', AWAITING_USER: 'person', DELAYED: 'clock', SCHEDULED: 'clock' };
 
+/** The symbol of a status that has one (busy statuses spin instead). */
+export const statusSymbol = (status: string): string => STATUS_ICON[status] ?? TONE_ICON[statusTone(status)];
+
 /**
  * Status as a symbol inside a circle – shape and colour both change, so a
  * colour-blind reader still tells a tick from a cross. `label` adds the words.
@@ -213,7 +216,7 @@ export function StatusIcon({ status, size = 22, label = false }: { status: strin
   return (
     <span className={`status-icon tone-${tone}`}>
       <span className="status-disc" style={{ width: size, height: size }} aria-hidden="true">
-        {tone === 'busy' ? <span className="status-spin" /> : <Icon name={STATUS_ICON[status] ?? TONE_ICON[tone]} size={Math.round(size * 0.6)} />}
+        {tone === 'busy' ? <span className="status-spin" /> : <Icon name={statusSymbol(status)} size={Math.round(size * 0.6)} />}
       </span>
       {label ? <span className="status-text">{statusLabel(status)}</span> : <span className="sr-only">{statusLabel(status)}</span>}
     </span>

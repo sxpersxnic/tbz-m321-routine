@@ -1,628 +1,763 @@
 [
   {
-    "icon": "checklist",
+    "contract": 1,
+    "domain": "tasks",
+    "manifestVersion": 2,
+    "service": "task-service",
     "name": "Tasks",
-    "page": "/tasks",
+    "description": "To-dos on your lists – created, ticked and moved by routines too.",
+    "icon": "checklist",
     "tint": "green",
     "order": 10,
-    "domain": "tasks",
-    "service": "task-service",
-    "contract": 1,
     "optional": false,
     "prefixes": [
       "task"
+    ],
+    "page": "/tasks",
+    "collections": {
+      "lists": {
+        "label": "Lists",
+        "list": "/api/v1/task-lists",
+        "idField": "id",
+        "labelField": "name",
+        "iconField": "icon",
+        "tintField": "color"
+      }
+    },
+    "capabilities": [
+      {
+        "type": "task.create",
+        "kind": "action",
+        "label": "Create task",
+        "sentence": "Create task {title}, due {dueDate}",
+        "description": "Puts a task on your list.",
+        "params": [
+          {
+            "name": "title",
+            "label": "Title",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "description",
+            "label": "Notes",
+            "type": "longText"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice",
+            "options": [
+              {
+                "value": "low",
+                "label": "Low"
+              },
+              {
+                "value": "normal",
+                "label": "Normal"
+              },
+              {
+                "value": "high",
+                "label": "High"
+              }
+            ],
+            "default": "normal"
+          },
+          {
+            "name": "dueInDays",
+            "label": "Due in days",
+            "type": "integer",
+            "min": 0,
+            "hint": "0 = today",
+            "advanced": true
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          },
+          {
+            "name": "title",
+            "label": "Task",
+            "type": "text",
+            "example": "Write weekly review"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref"
+          },
+          {
+            "name": "dueDate",
+            "label": "Due date",
+            "type": "date",
+            "example": "2026-10-01"
+          },
+          {
+            "name": "priority",
+            "label": "Priority",
+            "type": "choice"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "task.complete",
+        "kind": "action",
+        "label": "Complete task",
+        "sentence": "Complete {taskId}",
+        "description": "Ticks off a task.",
+        "params": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          },
+          {
+            "name": "completedAt",
+            "label": "Done at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "task.move",
+        "kind": "action",
+        "label": "Move task",
+        "sentence": "Move {taskId} to {listId}",
+        "description": "Moves a task to another list or day.",
+        "params": [
+          {
+            "name": "taskId",
+            "label": "Task",
+            "type": "text",
+            "required": true,
+            "hint": "Usually {{…}} from an earlier step"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          },
+          {
+            "name": "dueDate",
+            "label": "Due",
+            "type": "date"
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "task.await",
+        "kind": "human",
+        "label": "Do yourself",
+        "sentence": "You: {title}",
+        "description": "Puts a task on your list and waits until you tick it.",
+        "icon": "person",
+        "params": [
+          {
+            "name": "title",
+            "label": "What to do",
+            "type": "text",
+            "required": true,
+            "placeholder": "Stretch for 5 minutes"
+          },
+          {
+            "name": "description",
+            "label": "Notes",
+            "type": "longText"
+          },
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          }
+        ],
+        "output": [
+          {
+            "name": "taskId",
+            "label": "Task ID",
+            "type": "text"
+          },
+          {
+            "name": "completedAt",
+            "label": "Done at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "human": {
+          "awaits": "task"
+        },
+        "since": 2
+      },
+      {
+        "type": "task.openTasks",
+        "kind": "value",
+        "label": "Get open tasks",
+        "sentence": "Get open tasks in {listId}, due by {dueBy}",
+        "description": "The tasks still to do, soonest first.",
+        "params": [
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          },
+          {
+            "name": "dueBy",
+            "label": "Due by",
+            "type": "date"
+          },
+          {
+            "name": "limit",
+            "label": "At most",
+            "type": "integer",
+            "min": 1,
+            "max": 100,
+            "default": 20,
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Tasks",
+            "type": "list"
+          },
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 3
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "task.doneTasks",
+        "kind": "value",
+        "label": "Get done tasks",
+        "sentence": "Get tasks done since {since}",
+        "description": "What you ticked off – for a review.",
+        "params": [
+          {
+            "name": "since",
+            "label": "Since",
+            "type": "date",
+            "default": "+0d"
+          },
+          {
+            "name": "limit",
+            "label": "At most",
+            "type": "integer",
+            "min": 1,
+            "max": 100,
+            "default": 20,
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "items",
+            "label": "Tasks",
+            "type": "list"
+          },
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 3
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "task.count",
+        "kind": "value",
+        "label": "Count tasks",
+        "sentence": "Count open tasks in {listId}",
+        "description": "How many tasks are open (or overdue).",
+        "params": [
+          {
+            "name": "listId",
+            "label": "List",
+            "type": "ref",
+            "ref": {
+              "domain": "tasks",
+              "collection": "lists"
+            }
+          },
+          {
+            "name": "overdueOnly",
+            "label": "Only overdue",
+            "type": "boolean",
+            "default": false
+          }
+        ],
+        "output": [
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "integer",
+            "example": 4
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
+      }
     ],
     "triggers": [
       {
         "type": "task.created",
         "label": "A task is created",
-        "since": 1,
+        "sentence": "When a task {filter} is created",
+        "description": "Runs when a task is added – by you or a routine.",
         "fields": [
           {
             "name": "taskId",
-            "type": "text",
-            "label": "Task"
+            "label": "Task",
+            "type": "text"
           },
           {
             "name": "title",
-            "type": "text",
             "label": "Title",
+            "type": "text",
             "example": "Write weekly review"
           },
           {
             "name": "listId",
-            "type": "ref",
-            "label": "List"
+            "label": "List",
+            "type": "ref"
           },
           {
             "name": "listName",
-            "type": "text",
-            "label": "List name"
+            "label": "List name",
+            "type": "text"
           },
           {
             "name": "areaId",
-            "type": "ref",
-            "label": "Area"
+            "label": "Area",
+            "type": "ref"
           },
           {
             "name": "priority",
-            "type": "choice",
-            "label": "Priority"
+            "label": "Priority",
+            "type": "choice"
           },
           {
             "name": "dueDate",
-            "type": "date",
-            "label": "Due"
+            "label": "Due",
+            "type": "date"
           },
           {
             "name": "kind",
-            "type": "choice",
-            "label": "Kind"
+            "label": "Kind",
+            "type": "choice"
           },
           {
             "name": "sourceRoutineId",
-            "type": "ref",
-            "label": "Created by routine"
+            "label": "Created by routine",
+            "type": "ref"
           }
         ],
-        "sentence": "When a task {filter} is created",
-        "description": "Runs when a task is added – by you or a routine."
+        "since": 1
       },
       {
         "type": "task.completed",
         "label": "A task is completed",
-        "since": 1,
+        "sentence": "When a task {filter} is completed",
+        "description": "Runs when you tick a task.",
         "fields": [
           {
             "name": "taskId",
-            "type": "text",
-            "label": "Task"
+            "label": "Task",
+            "type": "text"
           },
           {
             "name": "title",
-            "type": "text",
             "label": "Title",
+            "type": "text",
             "example": "Write weekly review"
           },
           {
             "name": "listId",
-            "type": "ref",
-            "label": "List"
+            "label": "List",
+            "type": "ref"
           },
           {
             "name": "listName",
-            "type": "text",
-            "label": "List name"
+            "label": "List name",
+            "type": "text"
           },
           {
             "name": "areaId",
-            "type": "ref",
-            "label": "Area"
+            "label": "Area",
+            "type": "ref"
           },
           {
             "name": "priority",
-            "type": "choice",
-            "label": "Priority"
+            "label": "Priority",
+            "type": "choice"
           },
           {
             "name": "dueDate",
-            "type": "date",
-            "label": "Due"
+            "label": "Due",
+            "type": "date"
           },
           {
             "name": "kind",
-            "type": "choice",
-            "label": "Kind"
+            "label": "Kind",
+            "type": "choice"
           },
           {
             "name": "sourceRoutineId",
-            "type": "ref",
-            "label": "Created by routine"
+            "label": "Created by routine",
+            "type": "ref"
           },
           {
             "name": "completedAt",
-            "type": "text",
-            "label": "Done at"
+            "label": "Done at",
+            "type": "text"
           }
         ],
-        "sentence": "When a task {filter} is completed",
-        "description": "Runs when you tick a task."
+        "since": 1
       },
       {
         "type": "task.reopened",
         "label": "A task is reopened",
-        "since": 1,
+        "sentence": "When a task {filter} is reopened",
+        "description": "Runs when a done task is opened again.",
         "fields": [
           {
             "name": "taskId",
-            "type": "text",
-            "label": "Task"
+            "label": "Task",
+            "type": "text"
           },
           {
             "name": "title",
-            "type": "text",
             "label": "Title",
+            "type": "text",
             "example": "Write weekly review"
           },
           {
             "name": "listId",
-            "type": "ref",
-            "label": "List"
+            "label": "List",
+            "type": "ref"
           },
           {
             "name": "listName",
-            "type": "text",
-            "label": "List name"
+            "label": "List name",
+            "type": "text"
           },
           {
             "name": "areaId",
-            "type": "ref",
-            "label": "Area"
+            "label": "Area",
+            "type": "ref"
           },
           {
             "name": "priority",
-            "type": "choice",
-            "label": "Priority"
+            "label": "Priority",
+            "type": "choice"
           },
           {
             "name": "dueDate",
-            "type": "date",
-            "label": "Due"
+            "label": "Due",
+            "type": "date"
           },
           {
             "name": "kind",
-            "type": "choice",
-            "label": "Kind"
+            "label": "Kind",
+            "type": "choice"
           },
           {
             "name": "sourceRoutineId",
-            "type": "ref",
-            "label": "Created by routine"
+            "label": "Created by routine",
+            "type": "ref"
           }
         ],
-        "sentence": "When a task {filter} is reopened",
-        "description": "Runs when a done task is opened again."
+        "since": 1
       },
       {
         "type": "task.moved",
         "label": "A task is moved",
-        "since": 1,
+        "sentence": "When a task {filter} is moved",
+        "description": "Runs when a task changes its list or day.",
         "fields": [
           {
             "name": "taskId",
-            "type": "text",
-            "label": "Task"
+            "label": "Task",
+            "type": "text"
           },
           {
             "name": "title",
-            "type": "text",
             "label": "Title",
+            "type": "text",
             "example": "Write weekly review"
           },
           {
             "name": "listId",
-            "type": "ref",
-            "label": "List"
+            "label": "List",
+            "type": "ref"
           },
           {
             "name": "listName",
-            "type": "text",
-            "label": "List name"
+            "label": "List name",
+            "type": "text"
           },
           {
             "name": "areaId",
-            "type": "ref",
-            "label": "Area"
+            "label": "Area",
+            "type": "ref"
           },
           {
             "name": "priority",
-            "type": "choice",
-            "label": "Priority"
+            "label": "Priority",
+            "type": "choice"
           },
           {
             "name": "dueDate",
-            "type": "date",
-            "label": "Due"
+            "label": "Due",
+            "type": "date"
           },
           {
             "name": "kind",
-            "type": "choice",
-            "label": "Kind"
+            "label": "Kind",
+            "type": "choice"
           },
           {
             "name": "sourceRoutineId",
-            "type": "ref",
-            "label": "Created by routine"
+            "label": "Created by routine",
+            "type": "ref"
           },
           {
             "name": "fromListId",
-            "type": "ref",
-            "label": "From list"
+            "label": "From list",
+            "type": "ref"
           }
         ],
-        "sentence": "When a task {filter} is moved",
-        "description": "Runs when a task changes its list or day."
+        "since": 1
       }
     ],
-    "collections": {
-      "lists": {
-        "list": "/api/v1/task-lists",
-        "label": "Lists",
-        "idField": "id",
-        "iconField": "icon",
-        "tintField": "color",
-        "labelField": "name"
-      }
-    },
-    "description": "To-dos on your lists – created, ticked and moved by routines too.",
-    "capabilities": [
-      {
-        "kind": "action",
-        "type": "task.create",
-        "label": "Create task",
-        "since": 1,
-        "output": [
-          {
-            "name": "taskId",
-            "type": "text",
-            "label": "Task ID"
-          },
-          {
-            "name": "title",
-            "type": "text",
-            "label": "Task",
-            "example": "Write weekly review"
-          },
-          {
-            "name": "listId",
-            "type": "ref",
-            "label": "List"
-          },
-          {
-            "name": "dueDate",
-            "type": "date",
-            "label": "Due date",
-            "example": "2026-10-01"
-          },
-          {
-            "name": "priority",
-            "type": "choice",
-            "label": "Priority"
-          }
-        ],
-        "params": [
-          {
-            "name": "title",
-            "type": "text",
-            "label": "Title",
-            "required": true
-          },
-          {
-            "name": "description",
-            "type": "longText",
-            "label": "Notes"
-          },
-          {
-            "name": "priority",
-            "type": "choice",
-            "label": "Priority",
-            "default": "normal",
-            "options": [
-              {
-                "label": "Low",
-                "value": "low"
-              },
-              {
-                "label": "Normal",
-                "value": "normal"
-              },
-              {
-                "label": "High",
-                "value": "high"
-              }
-            ]
-          },
-          {
-            "min": 0,
-            "hint": "0 = today",
-            "name": "dueInDays",
-            "type": "integer",
-            "label": "Due in days",
-            "advanced": true
-          },
-          {
-            "name": "dueDate",
-            "type": "date",
-            "label": "Due"
-          },
-          {
-            "ref": {
-              "domain": "tasks",
-              "collection": "lists"
-            },
-            "name": "listId",
-            "type": "ref",
-            "label": "List"
-          }
-        ],
-        "sentence": "Create task {title}, due {dueDate}",
-        "description": "Puts a task on your list.",
-        "sideEffects": true
-      },
-      {
-        "kind": "action",
-        "type": "task.complete",
-        "label": "Complete task",
-        "since": 1,
-        "output": [
-          {
-            "name": "taskId",
-            "type": "text",
-            "label": "Task ID"
-          },
-          {
-            "name": "completedAt",
-            "type": "text",
-            "label": "Done at"
-          }
-        ],
-        "params": [
-          {
-            "hint": "Usually {{…}} from an earlier step",
-            "name": "taskId",
-            "type": "text",
-            "label": "Task",
-            "required": true
-          }
-        ],
-        "sentence": "Complete {taskId}",
-        "description": "Ticks off a task.",
-        "sideEffects": true
-      },
-      {
-        "kind": "action",
-        "type": "task.move",
-        "label": "Move task",
-        "since": 1,
-        "output": [
-          {
-            "name": "taskId",
-            "type": "text",
-            "label": "Task ID"
-          }
-        ],
-        "params": [
-          {
-            "hint": "Usually {{…}} from an earlier step",
-            "name": "taskId",
-            "type": "text",
-            "label": "Task",
-            "required": true
-          },
-          {
-            "ref": {
-              "domain": "tasks",
-              "collection": "lists"
-            },
-            "name": "listId",
-            "type": "ref",
-            "label": "List"
-          },
-          {
-            "name": "dueDate",
-            "type": "date",
-            "label": "Due"
-          }
-        ],
-        "sentence": "Move {taskId} to {listId}",
-        "description": "Moves a task to another list or day.",
-        "sideEffects": true
-      },
-      {
-        "kind": "value",
-        "type": "task.openTasks",
-        "label": "Get open tasks",
-        "since": 1,
-        "output": [
-          {
-            "name": "items",
-            "type": "list",
-            "label": "Tasks"
-          },
-          {
-            "name": "count",
-            "type": "integer",
-            "label": "Count",
-            "example": 3
-          }
-        ],
-        "params": [
-          {
-            "ref": {
-              "domain": "tasks",
-              "collection": "lists"
-            },
-            "name": "listId",
-            "type": "ref",
-            "label": "List"
-          },
-          {
-            "name": "dueBy",
-            "type": "date",
-            "label": "Due by"
-          },
-          {
-            "max": 100,
-            "min": 1,
-            "name": "limit",
-            "type": "integer",
-            "label": "At most",
-            "default": 20,
-            "advanced": true
-          }
-        ],
-        "sentence": "Get open tasks in {listId}, due by {dueBy}",
-        "description": "The tasks still to do, soonest first.",
-        "sideEffects": false
-      },
-      {
-        "kind": "value",
-        "type": "task.doneTasks",
-        "label": "Get done tasks",
-        "since": 1,
-        "output": [
-          {
-            "name": "items",
-            "type": "list",
-            "label": "Tasks"
-          },
-          {
-            "name": "count",
-            "type": "integer",
-            "label": "Count",
-            "example": 3
-          }
-        ],
-        "params": [
-          {
-            "name": "since",
-            "type": "date",
-            "label": "Since",
-            "default": "+0d"
-          },
-          {
-            "max": 100,
-            "min": 1,
-            "name": "limit",
-            "type": "integer",
-            "label": "At most",
-            "default": 20,
-            "advanced": true
-          }
-        ],
-        "sentence": "Get tasks done since {since}",
-        "description": "What you ticked off – for a review.",
-        "sideEffects": false
-      },
-      {
-        "kind": "value",
-        "type": "task.count",
-        "label": "Count tasks",
-        "since": 1,
-        "output": [
-          {
-            "name": "count",
-            "type": "integer",
-            "label": "Count",
-            "example": 4
-          }
-        ],
-        "params": [
-          {
-            "ref": {
-              "domain": "tasks",
-              "collection": "lists"
-            },
-            "name": "listId",
-            "type": "ref",
-            "label": "List"
-          },
-          {
-            "name": "overdueOnly",
-            "type": "boolean",
-            "label": "Only overdue",
-            "default": false
-          }
-        ],
-        "sentence": "Count open tasks in {listId}",
-        "description": "How many tasks are open (or overdue).",
-        "sideEffects": false
-      }
-    ],
-    "manifestVersion": 1,
     "enabled": true
   },
   {
-    "icon": "bell",
+    "contract": 1,
+    "domain": "notifications",
+    "manifestVersion": 2,
+    "service": "notification-service",
     "name": "Notifications",
-    "page": "/notifications",
+    "description": "Messages to you in the app.",
+    "icon": "bell",
     "tint": "pink",
     "order": 20,
-    "domain": "notifications",
-    "service": "notification-service",
-    "contract": 1,
     "optional": false,
     "prefixes": [
       "notification"
     ],
-    "description": "Messages to you in the app.",
+    "page": "/notifications",
     "capabilities": [
       {
-        "kind": "action",
         "type": "notification.send",
+        "kind": "action",
         "label": "Send notification",
-        "since": 1,
-        "output": [
-          {
-            "name": "notificationId",
-            "type": "text",
-            "label": "Notification"
-          },
-          {
-            "name": "deliveredAt",
-            "type": "text",
-            "label": "Delivered at"
-          }
-        ],
+        "sentence": "Send notification {title}",
+        "description": "Sends you a notification in the app.",
         "params": [
           {
             "name": "title",
-            "type": "text",
             "label": "Title",
+            "type": "text",
             "required": true
           },
           {
             "name": "body",
-            "type": "longText",
-            "label": "Message"
+            "label": "Message",
+            "type": "longText"
           },
           {
             "name": "priority",
-            "type": "choice",
             "label": "Priority",
-            "default": "normal",
+            "type": "choice",
             "options": [
               {
-                "label": "Low",
-                "value": "low"
+                "value": "low",
+                "label": "Low"
               },
               {
-                "label": "Normal",
-                "value": "normal"
+                "value": "normal",
+                "label": "Normal"
               },
               {
-                "label": "High",
-                "value": "high"
+                "value": "high",
+                "label": "High"
               }
-            ]
+            ],
+            "default": "normal"
           }
         ],
-        "sentence": "Send notification {title}",
-        "description": "Sends you a notification in the app.",
-        "sideEffects": true
+        "output": [
+          {
+            "name": "notificationId",
+            "label": "Notification",
+            "type": "text"
+          },
+          {
+            "name": "deliveredAt",
+            "label": "Delivered at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
+      },
+      {
+        "type": "notification.ask",
+        "kind": "human",
+        "label": "Ask me",
+        "sentence": "Ask me {question}",
+        "description": "Asks you a question with a few answers and waits for yours.",
+        "icon": "person",
+        "params": [
+          {
+            "name": "question",
+            "label": "Question",
+            "type": "text",
+            "required": true,
+            "placeholder": "How did you sleep?"
+          },
+          {
+            "name": "options",
+            "label": "Answers",
+            "type": "list",
+            "required": true,
+            "hint": "2 to 4 answers, e.g. [\"Well\", \"Badly\"]",
+            "default": [
+              "Yes",
+              "No"
+            ]
+          },
+          {
+            "name": "body",
+            "label": "Details",
+            "type": "longText",
+            "advanced": true
+          }
+        ],
+        "output": [
+          {
+            "name": "value",
+            "label": "Answer",
+            "type": "text",
+            "example": "Well"
+          },
+          {
+            "name": "label",
+            "label": "Answer label",
+            "type": "text",
+            "example": "Well"
+          },
+          {
+            "name": "answeredAt",
+            "label": "Answered at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
+        "human": {
+          "awaits": "question"
+        },
+        "since": 2
       }
     ],
-    "manifestVersion": 1,
+    "triggers": [
+      {
+        "type": "notification.answered",
+        "label": "A question is answered",
+        "sentence": "When you answer {filter}",
+        "description": "Runs when you answer a question a routine asked.",
+        "fields": [
+          {
+            "name": "notificationId",
+            "label": "Question",
+            "type": "text"
+          },
+          {
+            "name": "value",
+            "label": "Answer",
+            "type": "text",
+            "example": "Well"
+          },
+          {
+            "name": "label",
+            "label": "Answer label",
+            "type": "text"
+          }
+        ],
+        "since": 2
+      }
+    ],
     "enabled": true
   },
   {
-    "icon": "globe",
+    "contract": 1,
+    "domain": "connections",
+    "manifestVersion": 1,
+    "service": "integration-worker",
     "name": "Connections",
+    "description": "Weather, websites and e-mail – Routine talking to the outside world.",
+    "icon": "globe",
     "tint": "violet",
     "order": 30,
-    "domain": "connections",
-    "service": "integration-worker",
-    "contract": 1,
     "optional": false,
     "prefixes": [
       "weather",
@@ -630,556 +765,554 @@
       "summary",
       "email"
     ],
-    "description": "Weather, websites and e-mail – Routine talking to the outside world.",
     "capabilities": [
       {
-        "icon": "cloud",
-        "kind": "value",
-        "tint": "sky",
         "type": "weather.get",
+        "kind": "value",
         "label": "Get weather",
-        "since": 1,
-        "output": [
-          {
-            "name": "city",
-            "type": "text",
-            "label": "City"
-          },
-          {
-            "name": "temperatureC",
-            "type": "number",
-            "label": "Temperature",
-            "example": 21
-          },
-          {
-            "name": "condition",
-            "type": "text",
-            "label": "Conditions",
-            "example": "sunny"
-          },
-          {
-            "name": "summary",
-            "type": "text",
-            "label": "Forecast",
-            "example": "Zurich: sunny, 21 °C"
-          }
-        ],
+        "sentence": "Get weather for {city}",
+        "description": "Fetches the current weather for a city.",
+        "icon": "cloud",
+        "tint": "sky",
         "params": [
           {
             "name": "city",
-            "type": "text",
             "label": "City",
+            "type": "text",
             "required": true,
             "placeholder": "Zurich"
           }
         ],
-        "sentence": "Get weather for {city}",
-        "description": "Fetches the current weather for a city.",
-        "sideEffects": false
+        "output": [
+          {
+            "name": "city",
+            "label": "City",
+            "type": "text"
+          },
+          {
+            "name": "temperatureC",
+            "label": "Temperature",
+            "type": "number",
+            "example": 21
+          },
+          {
+            "name": "condition",
+            "label": "Conditions",
+            "type": "text",
+            "example": "sunny"
+          },
+          {
+            "name": "summary",
+            "label": "Forecast",
+            "type": "text",
+            "example": "Zurich: sunny, 21 °C"
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
       },
       {
-        "kind": "action",
         "type": "http.request",
+        "kind": "action",
         "label": "Call webhook",
-        "since": 1,
+        "sentence": "Call webhook {url}",
+        "description": "Sends a request to another service.",
+        "params": [
+          {
+            "name": "method",
+            "label": "Method",
+            "type": "choice",
+            "options": [
+              {
+                "value": "GET",
+                "label": "GET"
+              },
+              {
+                "value": "POST",
+                "label": "POST"
+              },
+              {
+                "value": "PUT",
+                "label": "PUT"
+              },
+              {
+                "value": "PATCH",
+                "label": "PATCH"
+              },
+              {
+                "value": "DELETE",
+                "label": "DELETE"
+              }
+            ],
+            "default": "GET",
+            "templating": false
+          },
+          {
+            "name": "url",
+            "label": "URL",
+            "type": "text",
+            "required": true,
+            "placeholder": "http://mock-external:8090/webhooks/demo",
+            "hint": "mock-external only"
+          },
+          {
+            "name": "headers",
+            "label": "Headers",
+            "type": "object",
+            "advanced": true
+          },
+          {
+            "name": "body",
+            "label": "Body (JSON)",
+            "type": "value"
+          }
+        ],
         "output": [
           {
             "name": "status",
-            "type": "integer",
             "label": "HTTP status",
+            "type": "integer",
             "example": 200
           },
           {
             "name": "body",
-            "type": "value",
-            "label": "Response"
+            "label": "Response",
+            "type": "value"
           }
         ],
-        "params": [
-          {
-            "name": "method",
-            "type": "choice",
-            "label": "Method",
-            "default": "GET",
-            "options": [
-              {
-                "label": "GET",
-                "value": "GET"
-              },
-              {
-                "label": "POST",
-                "value": "POST"
-              },
-              {
-                "label": "PUT",
-                "value": "PUT"
-              },
-              {
-                "label": "PATCH",
-                "value": "PATCH"
-              },
-              {
-                "label": "DELETE",
-                "value": "DELETE"
-              }
-            ],
-            "templating": false
-          },
-          {
-            "hint": "mock-external only",
-            "name": "url",
-            "type": "text",
-            "label": "URL",
-            "required": true,
-            "placeholder": "http://mock-external:8090/webhooks/demo"
-          },
-          {
-            "name": "headers",
-            "type": "object",
-            "label": "Headers",
-            "advanced": true
-          },
-          {
-            "name": "body",
-            "type": "value",
-            "label": "Body (JSON)"
-          }
-        ],
-        "sentence": "Call webhook {url}",
-        "description": "Sends a request to another service.",
-        "sideEffects": true
+        "sideEffects": true,
+        "since": 1
       },
       {
-        "icon": "doc",
-        "kind": "value",
-        "tint": "orange",
         "type": "summary.generate",
+        "kind": "value",
         "label": "Create summary",
-        "since": 1,
-        "output": [
-          {
-            "name": "text",
-            "type": "longText",
-            "label": "Text"
-          },
-          {
-            "name": "title",
-            "type": "text",
-            "label": "Title"
-          },
-          {
-            "name": "lineCount",
-            "type": "integer",
-            "label": "Lines"
-          }
-        ],
+        "sentence": "Create summary {title}",
+        "description": "Combines results of earlier steps into one text.",
+        "icon": "doc",
+        "tint": "orange",
         "params": [
           {
             "name": "title",
-            "type": "text",
             "label": "Title",
+            "type": "text",
             "required": true
           },
           {
             "name": "sections",
-            "type": "object",
-            "label": "Sections"
+            "label": "Sections",
+            "type": "object"
           },
           {
             "name": "lines",
-            "type": "list",
             "label": "Lines",
+            "type": "list",
             "advanced": true
           }
         ],
-        "sentence": "Create summary {title}",
-        "description": "Combines results of earlier steps into one text.",
-        "sideEffects": false
-      },
-      {
-        "icon": "mail",
-        "kind": "action",
-        "tint": "indigo",
-        "type": "email.send",
-        "label": "Send e-mail",
-        "since": 1,
         "output": [
           {
-            "name": "messageId",
-            "type": "text",
-            "label": "Message ID"
+            "name": "text",
+            "label": "Text",
+            "type": "longText"
           },
           {
-            "name": "to",
-            "type": "text",
-            "label": "Recipients"
+            "name": "title",
+            "label": "Title",
+            "type": "text"
           },
           {
-            "name": "subject",
-            "type": "text",
-            "label": "Subject"
-          },
-          {
-            "name": "sentAt",
-            "type": "text",
-            "label": "Sent at"
+            "name": "lineCount",
+            "label": "Lines",
+            "type": "integer"
           }
         ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "email.send",
+        "kind": "action",
+        "label": "Send e-mail",
+        "sentence": "Send e-mail {subject} to {to}",
+        "description": "Sends an e-mail to one or more addresses.",
+        "icon": "mail",
+        "tint": "indigo",
         "params": [
           {
-            "hint": "Several: separate with commas",
             "name": "to",
-            "type": "text",
             "label": "To",
+            "type": "text",
             "required": true,
-            "placeholder": "ada@example.com"
+            "placeholder": "ada@example.com",
+            "hint": "Several: separate with commas"
           },
           {
             "name": "subject",
-            "type": "text",
             "label": "Subject",
+            "type": "text",
             "required": true
           },
           {
             "name": "body",
-            "type": "longText",
-            "label": "Message"
+            "label": "Message",
+            "type": "longText"
           }
         ],
+        "output": [
+          {
+            "name": "messageId",
+            "label": "Message ID",
+            "type": "text"
+          },
+          {
+            "name": "to",
+            "label": "Recipients",
+            "type": "text"
+          },
+          {
+            "name": "subject",
+            "label": "Subject",
+            "type": "text"
+          },
+          {
+            "name": "sentAt",
+            "label": "Sent at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": true,
         "preview": true,
-        "sentence": "Send e-mail {subject} to {to}",
-        "description": "Sends an e-mail to one or more addresses.",
-        "sideEffects": true
+        "since": 1
       }
     ],
-    "manifestVersion": 1,
     "enabled": true
   },
   {
-    "icon": "routines",
+    "contract": 1,
+    "domain": "routines",
+    "manifestVersion": 1,
+    "service": "routine-service",
     "name": "Routines",
-    "page": "/routines",
+    "description": "Run a routine from another one, and react to how runs end.",
+    "icon": "routines",
     "tint": "grey",
     "order": 80,
-    "domain": "routines",
-    "service": "routine-service",
-    "contract": 1,
     "optional": false,
     "prefixes": [
       "routine",
       "execution"
     ],
-    "triggers": [
-      {
-        "type": "execution.completed",
-        "label": "A routine finished",
-        "since": 1,
-        "fields": [
-          {
-            "name": "routineId",
-            "type": "ref",
-            "label": "Routine"
-          },
-          {
-            "name": "routineName",
-            "type": "text",
-            "label": "Routine name"
-          }
-        ],
-        "sentence": "When {routineName} finishes",
-        "description": "Starts when a run of a routine succeeded."
-      },
-      {
-        "type": "execution.failed",
-        "label": "A routine failed",
-        "since": 1,
-        "fields": [
-          {
-            "name": "routineId",
-            "type": "ref",
-            "label": "Routine"
-          },
-          {
-            "name": "routineName",
-            "type": "text",
-            "label": "Routine name"
-          },
-          {
-            "name": "errorCode",
-            "type": "text",
-            "label": "Why"
-          }
-        ],
-        "sentence": "When {routineName} fails",
-        "description": "Starts when a run of a routine failed."
-      }
-    ],
+    "page": "/routines",
     "collections": {
       "routines": {
-        "list": "/api/v1/routines",
         "label": "Routines",
+        "list": "/api/v1/routines",
         "idField": "id",
         "labelField": "name"
       }
     },
-    "description": "Run a routine from another one, and react to how runs end.",
     "capabilities": [
       {
-        "kind": "action",
         "type": "routine.run",
+        "kind": "action",
         "label": "Run routine",
-        "since": 1,
-        "output": [
-          {
-            "name": "result",
-            "type": "value",
-            "label": "Result"
-          },
-          {
-            "name": "executionId",
-            "type": "text",
-            "label": "Run"
-          },
-          {
-            "name": "vars",
-            "type": "object",
-            "label": "Variables"
-          }
-        ],
+        "sentence": "Run routine {routineId} with {input}",
+        "description": "Runs another routine like a function and waits for it.",
         "params": [
           {
+            "name": "routineId",
+            "label": "Routine",
+            "type": "ref",
+            "required": true,
             "ref": {
               "domain": "routines",
               "collection": "routines"
             },
-            "name": "routineId",
-            "type": "ref",
-            "label": "Routine",
-            "required": true,
             "templating": false
           },
           {
-            "hint": "The routine reads it as {{input}}; it returns its variable \"result\"",
             "name": "input",
+            "label": "Input",
             "type": "value",
-            "label": "Input"
+            "hint": "The routine reads it as {{input}}; it returns its variable \"result\""
           },
           {
             "name": "routineName",
-            "type": "text",
             "label": "Routine name",
+            "type": "text",
             "advanced": true,
             "templating": false
           }
         ],
-        "sentence": "Run routine {routineId} with {input}",
-        "description": "Runs another routine like a function and waits for it.",
-        "sideEffects": true
+        "output": [
+          {
+            "name": "result",
+            "label": "Result",
+            "type": "value"
+          },
+          {
+            "name": "executionId",
+            "label": "Run",
+            "type": "text"
+          },
+          {
+            "name": "vars",
+            "label": "Variables",
+            "type": "object"
+          }
+        ],
+        "sideEffects": true,
+        "since": 1
       }
     ],
-    "manifestVersion": 1,
+    "triggers": [
+      {
+        "type": "execution.completed",
+        "label": "A routine finished",
+        "sentence": "When {routineName} finishes",
+        "description": "Starts when a run of a routine succeeded.",
+        "fields": [
+          {
+            "name": "routineId",
+            "label": "Routine",
+            "type": "ref"
+          },
+          {
+            "name": "routineName",
+            "label": "Routine name",
+            "type": "text"
+          }
+        ],
+        "since": 1
+      },
+      {
+        "type": "execution.failed",
+        "label": "A routine failed",
+        "sentence": "When {routineName} fails",
+        "description": "Starts when a run of a routine failed.",
+        "fields": [
+          {
+            "name": "routineId",
+            "label": "Routine",
+            "type": "ref"
+          },
+          {
+            "name": "routineName",
+            "label": "Routine name",
+            "type": "text"
+          },
+          {
+            "name": "errorCode",
+            "label": "Why",
+            "type": "text"
+          }
+        ],
+        "since": 1
+      }
+    ],
     "enabled": true
   },
   {
-    "icon": "calc",
+    "contract": 1,
+    "domain": "scripting",
+    "manifestVersion": 1,
+    "service": "routine-service",
     "name": "Scripting",
+    "description": "Variables, conditions and calculations between your steps.",
+    "icon": "calc",
     "tint": "grey",
     "order": 90,
-    "domain": "scripting",
-    "service": "routine-service",
-    "contract": 1,
     "optional": false,
     "prefixes": [
       "variable",
       "condition",
       "math"
     ],
-    "description": "Variables, conditions and calculations between your steps.",
     "capabilities": [
       {
-        "icon": "variable",
-        "kind": "value",
         "type": "variable.set",
+        "kind": "value",
         "label": "Set variable",
-        "since": 1,
-        "output": [
-          {
-            "name": "name",
-            "type": "text",
-            "label": "Name"
-          },
-          {
-            "name": "value",
-            "type": "value",
-            "label": "Value"
-          }
-        ],
+        "sentence": "Set {name} to {value}",
+        "description": "Keeps a value under a name, for later steps.",
+        "icon": "variable",
         "params": [
           {
             "name": "name",
-            "type": "text",
             "label": "Name",
+            "type": "text",
             "required": true,
-            "templating": false,
-            "placeholder": "city"
+            "placeholder": "city",
+            "templating": false
           },
           {
-            "hint": "Text, a number, or a list like [\"a\", \"b\"]",
             "name": "value",
+            "label": "Value",
             "type": "value",
-            "label": "Value"
+            "hint": "Text, a number, or a list like [\"a\", \"b\"]"
           }
         ],
-        "sentence": "Set {name} to {value}",
-        "description": "Keeps a value under a name, for later steps.",
-        "sideEffects": false
-      },
-      {
-        "icon": "branch",
-        "kind": "value",
-        "type": "condition.if",
-        "label": "If",
-        "since": 1,
         "output": [
           {
-            "name": "result",
-            "type": "boolean",
-            "label": "Result",
-            "example": true
+            "name": "name",
+            "label": "Name",
+            "type": "text"
+          },
+          {
+            "name": "value",
+            "label": "Value",
+            "type": "value"
           }
         ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "condition.if",
+        "kind": "value",
+        "label": "If",
+        "sentence": "If {left} {operator} {right}",
+        "description": "Compares two values – later steps can run only if it holds.",
+        "icon": "branch",
         "params": [
           {
             "name": "left",
-            "type": "value",
-            "label": "Value"
+            "label": "Value",
+            "type": "value"
           },
           {
             "name": "operator",
-            "type": "choice",
             "label": "Comparison",
-            "default": "equals",
+            "type": "choice",
+            "required": true,
             "options": [
               {
-                "label": "is",
-                "value": "equals"
+                "value": "equals",
+                "label": "is"
               },
               {
-                "label": "is not",
-                "value": "notEquals"
+                "value": "notEquals",
+                "label": "is not"
               },
               {
-                "label": "contains",
-                "value": "contains"
+                "value": "contains",
+                "label": "contains"
               },
               {
-                "label": "does not contain",
-                "value": "notContains"
+                "value": "notContains",
+                "label": "does not contain"
               },
               {
-                "label": "is greater than",
-                "value": "greaterThan"
+                "value": "greaterThan",
+                "label": "is greater than"
               },
               {
-                "label": "is less than",
-                "value": "lessThan"
+                "value": "lessThan",
+                "label": "is less than"
               },
               {
-                "label": "is empty",
-                "value": "isEmpty"
+                "value": "isEmpty",
+                "label": "is empty"
               },
               {
-                "label": "is not empty",
-                "value": "isNotEmpty"
+                "value": "isNotEmpty",
+                "label": "is not empty"
               }
             ],
-            "required": true,
+            "default": "equals",
             "templating": false
           },
           {
             "name": "right",
-            "type": "value",
-            "label": "Compared with"
+            "label": "Compared with",
+            "type": "value"
           }
         ],
-        "sentence": "If {left} {operator} {right}",
-        "description": "Compares two values – later steps can run only if it holds.",
-        "sideEffects": false
-      },
-      {
-        "kind": "value",
-        "type": "math.calculate",
-        "label": "Calculate",
-        "since": 1,
         "output": [
           {
             "name": "result",
-            "type": "number",
             "label": "Result",
-            "example": 42
+            "type": "boolean",
+            "example": true
           }
         ],
+        "sideEffects": false,
+        "since": 1
+      },
+      {
+        "type": "math.calculate",
+        "kind": "value",
+        "label": "Calculate",
+        "sentence": "Calculate {a} {operator} {b}",
+        "description": "Adds, subtracts, multiplies, … two numbers.",
         "params": [
           {
             "name": "a",
-            "type": "value",
             "label": "Number",
+            "type": "value",
             "required": true
           },
           {
             "name": "operator",
-            "type": "choice",
             "label": "Operation",
-            "default": "+",
+            "type": "choice",
+            "required": true,
             "options": [
               {
-                "label": "+",
-                "value": "+"
+                "value": "+",
+                "label": "+"
               },
               {
-                "label": "−",
-                "value": "-"
+                "value": "-",
+                "label": "−"
               },
               {
-                "label": "×",
-                "value": "*"
+                "value": "*",
+                "label": "×"
               },
               {
-                "label": "÷",
-                "value": "/"
+                "value": "/",
+                "label": "÷"
               },
               {
-                "label": "modulo",
-                "value": "%"
+                "value": "%",
+                "label": "modulo"
               },
               {
-                "label": "min",
-                "value": "min"
+                "value": "min",
+                "label": "min"
               },
               {
-                "label": "max",
-                "value": "max"
+                "value": "max",
+                "label": "max"
               },
               {
-                "label": "round to digits",
-                "value": "round"
+                "value": "round",
+                "label": "round to digits"
               }
             ],
-            "required": true,
+            "default": "+",
             "templating": false
           },
           {
             "name": "b",
-            "type": "value",
-            "label": "Number"
+            "label": "Number",
+            "type": "value"
           }
         ],
-        "sentence": "Calculate {a} {operator} {b}",
-        "description": "Adds, subtracts, multiplies, … two numbers.",
-        "sideEffects": false
+        "output": [
+          {
+            "name": "result",
+            "label": "Result",
+            "type": "number",
+            "example": 42
+          }
+        ],
+        "sideEffects": false,
+        "since": 1
       }
     ],
-    "manifestVersion": 1,
     "enabled": true
   }
 ]

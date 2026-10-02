@@ -14,8 +14,9 @@ import { CRON_PRESETS, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, usePolling, useRouteParam, useUnsavedGuard } from '../hooks.ts';
 import { FREQUENCIES, parseSchedule, toCron, WEEKDAYS, withFrequency, type Frequency } from '../schedule.ts';
 import { ALERT_CHOICES } from '../lib/health.ts';
+import { stepTimeout } from '../lib/waiting.ts';
 import { TEMPLATES } from '../templates.ts';
-import type { ActionDefinition, RoutineInput, Trigger, TriggerType } from '../types.ts';
+import type { ActionDefinition, RoutineInput, StepTimeout, Trigger, TriggerType } from '../types.ts';
 
 // ---------------------------------------------------------------- editor model
 
@@ -31,6 +32,8 @@ interface DraftAction {
   runIf: { uid: string; is: boolean } | null;
   /** `{{…}}` reference to a list, '' = runs once. */
   forEach: string;
+  /** "If you don't get to it" – steps you do yourself; null = keep waiting. */
+  timeout: StepTimeout | null;
 }
 
 interface Draft {
@@ -150,6 +153,7 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
       values: toValues(action.type, action.params),
       runIf: action.runIf && uids.has(action.runIf.action) ? { uid: uids.get(action.runIf.action) as string, is: action.runIf.is } : null,
       forEach: action.forEach ?? '',
+      timeout: action.timeout ?? null,
     })),
   };
 }
@@ -176,6 +180,7 @@ function toInput(draft: Draft): RoutineInput {
       params: toParams(action),
       ...(action.runIf && condition ? { runIf: { action: condition, is: action.runIf.is } } : {}),
       ...(action.forEach.trim() ? { forEach: action.forEach.trim() } : {}),
+      ...(action.timeout ? { timeout: action.timeout } : {}),
     };
   });
   return {
@@ -473,7 +478,7 @@ export function RoutineEditor({ id }: { id?: string }) {
     // the API allows steps 1–50; beyond that a new action joins the last step (runs in parallel)
     const step = Math.min(MAX_STEP, Math.max(0, ...draft.actions.map((action) => action.step)) + 1);
     const form = formOf(type);
-    const action: DraftAction = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}), runIf: null, forEach: '' };
+    const action: DraftAction = { uid: uid(), key, type, step, values: toValues(type, form?.defaults ?? {}), runIf: null, forEach: '', timeout: null };
     setDraft((current) => ({ ...current, actions: [...current.actions, action] }));
     toggleExpanded(action.uid, true);
     // a freshly added card is below the fold on a long routine
@@ -1063,6 +1068,10 @@ export function RoutineEditor({ id }: { id?: string }) {
                               <FlowControls action={action} earlier={earlier} variables={variablesBefore(action)} invalid={invalid.get(fieldId(action.uid, 'runIf'))}
                                 onChange={(patch) => updateAction(action.uid, patch)} />
 
+                              {catalog.capability(action.type)?.kind === 'human' && (
+                                <HumanTimeout action={action} onChange={(timeout) => updateAction(action.uid, { timeout })} />
+                              )}
+
                               {/* a saved routine can try steps that only read or compute – nothing is sent or created */}
                               {id && runsInTest(catalog.capability(action.type)) && (
                                 <TryStep routineId={id} action={definitionOf(action)} types={types} onOutput={rememberOutputs} />
@@ -1139,6 +1148,7 @@ export function RoutineEditor({ id }: { id?: string }) {
                 key: action.key, type: action.type, step: action.step, params: safeParams(action),
                 ...(action.runIf ? { runIf: { action: draft.actions.find((candidate) => candidate.uid === action.runIf?.uid)?.key ?? '', is: action.runIf.is } } : {}),
                 ...(action.forEach ? { forEach: action.forEach } : {}),
+                ...(action.timeout ? { timeout: action.timeout } : {}),
               }))}
                 trigger={{
                   icon: TRIGGER_ICONS[draft.triggerType],
@@ -1238,6 +1248,55 @@ function FlowControls({ action, earlier, variables, invalid, onChange }: {
             <option value="">Run once</option>
             {lists.map((list) => <option key={list.value} value={list.value}>{list.label}</option>)}
             {custom && <option value={action.forEach}>{action.forEach}</option>}
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
+
+/** How long a step you do yourself may wait – the choices of "If you don't get to it". */
+const WAIT_CHOICES = [
+  { value: 'PT15M', label: '15 minutes' },
+  { value: 'PT30M', label: '30 minutes' },
+  { value: 'PT1H', label: '1 hour' },
+  { value: 'PT2H', label: '2 hours' },
+  { value: 'PT4H', label: '4 hours' },
+  { value: 'PT8H', label: '8 hours' },
+  { value: 'P1D', label: '1 day' },
+  { value: 'P2D', label: '2 days' },
+  { value: 'P1W', label: '1 week' },
+];
+
+/**
+ * "If you don't get to it" (02-experience §6): keep waiting, or skip / fail the step after a while.
+ * Only on steps you do yourself.
+ */
+function HumanTimeout({ action, onChange }: { action: DraftAction; onChange: (timeout: StepTimeout | null) => void }) {
+  const mode = action.timeout?.then ?? 'wait';
+  const after = action.timeout?.after ?? 'PT2H';
+  const custom = !WAIT_CHOICES.some((choice) => choice.value === after);
+  return (
+    <div className="flow-controls">
+      <label className="field">
+        <span><Icon name="clock" size={13} /> If you don&apos;t get to it</span>
+        <select value={mode} onChange={(event) => {
+          const then = event.target.value;
+          onChange(then === 'skip' || then === 'fail' ? stepTimeout(after, then) : null);
+        }}>
+          <option value="wait">Keep waiting</option>
+          <option value="skip">Skip it after …</option>
+          <option value="fail">Fail the run after …</option>
+        </select>
+      </label>
+      {action.timeout && (
+        <label className="field">
+          <span>After</span>
+          <select value={after} onChange={(event) => {
+            onChange(stepTimeout(event.target.value, action.timeout?.then ?? 'skip'));
+          }}>
+            {WAIT_CHOICES.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+            {custom && <option value={after}>{after}</option>}
           </select>
         </label>
       )}
