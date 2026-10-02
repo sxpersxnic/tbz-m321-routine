@@ -19,7 +19,7 @@ paths:
       summary: Own tasks
       operationId: listTasks
       parameters:
-        - { name: status, in: query, schema: { enum: [OPEN, DONE] } }
+        - { name: status, in: query, schema: { enum: [OPEN, DONE, CANCELLED] } }
         - { name: listId, in: query, schema: { type: string, format: uuid } }
       responses:
         '200':
@@ -53,6 +53,9 @@ paths:
   /api/v1/tasks/{taskId}:
     patch:
       summary: Complete / reopen a task
+      description: |
+        Ticking a step task (kind step) completes the routine step waiting for it, in the same
+        transaction. A done or cancelled step task can't be changed (409).
       operationId: updateTaskStatus
       parameters:
         - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -68,6 +71,7 @@ paths:
       responses:
         '200': { description: updated, content: { application/json: { schema: { $ref: '#/components/schemas/Task' } } } }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: a step task that is done or cancelled, $ref: '#/components/responses/Problem' }
 
   /api/v1/task-lists:
     get:
@@ -161,8 +165,12 @@ components:
         title: { type: string }
         description: { type: string }
         priority: { enum: [low, normal, high] }
-        status: { enum: [OPEN, DONE] }
+        status: { enum: [OPEN, DONE, CANCELLED], description: 'CANCELLED: a step task whose step expired, was skipped or whose run was cancelled' }
         dueDate: { type: [string, 'null'], format: date }
         sourceExecutionId: { type: [string, 'null'], format: uuid, description: 'set when a routine created the task' }
+        kind: { enum: [task, step], description: 'step: a routine waits for it ("Do yourself")' }
+        sourceRoutineId: { type: [string, 'null'], format: uuid }
+        sourceRoutineName: { type: [string, 'null'], description: 'the routine waiting for a step task' }
+        awaitingActionId: { type: [string, 'null'], format: uuid, description: 'the run step a step task completes' }
         createdAt: { type: string, format: date-time }
         completedAt: { type: [string, 'null'], format: date-time }

@@ -9,13 +9,23 @@ export interface TaskRow {
   title: string;
   description: string;
   priority: string;
-  status: 'OPEN' | 'DONE';
+  status: TaskStatus;
   due_date: string | null;
   source_action_id: string | null;
   source_execution_id: string | null;
+  /** `step`: a routine waits for it (task.await) – ticking it completes the step. */
+  kind: 'task' | 'step';
+  source_routine_id: string | null;
+  source_routine_name: string | null;
+  awaiting_action_id: string | null;
+  step_group: string | null;
+  step_position: number | null;
   created_at: Date;
   completed_at: Date | null;
 }
+
+/** CANCELLED: a step task whose step expired, was skipped or whose run was cancelled. */
+export type TaskStatus = 'OPEN' | 'DONE' | 'CANCELLED';
 
 export interface TaskListRow {
   id: string;
@@ -76,7 +86,23 @@ export async function insertTask(db: Queryable, task: NewTask): Promise<{ row: T
   return { row: existing[0], created: false };
 }
 
-export async function setStatus(db: Queryable, taskId: string, status: 'OPEN' | 'DONE'): Promise<TaskRow> {
+/** A step a person does (task.await): its task, or – asked again after a resume – the same task reopened. */
+export async function upsertStepTask(
+  db: Queryable,
+  step: { ownerId: string; listId: string; title: string; description: string; actionId: string; executionId: string; routineId: string | null; routineName: string | null },
+): Promise<{ row: TaskRow; created: boolean }> {
+  const { rows } = await db.query<TaskRow & { inserted: boolean }>(
+    `INSERT INTO tasks (id, owner_id, list_id, title, description, kind, awaiting_action_id, source_execution_id, source_routine_id, source_routine_name)
+     VALUES ($1, $2, $3, $4, $5, 'step', $6, $7, $8, $9)
+     ON CONFLICT (awaiting_action_id) DO UPDATE SET status = 'OPEN', completed_at = NULL
+     RETURNING *, (xmax = 0) AS inserted`,
+    [randomUUID(), step.ownerId, step.listId, step.title, step.description, step.actionId, step.executionId, step.routineId, step.routineName],
+  );
+  const { inserted, ...row } = rows[0];
+  return { row, created: inserted };
+}
+
+export async function setStatus(db: Queryable, taskId: string, status: TaskStatus): Promise<TaskRow> {
   const { rows } = await db.query<TaskRow>(
     `UPDATE tasks SET status = $2, completed_at = CASE WHEN $2 = 'DONE' THEN now() ELSE NULL END WHERE id = $1 RETURNING *`,
     [taskId, status],
@@ -137,7 +163,7 @@ export async function eventFields(db: Queryable, row: TaskRow, sourceRoutineId: 
     areaId: null,
     priority: row.priority,
     dueDate: row.due_date,
-    kind: 'task',
-    sourceRoutineId,
+    kind: row.kind,
+    sourceRoutineId: sourceRoutineId ?? row.source_routine_id,
   };
 }

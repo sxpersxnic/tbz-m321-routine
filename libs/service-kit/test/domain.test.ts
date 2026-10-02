@@ -105,7 +105,10 @@ describe('domain kit', { skip: needsDatabase }, () => {
       await tools.emit('demo.happened', { ownerId: cmd.ownerId });
       return { kind: 'completed', output: { mode: cmd.context.mode } };
     },
-    'demo.await': async () => ({ kind: 'awaiting', awaiting: { kind: 'task', refId: 'task-1', title: 'Do it yourself' } }),
+    'demo.await': async () => {
+      count('demo.await');
+      return { kind: 'awaiting', awaiting: { kind: 'task', refId: 'task-1', title: 'Do it yourself' } };
+    },
     'demo.flaky': async () => {
       throw new TransientError('provider down', { code: 'UNREACHABLE' });
     },
@@ -242,6 +245,18 @@ describe('domain kit', { skip: needsDatabase }, () => {
 
     await fake.deliver(createEnvelope({ type: 'ActionCancelRequested', version: 1, source: 'routine-service', data: { actionId, executionId: envelope.data.executionId, ownerId: envelope.data.ownerId, actionType: 'demo.await', reason: 'expired' } }));
     assert.equal(calls.cancel, 1);
+    assert.equal((await db.pool.query('SELECT 1 FROM processed_actions WHERE action_id = $1', [actionId])).rows.length, 1, 'a completed step keeps its result');
+  });
+
+  it('forgets a cancelled step that still waited – a resumed run asks for it again', async () => {
+    const envelope = command('demo.await');
+    await fake.deliver(envelope);
+    const cancelled = createEnvelope({ type: 'ActionCancelRequested', version: 1, source: 'routine-service', data: { actionId: envelope.data.actionId, executionId: envelope.data.executionId, ownerId: envelope.data.ownerId, actionType: 'demo.await', reason: 'expired' } });
+    await fake.deliver(cancelled);
+    const before = calls['demo.await'] ?? 0;
+    await fake.deliver(envelope);
+    assert.equal(calls['demo.await'], before + 1, 'the handler runs again');
+    assert.equal((await outboxFor(String(envelope.data.actionId))).filter((row) => row.routing_key === 'action.awaiting-user').length, 2);
   });
 
   it('registers again on a reconnect', async () => {

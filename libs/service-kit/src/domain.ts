@@ -194,6 +194,9 @@ export async function handleCommand(pool: Pool, options: Pick<DomainOptions, 'ha
         const cancel = options.cancel?.[command.actionType];
         if (cancel) await cancel({ ...command, reason: command.cancel.reason }, toolsFor(tx, options.service, command));
         else options.logger.warn({ actionType: command.actionType }, 'cancel request for a capability without a cancel handler ignored');
+        // a step that still waited is forgotten, so resuming its run asks for it again (the handler
+        // reopens the item); a step the person completed keeps its result
+        await tx.query(`DELETE FROM processed_actions WHERE action_id = $1 AND result->>'type' = 'ActionAwaitingUser'`, [command.actionId]);
         return;
       }
 

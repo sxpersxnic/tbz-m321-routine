@@ -1,9 +1,9 @@
 import type { DomainManifest, OutputField, ParamSpec } from '@routine/service-kit';
 
 /**
- * The `tasks` domain (docs/v2/services/task-service.md §5) – M2: creating, completing, moving and
- * reading tasks, and the task events. Human steps (task.await …) and areas come with M3 and M5, as
- * new manifest versions (additions are compatible).
+ * The `tasks` domain (docs/v2/services/task-service.md §5) – v1 (M2): creating, completing, moving
+ * and reading tasks, and the task events; v2 (M3): "Do yourself" (task.await). Areas and the other
+ * human steps come with M5, as new manifest versions (additions are compatible).
  */
 
 const PRIORITY: ParamSpec = {
@@ -41,7 +41,7 @@ const EVENT_FIELDS: OutputField[] = [
 export const TASKS_MANIFEST: DomainManifest = {
   contract: 1,
   domain: 'tasks',
-  manifestVersion: 1,
+  manifestVersion: 2,
   service: 'task-service',
   name: 'Tasks',
   description: 'To-dos on your lists – created, ticked and moved by routines too.',
@@ -107,6 +107,22 @@ export const TASKS_MANIFEST: DomainManifest = {
       output: [{ name: 'taskId', label: 'Task ID', type: 'text' }],
       sideEffects: true,
       since: 1,
+    },
+    {
+      type: 'task.await',
+      kind: 'human',
+      label: 'Do yourself',
+      sentence: 'You: {title}',
+      description: 'Puts a task on your list and waits until you tick it.',
+      icon: 'person',
+      params: [{ name: 'title', label: 'What to do', type: 'text', required: true, placeholder: 'Stretch for 5 minutes' }, { name: 'description', label: 'Notes', type: 'longText' }, LIST],
+      output: [
+        { name: 'taskId', label: 'Task ID', type: 'text' },
+        { name: 'completedAt', label: 'Done at', type: 'text' },
+      ],
+      sideEffects: true,
+      human: { awaits: 'task' },
+      since: 2,
     },
     {
       type: 'task.openTasks',

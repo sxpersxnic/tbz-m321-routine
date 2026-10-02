@@ -7,7 +7,8 @@ import { createEnvelope, createPool, emitEvent, handleCommand, OutboxRelay, runK
 import pg from 'pg';
 import pino from 'pino';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { taskHandlers } from '../src/capabilities.ts';
+import { cancelStepTask, taskHandlers } from '../src/capabilities.ts';
+import { changeStatus } from '../src/status.ts';
 import { TASKS_MANIFEST } from '../src/manifest.ts';
 import { defaultListId, eventFields, insertTask } from '../src/tasks.ts';
 
@@ -53,7 +54,14 @@ describe('tasks domain (04 §7)', { skip: needsDatabase }, () => {
       source: 'routine-service',
       data: { actionId: randomUUID(), executionId: randomUUID(), routineId: randomUUID(), ownerId, actionKey: 'a', actionType, params, context },
     });
-  const run = (envelope: Envelope) => handleCommand(pool, { handlers, logger, service: 'task-service' }, envelope);
+  const cancel = { 'task.await': async (cmd: Parameters<typeof cancelStepTask>[0], tools: Parameters<typeof cancelStepTask>[1]) => void (await cancelStepTask(cmd, tools, logger)) };
+  const run = (envelope: Envelope) => handleCommand(pool, { handlers, cancel, logger, service: 'task-service' }, envelope);
+  const cancelOf = (envelope: Envelope, reason = 'expired') =>
+    createEnvelope({ type: 'ActionCancelRequested', version: 1, source: 'routine-service', data: { ...envelope.data, reason } });
+  const tick = (taskId: string, status: 'OPEN' | 'DONE' = 'DONE') => withTransaction(pool, (tx) => changeStatus(tx, ownerId, taskId, status));
+  const stepTask = async (envelope: Envelope) =>
+    (await pool.query<{ id: string; status: string; kind: string; source_routine_name: string | null }>('SELECT * FROM tasks WHERE awaiting_action_id = $1', [envelope.data.actionId])).rows[0];
+  const resultsOf = async (envelope: Envelope, routingKey: string) => (await outbox()).filter((row) => row.payload.data.actionId === envelope.data.actionId && row.routing_key === routingKey);
   const outbox = async () => (await pool.query<{ routing_key: string; payload: Envelope<Record<string, unknown>> }>('SELECT routing_key, payload FROM outbox ORDER BY id')).rows;
   const resultOf = async (envelope: Envelope) => (await outbox()).filter((row) => row.payload.data.actionId === envelope.data.actionId && row.routing_key.startsWith('action.')).at(-1);
   /** The output of a command's (last) result – there must be one. */
@@ -144,5 +152,60 @@ describe('tasks domain (04 §7)', { skip: needsDatabase }, () => {
     const relay = new OutboxRelay(pool, { publish: async (_exchange, routingKey, envelope) => void published.push(`${routingKey}:${(envelope.data as { title?: string }).title}`) }, logger, { batchSize: 500, intervalMs: 10, duplicateRate: 0 });
     while (await relay.relayBatch());
     assert.ok(published.includes('task.created:Survives'));
+  });
+
+  describe('human step task.await (services/task-service.md §10)', () => {
+    const awaitCommand = () => command('task.await', { title: 'Stretch for 5 minutes' }, { mode: 'live', depth: 0, routineName: 'Morning checklist' });
+
+    it('creates a step task and answers ActionAwaitingUser; ticking completes the step exactly once', async () => {
+      const envelope = awaitCommand();
+      await run(envelope);
+      await run(envelope); // redelivered
+      const task = await stepTask(envelope);
+      assert.equal(task.kind, 'step');
+      assert.equal(task.source_routine_name, 'Morning checklist');
+      const awaiting = await resultsOf(envelope, 'action.awaiting-user');
+      assert.equal(awaiting.length, 2, 'the duplicate gets the same answer');
+      assert.deepEqual(contractErrors('action-awaiting-user.v1.schema.json', awaiting[0].payload), []);
+      assert.deepEqual(awaiting[0].payload.data.awaiting, { kind: 'task', refId: task.id, title: 'Stretch for 5 minutes' });
+      assert.equal((await pool.query('SELECT 1 FROM tasks WHERE awaiting_action_id = $1', [envelope.data.actionId])).rows.length, 1, 'one task');
+
+      await tick(task.id);
+      await tick(task.id); // ticked again: nothing changes
+      const completed = await resultsOf(envelope, 'action.completed');
+      assert.equal(completed.length, 1);
+      assert.deepEqual(contractErrors('action-completed.v1.schema.json', completed[0].payload), []);
+      assert.equal((completed[0].payload.data.output as { taskId: string }).taskId, task.id);
+      const event = (await outbox()).find((row) => row.routing_key === 'task.completed' && row.payload.data.taskId === task.id);
+      assert.equal(event?.payload.data.kind, 'step');
+
+      await assert.rejects(tick(task.id, 'OPEN'), { status: 409 }, 'a done step stays done');
+      await run(cancelOf(envelope, 'runCancelled')); // cancel after the tick: ignored
+      assert.equal((await stepTask(envelope)).status, 'DONE');
+      assert.equal((await resultsOf(envelope, 'action.completed')).length, 1);
+    });
+
+    it('cancel before the tick closes the task; ticking it then is refused and sends nothing', async () => {
+      const envelope = awaitCommand();
+      await run(envelope);
+      await run(cancelOf(envelope, 'expired'));
+      const task = await stepTask(envelope);
+      assert.equal(task.status, 'CANCELLED');
+      await assert.rejects(tick(task.id), { status: 409 });
+      assert.equal((await resultsOf(envelope, 'action.completed')).length, 0);
+    });
+
+    it('asked again after its run was resumed: the same task, open again', async () => {
+      const envelope = awaitCommand();
+      await run(envelope);
+      const first = await stepTask(envelope);
+      await run(cancelOf(envelope, 'expired'));
+      await run(envelope); // the resumed run requests the step again
+      const again = await stepTask(envelope);
+      assert.equal(again.id, first.id);
+      assert.equal(again.status, 'OPEN');
+      assert.equal((await resultsOf(envelope, 'action.awaiting-user')).length, 2);
+      assert.ok((await outbox()).some((row) => row.routing_key === 'task.reopened' && row.payload.data.taskId === first.id));
+    });
   });
 });

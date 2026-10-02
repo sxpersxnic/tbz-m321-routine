@@ -22,10 +22,11 @@ import {
   waitForDatabase,
   withTransaction,
 } from '@routine/service-kit';
-import { taskHandlers } from './capabilities.ts';
+import { cancelStepTask, taskHandlers } from './capabilities.ts';
+import { changeStatus } from './status.ts';
 import { TASKS_MANIFEST } from './manifest.ts';
 import { SOURCE } from './messages.ts';
-import { defaultListId, eventFields, getTask, insertTask, ownedListId, setStatus, type TaskListRow, type TaskRow } from './tasks.ts';
+import { defaultListId, eventFields, insertTask, ownedListId, type TaskListRow, type TaskRow } from './tasks.ts';
 
 const SERVICE = SOURCE;
 const logger = createLogger(SERVICE);
@@ -58,6 +59,10 @@ const taskDto = (row: TaskRow) => ({
   status: row.status,
   dueDate: row.due_date,
   sourceExecutionId: row.source_execution_id,
+  kind: row.kind,
+  sourceRoutineId: row.source_routine_id,
+  sourceRoutineName: row.source_routine_name,
+  awaitingActionId: row.awaiting_action_id,
   createdAt: row.created_at,
   completedAt: row.completed_at,
 });
@@ -70,6 +75,7 @@ const domain = startDomain({
   logger,
   queue: 'task-service.actions',
   handlers: taskHandlers(logger),
+  cancel: { 'task.await': async (command, tools) => void (await cancelStepTask(command, tools, logger)) },
   chaosFailureRate: envFloat('CHAOS_FAILURE_RATE', 0),
 });
 
@@ -89,13 +95,13 @@ installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/']);
 
 const taskParams = { type: 'object', required: ['taskId'], properties: { taskId: { type: 'string', format: 'uuid' } } } as const;
 
-app.get<{ Querystring: { status?: 'OPEN' | 'DONE'; listId?: string } }>(
+app.get<{ Querystring: { status?: 'OPEN' | 'DONE' | 'CANCELLED'; listId?: string } }>(
   '/api/v1/tasks',
   {
     schema: {
       querystring: {
         type: 'object',
-        properties: { status: { type: 'string', enum: ['OPEN', 'DONE'] }, listId: { type: 'string', format: 'uuid' } },
+        properties: { status: { type: 'string', enum: ['OPEN', 'DONE', 'CANCELLED'] }, listId: { type: 'string', format: 'uuid' } },
       },
     },
   },
@@ -160,16 +166,7 @@ app.patch<{ Params: { taskId: string }; Body: { status: 'OPEN' | 'DONE' } }>(
   },
   async (request) => {
     const user = requireUser(request);
-    const updated = await withTransaction(pool, async (tx) => {
-      const task = await getTask(tx, user.id, request.params.taskId, true);
-      if (!task) throw notFound('Task');
-      if (task.status === request.body.status) return task; // nothing changed – no event
-      const row = await setStatus(tx, task.id, request.body.status);
-      const fields = await eventFields(tx, row);
-      if (row.status === 'DONE') await emitEvent(tx, SERVICE, 'task.completed', { ...fields, completedAt: row.completed_at?.toISOString() });
-      else await emitEvent(tx, SERVICE, 'task.reopened', fields);
-      return row;
-    });
+    const updated = await withTransaction(pool, (tx) => changeStatus(tx, user.id, request.params.taskId, request.body.status));
     return taskDto(updated);
   },
 );
@@ -238,7 +235,11 @@ app.delete<{ Params: { listId: string } }>(
     const { rows } = await pool.query<TaskListRow>('SELECT * FROM task_lists WHERE id = $1 AND owner_id = $2', [request.params.listId, user.id]);
     if (!rows[0]) throw notFound('Task list');
     if (rows[0].is_default) throw conflict('The default list cannot be deleted');
-    await pool.query('DELETE FROM task_lists WHERE id = $1', [rows[0].id]);
+    await withTransaction(pool, async (tx) => {
+      // open steps of running routines must not vanish with their list – they move to the default list
+      await tx.query(`UPDATE tasks SET list_id = $2 WHERE list_id = $1 AND kind = 'step' AND status = 'OPEN'`, [rows[0].id, await defaultListId(tx, user.id)]);
+      await tx.query('DELETE FROM task_lists WHERE id = $1', [rows[0].id]);
+    });
     return reply.status(204).send();
   },
 );

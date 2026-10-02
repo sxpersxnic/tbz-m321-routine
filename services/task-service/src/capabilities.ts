@@ -1,7 +1,7 @@
 /** The `tasks` capabilities (services/task-service.md §5) as domain-kit handlers. */
-import { PermanentError, type CapabilityHandler, type Logger } from '@routine/service-kit';
-import { localDate, parseCreateParams, parseDate, parseId, parseLimit } from './messages.ts';
-import { countOpen, defaultListId, doneTasks, eventFields, getTask, insertTask, moveTask, openTasks, ownedListId, setStatus, taskItem } from './tasks.ts';
+import { PermanentError, type CapabilityHandler, type DomainCommand, type HandlerTools, type Logger } from '@routine/service-kit';
+import { localDate, parseAwaitParams, parseCreateParams, parseDate, parseId, parseLimit } from './messages.ts';
+import { countOpen, defaultListId, doneTasks, eventFields, getTask, insertTask, moveTask, openTasks, ownedListId, setStatus, taskItem, upsertStepTask, type TaskRow } from './tasks.ts';
 
 const DEFAULT_TIMEZONE = 'Europe/Zurich';
 
@@ -53,6 +53,26 @@ export function taskHandlers(logger: Logger): Record<string, CapabilityHandler> 
       return { kind: 'completed', output: { taskId: moved.id } };
     },
 
+    /** "Do yourself": a task for the person; the step completes when they tick it (PATCH, see completeStep). */
+    'task.await': async (command, { tx, emit }) => {
+      const params = parseAwaitParams(command.params);
+      const chosen = params.listId ? await ownedListId(tx, command.ownerId, params.listId) : null;
+      if (params.listId && !chosen) logger.warn({ listId: params.listId }, 'task list not found – using the default list');
+      const { row, created } = await upsertStepTask(tx, {
+        ownerId: command.ownerId,
+        listId: chosen ?? (await defaultListId(tx, command.ownerId)),
+        title: params.title,
+        description: params.description,
+        actionId: command.actionId,
+        executionId: command.executionId,
+        routineId: command.routineId,
+        routineName: command.context.routineName ?? null,
+      });
+      // asked again after its run was resumed: the same task, open again
+      await emit(created ? 'task.created' : 'task.reopened', await eventFields(tx, row, command.routineId));
+      return { kind: 'awaiting', awaiting: { kind: 'task', refId: row.id, title: row.title } };
+    },
+
     'task.openTasks': async (command, { tx }) => {
       const timezone = command.context.timezone ?? DEFAULT_TIMEZONE;
       const { rows, count } = await openTasks(tx, command.ownerId, {
@@ -81,4 +101,20 @@ export function taskHandlers(logger: Logger): Record<string, CapabilityHandler> 
       return { kind: 'completed', output: { count } };
     },
   };
+}
+
+/**
+ * Closes a step task whose step is not needed any more (expired, skipped, run cancelled). A task the
+ * person ticked first stays done – their tick won (05-messaging §5 rule 4).
+ */
+export async function cancelStepTask(command: DomainCommand & { reason: string }, { tx }: Pick<HandlerTools, 'tx'>, logger: Logger): Promise<TaskRow | null> {
+  const { rows } = await tx.query<TaskRow>('SELECT * FROM tasks WHERE awaiting_action_id = $1 FOR UPDATE', [command.actionId]);
+  const task = rows[0];
+  if (task?.status !== 'OPEN') {
+    logger.info({ actionId: command.actionId, status: task?.status ?? 'none', reason: command.reason }, 'cancel of a step task ignored');
+    return task ?? null;
+  }
+  const cancelled = await setStatus(tx, task.id, 'CANCELLED');
+  logger.info({ taskId: task.id, reason: command.reason }, 'step task cancelled');
+  return cancelled;
 }

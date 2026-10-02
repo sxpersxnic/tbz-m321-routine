@@ -31,7 +31,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
   - Tests: expiry `skip`/`fail`, manual skip, cancel sends `ActionCancelRequested` for every
     awaiting action, the human-step race (rule 4 of [05 §5](../05-messaging.md)).
 
-- [ ] **M3-04 · `task.await` in task-service**
+- [x] **M3-04 · `task.await` in task-service**
   - Migration (M3 part of [services/task-service.md §2](../services/task-service.md)). Handler returns
     `awaiting`. Completing a `step` task (PATCH `status: DONE`) calls `completeAwaiting` in the
     same transaction. Cancel handler → `CANCELLED`. Step tasks show a routine badge in task

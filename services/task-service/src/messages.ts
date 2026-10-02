@@ -67,6 +67,17 @@ export function parseCreateParams(params: Record<string, unknown>, timezone: str
   };
 }
 
+/** task.await – a task for the person to do. */
+export function parseAwaitParams(params: Record<string, unknown>): { title: string; description: string; listId: string | null } {
+  const title = params.title;
+  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required', INVALID_PARAMS);
+  return {
+    title: title.trim().slice(0, 200),
+    description: typeof params.description === 'string' ? params.description : '',
+    listId: parseId(params.listId, 'listId', 'list'),
+  };
+}
+
 export function parseLimit(value: unknown, fallback = 20): number {
   if (value === undefined || value === null || value === '') return fallback;
   const limit = Number(value);
