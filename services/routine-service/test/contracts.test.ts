@@ -2,10 +2,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { createEnvelope, manifestDigest } from '@routine/service-kit';
+import { createEnvelope, manifestDigest, parseCommand } from '@routine/service-kit';
 import { BUILTIN_MANIFESTS } from '../src/domain/builtin-manifests.ts';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionRequested, executionCompleted, executionFailed, executionResumed, parseActionResult, parseRegistryMessage, routineTriggered, routineUnhealthy, subRoutineResult } from '../src/messages.ts';
+import { actionCancelRequested, actionRequested, executionCompleted, executionFailed, executionResumed, executionWaitingForYou, parseActionResult, parseRegistryMessage, routineTriggered, routineUnhealthy, subRoutineResult } from '../src/messages.ts';
 
 const ids = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), correlationId: randomUUID() };
 
@@ -60,6 +60,29 @@ describe('routine-service produces valid messages', () => {
     const message = executionResumed({ ...ids, fromActionKey: 'call', resumedBy: ids.ownerId, resumeCount: 1 });
     assert.deepEqual(contractErrors('execution-resumed.v1.schema.json', message.envelope), []);
     assert.equal(message.routingKey, 'execution.resumed');
+  });
+
+  it('ActionCancelRequested v1, routed like the step and readable by the domain kit', () => {
+    const message = actionCancelRequested({ ...ids, actionId: randomUUID(), actionKey: 'stretch', actionType: 'task.await', reason: 'expired' });
+    assert.deepEqual(contractErrors('action-cancel-requested.v1.schema.json', message.envelope), []);
+    assert.equal(message.exchange, 'routine.actions');
+    assert.equal(message.routingKey, 'action.task.await');
+    const command = parseCommand(message.envelope as never);
+    assert.deepEqual(command.cancel, { reason: 'expired' });
+    assert.equal(command.ownerId, ids.ownerId);
+  });
+
+  it('ExecutionWaitingForYou v1', () => {
+    const message = executionWaitingForYou({
+      ...ids,
+      routineName: 'Morning checklist',
+      awaiting: [
+        { actionKey: 'stretch', kind: 'task', refId: randomUUID(), title: 'Stretch', dueAt: new Date().toISOString() },
+        { actionKey: 'mood', kind: 'question', refId: randomUUID(), title: 'How did you sleep?' },
+      ],
+    });
+    assert.deepEqual(contractErrors('execution-waiting-for-you.v1.schema.json', message.envelope), []);
+    assert.equal(message.routingKey, 'execution.waitingForYou');
   });
 
   describe('ExecutionCompleted – expand and contract', () => {

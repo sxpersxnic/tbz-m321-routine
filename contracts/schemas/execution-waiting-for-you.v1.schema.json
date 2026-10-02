@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/execution-waiting-for-you.v1.schema.json",
+  "title": "ExecutionWaitingForYou v1",
+  "description": "A run entered WAITING_FOR_YOU: only human steps are in flight (docs/v2/06-engine.md §5). Published once each time the run enters the status. Routing key: execution.waitingForYou",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ExecutionWaitingForYou"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "executionId",
+        "routineId",
+        "ownerId",
+        "routineName",
+        "awaiting"
+      ],
+      "properties": {
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineName": {
+          "type": "string"
+        },
+        "awaiting": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "actionKey",
+              "kind",
+              "refId",
+              "title"
+            ],
+            "properties": {
+              "actionKey": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "task",
+                  "question",
+                  "checkIn"
+                ]
+              },
+              "refId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "when the step expires (its timeout), null when it waits indefinitely"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

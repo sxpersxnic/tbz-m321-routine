@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/action-cancel-requested.v1.schema.json",
+  "title": "ActionCancelRequested v1",
+  "description": "A waiting human step is no longer needed: it expired or its run was cancelled (docs/v2/05-messaging.md §4.1). The domain closes the item (task → CANCELLED, question → expired) and sends no result. Routing key: action.<actionType> on routine.actions",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ActionCancelRequested"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "actionId",
+        "executionId",
+        "actionType",
+        "ownerId",
+        "reason"
+      ],
+      "properties": {
+        "actionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actionKey": {
+          "type": "string"
+        },
+        "actionType": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*\\.[a-z][a-zA-Z0-9]*$"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reason": {
+          "enum": [
+            "expired",
+            "runCancelled"
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

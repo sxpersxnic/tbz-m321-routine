@@ -263,6 +263,77 @@ export function executionResumed(input: {
   };
 }
 
+/** What a human step waits for (ActionAwaitingUser.awaiting, 05-messaging §4.1). */
+export interface AwaitingItem {
+  kind: 'task' | 'question' | 'checkIn';
+  refId: string;
+  title: string;
+  dueAt?: string | null;
+}
+
+/**
+ * A waiting human step is not needed any more (05-messaging §4.1): it expired, or its run was
+ * cancelled. Routed like the step's ActionRequested, so the domain that holds the item gets it.
+ */
+export function actionCancelRequested(input: {
+  actionId: string;
+  executionId: string;
+  routineId: string;
+  ownerId: string;
+  actionKey: string;
+  actionType: string;
+  reason: 'expired' | 'runCancelled';
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.actions,
+    routingKey: `action.${input.actionType}`,
+    envelope: createEnvelope({
+      type: 'ActionCancelRequested',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        actionId: input.actionId,
+        executionId: input.executionId,
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        actionKey: input.actionKey,
+        actionType: input.actionType,
+        reason: input.reason,
+      },
+    }),
+  };
+}
+
+/** A run entered WAITING_FOR_YOU: only human steps are in flight (06-engine §5). */
+export function executionWaitingForYou(input: {
+  executionId: string;
+  routineId: string;
+  ownerId: string;
+  routineName: string;
+  awaiting: Array<AwaitingItem & { actionKey: string }>;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'execution.waitingForYou',
+    envelope: createEnvelope({
+      type: 'ExecutionWaitingForYou',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        executionId: input.executionId,
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        routineName: input.routineName,
+        awaiting: input.awaiting.map((item) => ({ actionKey: item.actionKey, kind: item.kind, refId: item.refId, title: item.title, dueAt: item.dueAt ?? null })),
+      },
+    }),
+  };
+}
+
 // ---------------------------------------------------------------- incoming (tolerant reader)
 
 export type ActionResult =

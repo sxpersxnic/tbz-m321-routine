@@ -14,7 +14,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
 
 ---
 
-- [ ] **M3-01 · Contracts**
+- [x] **M3-01 · Contracts**
   - Schemas + AsyncAPI + contract tests: `ActionAwaitingUser`, `ActionCancelRequested`,
     `ExecutionWaitingForYou`.
 

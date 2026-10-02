@@ -1,7 +1,7 @@
 asyncapi: 3.0.0
 info:
   title: Routine Messaging
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Asynchronous contracts between the Routine services (RabbitMQ, AMQP 0-9-1).
 
@@ -46,11 +46,12 @@ channels:
         exchange: { name: routine.actions, type: topic, durable: true, autoDelete: false }
     messages:
       ActionRequested: { $ref: '#/components/messages/ActionRequested' }
+      ActionCancelRequested: { $ref: '#/components/messages/ActionCancelRequested' }
 
   actionResults:
     address: routine.action-results
     title: Action results
-    description: 'Topic exchange. Routing keys: action.completed, action.failed, action.retry-scheduled'
+    description: 'Topic exchange. Routing keys: action.completed, action.failed, action.retry-scheduled, action.awaiting-user'
     bindings:
       amqp:
         is: routingKey
@@ -64,7 +65,7 @@ channels:
   routineEvents:
     address: routine.events
     title: Domain events of the routine service
-    description: 'Topic exchange. Routing keys: routine.triggered, execution.completed, execution.failed, execution.resumed, routine.unhealthy'
+    description: 'Topic exchange. Routing keys: routine.triggered, execution.completed, execution.failed, execution.resumed, execution.waitingForYou, routine.unhealthy'
     bindings:
       amqp:
         is: routingKey
@@ -75,6 +76,7 @@ channels:
       ExecutionCompletedV2: { $ref: '#/components/messages/ExecutionCompletedV2' }
       ExecutionFailed: { $ref: '#/components/messages/ExecutionFailed' }
       ExecutionResumed: { $ref: '#/components/messages/ExecutionResumed' }
+      ExecutionWaitingForYou: { $ref: '#/components/messages/ExecutionWaitingForYou' }
       RoutineUnhealthy: { $ref: '#/components/messages/RoutineUnhealthy' }
 
   platformRegistry:
@@ -113,8 +115,10 @@ operations:
   requestAction:
     action: send
     channel: { $ref: '#/channels/actionRequests' }
-    summary: routine-service – publishes the actions of a step (via outbox)
-    messages: [{ $ref: '#/channels/actionRequests/messages/ActionRequested' }]
+    summary: routine-service – publishes the actions of a step, and cancels waiting human steps (expired, run cancelled) (via outbox)
+    messages:
+      - { $ref: '#/channels/actionRequests/messages/ActionRequested' }
+      - { $ref: '#/channels/actionRequests/messages/ActionCancelRequested' }
   consumeActionResults:
     action: receive
     channel: { $ref: '#/channels/actionResults' }
@@ -123,6 +127,7 @@ operations:
       - { $ref: '#/channels/actionResults/messages/ActionCompleted' }
       - { $ref: '#/channels/actionResults/messages/ActionFailed' }
       - { $ref: '#/channels/actionResults/messages/ActionRetryScheduled' }
+      - { $ref: '#/channels/actionResults/messages/ActionAwaitingUser' }
   publishExecutionEvents:
     action: send
     channel: { $ref: '#/channels/routineEvents' }
@@ -132,22 +137,26 @@ operations:
       - { $ref: '#/channels/routineEvents/messages/ExecutionCompletedV2' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionFailed' }
       - { $ref: '#/channels/routineEvents/messages/ExecutionResumed' }
+      - { $ref: '#/channels/routineEvents/messages/ExecutionWaitingForYou' }
       - { $ref: '#/channels/routineEvents/messages/RoutineUnhealthy' }
 
   # ---- workers
   executeActions:
     action: receive
     channel: { $ref: '#/channels/actionRequests' }
-    summary: task-service, integration-worker (scalable), notification-service – one queue each
-    messages: [{ $ref: '#/channels/actionRequests/messages/ActionRequested' }]
+    summary: task-service, integration-worker (scalable), notification-service – one queue each; domains with human steps also close their items on ActionCancelRequested
+    messages:
+      - { $ref: '#/channels/actionRequests/messages/ActionRequested' }
+      - { $ref: '#/channels/actionRequests/messages/ActionCancelRequested' }
   reportActionResults:
     action: send
     channel: { $ref: '#/channels/actionResults' }
-    summary: workers report a result, a retry or a permanent failure
+    summary: workers report a result, a retry, a permanent failure, or that a human step waits for a person
     messages:
       - { $ref: '#/channels/actionResults/messages/ActionCompleted' }
       - { $ref: '#/channels/actionResults/messages/ActionFailed' }
       - { $ref: '#/channels/actionResults/messages/ActionRetryScheduled' }
+      - { $ref: '#/channels/actionResults/messages/ActionAwaitingUser' }
 
   # ---- notification-service
   notifyOnExecutionEvents:
@@ -184,8 +193,13 @@ components:
     ActionAwaitingUser:
       name: ActionAwaitingUser
       title: ActionAwaitingUser v1
-      summary: 'A human step waits for a person: { actionId, executionId, actionType, awaiting: { kind, refId, title, dueAt? }, processedBy } – from M3'
+      summary: 'A human step waits for a person: { actionId, executionId, actionType, awaiting: { kind, refId, title, dueAt? }, processedBy }'
       payload: { $ref: '../schemas/action-awaiting-user.v1.schema.json' }
+    ActionCancelRequested:
+      name: ActionCancelRequested
+      title: ActionCancelRequested v1
+      summary: 'A waiting human step expired or its run was cancelled: { actionId, executionId, actionType, ownerId, reason: expired | runCancelled } – the domain closes the item and sends no result'
+      payload: { $ref: '../schemas/action-cancel-requested.v1.schema.json' }
     ActionRetryScheduled:
       name: ActionRetryScheduled
       title: ActionRetryScheduled v1
@@ -210,6 +224,11 @@ components:
       title: ExecutionResumed v1
       summary: 'A failed execution goes on from its failed step: { executionId, routineId, ownerId, fromActionKey, resumedBy, resumeCount }'
       payload: { $ref: '../schemas/execution-resumed.v1.schema.json' }
+    ExecutionWaitingForYou:
+      name: ExecutionWaitingForYou
+      title: ExecutionWaitingForYou v1
+      summary: 'Only human steps are in flight: { executionId, routineId, ownerId, routineName, awaiting: [{ actionKey, kind, refId, title, dueAt }] } – delivery-service sends push (M8)'
+      payload: { $ref: '../schemas/execution-waiting-for-you.v1.schema.json' }
     DomainRegistered:
       name: DomainRegistered
       title: DomainRegistered v1
