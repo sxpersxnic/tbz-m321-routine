@@ -1116,7 +1116,7 @@
   {
     "contract": 1,
     "domain": "scripting",
-    "manifestVersion": 1,
+    "manifestVersion": 2,
     "service": "routine-service",
     "name": "Scripting",
     "description": "Variables, conditions and calculations between your steps.",
@@ -1127,7 +1127,8 @@
     "prefixes": [
       "variable",
       "condition",
-      "math"
+      "math",
+      "flow"
     ],
     "capabilities": [
       {
@@ -1311,6 +1312,39 @@
         ],
         "sideEffects": false,
         "since": 1
+      },
+      {
+        "type": "flow.wait",
+        "kind": "value",
+        "label": "Wait",
+        "sentence": "Wait for {for} until {until}",
+        "description": "Pauses the routine for a while, or until a time of day.",
+        "icon": "clock",
+        "params": [
+          {
+            "name": "for",
+            "label": "For",
+            "type": "duration",
+            "placeholder": "PT1H",
+            "hint": "At most 7 days"
+          },
+          {
+            "name": "until",
+            "label": "Until",
+            "type": "time",
+            "placeholder": "17:00",
+            "hint": "The next time it is this late"
+          }
+        ],
+        "output": [
+          {
+            "name": "wokeAt",
+            "label": "Woke at",
+            "type": "text"
+          }
+        ],
+        "sideEffects": false,
+        "since": 2
       }
     ],
     "enabled": true

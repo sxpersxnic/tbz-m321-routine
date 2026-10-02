@@ -54,7 +54,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
     with its items. The editor offers a *Checklist* starting point: a routine whose step 1 is N
     parallel `task.await` steps.
 
-- [ ] **M3-08 · `flow.wait`**
+- [x] **M3-08 · `flow.wait`**
   - Built-in capability, `SCHEDULED` + `wake_at`, housekeeping completion, max 7 days, `until`
     computed in the owner's time zone (`Europe/Zurich` until M5 provides profiles).
   - Web: *Wait* step form (*for* duration or *until* time).

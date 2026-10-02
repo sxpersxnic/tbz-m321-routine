@@ -247,6 +247,9 @@ Domain **`scripting`** (engine-evaluated, `sideEffects: false`), registered in-p
 `flow.wait` is special: on dispatch it becomes `SCHEDULED` with `wake_at`. The housekeeping
 loop completes due `SCHEDULED` actions (`FOR UPDATE SKIP LOCKED`) and advances. Maximum wait:
 7 days.
+It is a `value` (no side effects), so *Try this step* runs it – a test run doesn't wait and
+completes it at once. A templated duration that turns out invalid or longer than 7 days fails
+the step with `INVALID_PARAMS`.
 
 Domain **`routines`** (owned by routine-service):
 

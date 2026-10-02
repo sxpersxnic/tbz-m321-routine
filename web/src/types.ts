@@ -268,6 +268,8 @@ export interface ExecutionAction {
   awaiting?: AwaitingItem;
   acceptedAt?: string | null;
   deadlineAt?: string | null;
+  /** A Wait step: when it wakes up. */
+  wakeAt?: string;
 }
 
 export interface ExecutionLogEntry {

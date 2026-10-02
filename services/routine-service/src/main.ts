@@ -126,6 +126,8 @@ const housekeepingLoop = startLoop('housekeeping', 2_000, logger, async () => {
   await engine.markStaleExecutions();
   const expired = await engine.expireAwaitingActions();
   if (expired > 0) logger.info({ expired }, 'human steps expired');
+  const woken = await engine.wakeDueWaits();
+  if (woken > 0) logger.debug({ woken }, 'wait steps woke up');
   if (housekeepingRuns++ % 1_800 === 0) await relay.purgePublished();
   if (housekeepingRuns % 30 === 0) {
     // nightly 30-day health counts: tried every minute, done once a day by one replica

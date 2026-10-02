@@ -1,6 +1,7 @@
 import type { ParamSpec } from '@routine/service-kit';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './catalog.ts';
 import { VARIABLE_NAME } from './control.ts';
+import { waitIssue } from './wait.ts';
 import { DEFAULT_TIMEZONE, validateSchedule } from './schedule.ts';
 import { referencedActionKeys, templatePaths } from './templates.ts';
 
@@ -84,6 +85,10 @@ function scriptingIssues(action: ActionDefinition): string[] {
   const { name } = action.params;
   if (action.type === 'variable.set' && (typeof name !== 'string' || !VARIABLE_NAME.test(name))) {
     return [`action "${action.key}": variable name must start with a letter and use only letters, digits and _`];
+  }
+  if (action.type === 'flow.wait') {
+    const issue = waitIssue(action.params);
+    if (issue) return [`action "${action.key}": ${issue}`];
   }
   return [];
 }

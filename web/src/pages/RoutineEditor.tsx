@@ -7,6 +7,7 @@ import { pickerGroups } from '../catalog/picker.ts';
 import { useCatalog } from '../catalog/store.ts';
 import { shortValue, TryStep } from '../components/try-step.tsx';
 import { DateInput } from '../forms/date-input.tsx';
+import { DURATION_CHOICES } from '../forms/durations.ts';
 import { ConfirmDialog, CopyButton, Disclosure, ErrorNote, Icon, IconButton, JsonBlock, Loading } from '../components/ui.tsx';
 import { ActionFlow, ActionGlyph, ActionSentence, AppearanceDialog, routineLook } from '../components/visual.tsx';
 import { previewCron, runTime, usesSeconds } from '../cron.ts';
@@ -718,6 +719,13 @@ export function RoutineEditor({ id }: { id?: string }) {
             {/* a list deleted since: say so instead of silently showing "default" */}
             {value && taskLists.data && !taskLists.data.some((list) => list.id === value) && <option value={value as string}>Deleted list – uses default</option>}
           </select>
+        ) : field.kind === 'duration' ? (
+          <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
+            <option value="">{field.required ? 'Choose…' : '–'}</option>
+            {field.options?.map((option) => <option key={option} value={option}>{field.optionLabels?.[option] ?? option}</option>)}
+            {/* a duration typed elsewhere (a template, the API) stays as it is */}
+            {value && !field.options?.includes(value as string) && <option value={value as string}>{value as string}</option>}
+          </select>
         ) : field.kind === 'select' ? (
           <select {...common} className={problem ? 'invalid' : ''} onChange={(event) => apply(event.target.value)}>
             <option value="">Default</option>
@@ -1256,17 +1264,7 @@ function FlowControls({ action, earlier, variables, invalid, onChange }: {
 }
 
 /** How long a step you do yourself may wait – the choices of "If you don't get to it". */
-const WAIT_CHOICES = [
-  { value: 'PT15M', label: '15 minutes' },
-  { value: 'PT30M', label: '30 minutes' },
-  { value: 'PT1H', label: '1 hour' },
-  { value: 'PT2H', label: '2 hours' },
-  { value: 'PT4H', label: '4 hours' },
-  { value: 'PT8H', label: '8 hours' },
-  { value: 'P1D', label: '1 day' },
-  { value: 'P2D', label: '2 days' },
-  { value: 'P1W', label: '1 week' },
-];
+const WAIT_CHOICES = DURATION_CHOICES.filter((choice) => choice.value !== 'PT5M');
 
 /**
  * "If you don't get to it" (02-experience §6): keep waiting, or skip / fail the step after a while.

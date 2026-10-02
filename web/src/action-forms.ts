@@ -7,8 +7,9 @@
  * `tasklist` = a select filled with the user's task lists.
  * `value` = free text that becomes a number, list or object when it reads as JSON (`42`, `["a","b"]`).
  * `routine` = a select of the user's routines; stores `routineId` and, for display, `routineName`.
+ * `duration` = a select of common ISO 8601 durations (forms/durations.ts).
  */
-export type FieldKind = 'text' | 'textarea' | 'number' | 'boolean' | 'date' | 'time' | 'select' | 'json' | 'keyvalue' | 'tasklist' | 'value' | 'routine';
+export type FieldKind = 'text' | 'textarea' | 'number' | 'boolean' | 'date' | 'time' | 'select' | 'json' | 'keyvalue' | 'tasklist' | 'value' | 'routine' | 'duration';
 
 export interface ParamField {
   name: string;

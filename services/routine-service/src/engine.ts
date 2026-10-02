@@ -4,7 +4,9 @@ import { conditionMet, CONTROL_ACTION_TYPES, ControlError, evaluateControlAction
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES, type InFlightStatus } from './domain/progress.ts';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './domain/catalog.ts';
 import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
+import { DEFAULT_TIMEZONE } from './domain/schedule.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
+import { wakeAt } from './domain/wait.ts';
 import {
   actionCancelRequested,
   actionRequested,
@@ -29,6 +31,7 @@ import {
   lockExecution,
   copySampleActions,
   dueAwaitingActions,
+  dueWaitActions,
   insertExecution,
   markExecutionResumed,
   recordRunOutcome,
@@ -38,6 +41,7 @@ import {
   markActionDispatched,
   markActionFailed,
   markActionRetrying,
+  markActionScheduled,
   markActionSkipped,
   markStaleExecutionsWaiting,
   skipPendingActions,
@@ -381,6 +385,31 @@ export class ExecutionEngine {
     return expired;
   }
 
+  /**
+   * Housekeeping (06-engine §9): Wait steps whose time has come complete with `wokeAt`, and the run
+   * goes on. Replica-safe like expiry: an execution another replica holds waits for the next round.
+   */
+  async wakeDueWaits(limit = 50): Promise<number> {
+    let woken = 0;
+    for (const due of await dueWaitActions(this.#pool, limit)) {
+      const done = await withTransaction(this.#pool, async (client) => {
+        const execution = await lockExecution(client, due.execution_id, true);
+        if (!execution) return false;
+        const actions = await listExecutionActions(client, execution.id);
+        const action = actions.find((candidate) => candidate.id === due.id);
+        if (action?.status !== 'SCHEDULED' || !action.wake_at || action.wake_at.getTime() > Date.now()) return false;
+        const output = { wokeAt: new Date().toISOString() };
+        await markActionCompleted(client, action.id, output, ENGINE);
+        await appendLog(client, execution.id, 'ACTION_COMPLETED', 'Waited long enough', action.key);
+        Object.assign(action, { status: 'COMPLETED', output, processed_by: ENGINE });
+        if (!TERMINAL_EXECUTION_STATUSES.has(execution.status)) await this.#advance(client, execution, actions);
+        return true;
+      });
+      if (done) woken++;
+    }
+    return woken;
+  }
+
   /** "Skip" on a waiting human step (06-engine §5.5): the run goes on without it. */
   async skipAwaitingAction(executionId: string, ownerId: string, actionKey: string): Promise<'skipped' | 'not_found' | 'not_waiting'> {
     return withTransaction(this.#pool, async (client) => {
@@ -534,6 +563,30 @@ export class ExecutionEngine {
               });
               await appendLog(client, execution.id, 'ACTION_DISPATCHED', `Calls routine "${target.name}" (${started?.execution.id ?? '?'})`, action.key);
               Object.assign(action, { status: 'DISPATCHED', dispatched_at: new Date() });
+              continue;
+            }
+
+            // "Wait": the step sleeps until its time (housekeeping wakes it); a test run doesn't wait
+            if (action.type === 'flow.wait') {
+              let until: Date;
+              try {
+                until = execution.kind === 'test' ? new Date() : wakeAt(params, new Date(), DEFAULT_TIMEZONE);
+              } catch (error) {
+                if (!(error instanceof ControlError)) throw error;
+                await fail(action, error.message, 'INVALID_PARAMS');
+                continue;
+              }
+              if (execution.kind === 'test') {
+                await markActionDispatched(client, action.id, params);
+                const output = { wokeAt: until.toISOString() };
+                await markActionCompleted(client, action.id, output, ENGINE);
+                await appendLog(client, execution.id, 'ACTION_COMPLETED', 'A test does not wait', action.key);
+                Object.assign(action, { status: 'COMPLETED', output, processed_by: ENGINE });
+                continue;
+              }
+              await markActionScheduled(client, action.id, params, until);
+              await appendLog(client, execution.id, 'ACTION_SCHEDULED', `Waits until ${until.toISOString()}`, action.key);
+              Object.assign(action, { status: 'SCHEDULED', wake_at: until, dispatched_at: new Date() });
               continue;
             }
 

@@ -10,7 +10,7 @@ import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusS
 import { between, clock, dateTime, groupByDay, JAEGER_URL, relative, splitInstance, TRIGGER_WORDS } from '../format.ts';
 import { navigate, useNow, usePolling, useRouteParam } from '../hooks.ts';
 import { FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine } from '../lib/failure-copy.ts';
-import { doItHref, doneTooLate, waitingLine, waitingSteps } from '../lib/waiting.ts';
+import { delayedUntil, doItHref, doneTooLate, moment, waitingLine, waitingSteps } from '../lib/waiting.ts';
 import { TERMINAL_STATUSES, type Execution, type ExecutionAction, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
 
 /** One run as a list row. `routine`, when known, gives the row its routine's colour and symbol. */
@@ -134,6 +134,13 @@ const HEADLINE: Record<ExecutionStatus, string> = {
   FAILED: 'Failed',
 };
 
+/** "Waiting until 17:00" for a run that sleeps, "Cancelled" for one ended on purpose (02 §7). */
+function headline(e: Detail): string {
+  if (e.errorCode === 'CANCELLED') return 'Cancelled';
+  const until = e.status === 'DELAYED' ? delayedUntil(e) : undefined;
+  return until ? `Waiting until ${moment(until)}` : HEADLINE[e.status];
+}
+
 export function ExecutionDetail({ id }: { id: string }) {
   const toast = useToast();
   const now = useNow(500);
@@ -237,7 +244,7 @@ export function ExecutionDetail({ id }: { id: string }) {
         </span>
         <div className="grow">
           <span className="eyebrow">{e.routineName}</span>
-          <h1 aria-live="polite">{e.errorCode === 'CANCELLED' ? 'Cancelled' : HEADLINE[e.status]}</h1>
+          <h1 aria-live="polite">{headline(e)}</h1>
           <p>
             {e.calledBy ? <a href={`#/executions/${e.calledBy}`}>{started}</a> : started} · {dateTime(e.createdAt)} · <span className="tabular">{between(e.startedAt ?? e.createdAt, e.finishedAt, now)}</span>
             {e.resumeCount > 0 && <> · Resumed {e.resumeCount}×</>}
@@ -460,6 +467,7 @@ function ActionFlowForRun({ e, now, selected, onSelect }: { e: Detail; now: numb
         <span className="aside">
           <StatusIcon status={action.status} size={20} label={action.status !== 'COMPLETED'} />
           {action.status === 'SKIPPED' && doneTooLate(e, action.key) && <span className="muted small">done too late</span>}
+          {action.status === 'SCHEDULED' && action.wakeAt && <span className="muted small">until {moment(action.wakeAt)}</span>}
           <span className="muted small tabular">
             {action.attempts > 1 && <>attempt {action.attempts} · </>}
             {action.dispatchedAt ? between(action.dispatchedAt, action.finishedAt, now) : ''}

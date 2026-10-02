@@ -24,6 +24,11 @@ export function doItHref(action: Pick<ExecutionAction, 'awaiting'>): string {
   return action.awaiting?.kind === 'question' ? '#/notifications' : '#/tasks';
 }
 
+/** When a DELAYED run goes on: the earliest Wait step's wake-up time. */
+export function delayedUntil(e: Pick<ExecutionDetail, 'actions'>): string | undefined {
+  return e.actions.filter((action) => action.status === 'SCHEDULED' && action.wakeAt).map((action) => action.wakeAt as string).sort()[0];
+}
+
 /** Steps that wait for a person now. */
 export const waitingSteps = (e: Pick<ExecutionDetail, 'actions'>) => e.actions.filter((action) => action.status === 'AWAITING_USER');
 

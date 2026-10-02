@@ -87,6 +87,8 @@ export interface ExecutionActionRow {
   accepted_at: Date | null;
   deadline_at: Date | null;
   timeout: StepTimeout | null;
+  /** A Wait step: when it wakes up. */
+  wake_at: Date | null;
 }
 
 export interface ExecutionLogRow {
@@ -407,6 +409,25 @@ export async function markActionAwaiting(db: Queryable, id: string, awaiting: Aw
   return rows[0];
 }
 
+/** A Wait step goes to sleep until `wakeAt` (06-engine §9). */
+export async function markActionScheduled(db: Queryable, id: string, resolvedParams: Record<string, unknown>, wakeAt: Date): Promise<void> {
+  await db.query(
+    `UPDATE execution_actions
+        SET status = 'SCHEDULED', resolved_params = $2, wake_at = $3, attempts = 1, dispatched_at = now(), processed_by = 'routine-engine', updated_at = now()
+      WHERE id = $1`,
+    [id, JSON.stringify(resolvedParams), wakeAt],
+  );
+}
+
+/** Wait steps whose time has come, earliest first – the housekeeping loop wakes them. */
+export async function dueWaitActions(db: Queryable, limit: number): Promise<Array<{ id: string; execution_id: string }>> {
+  const { rows } = await db.query<{ id: string; execution_id: string }>(
+    `SELECT id, execution_id FROM execution_actions WHERE status = 'SCHEDULED' AND wake_at <= now() ORDER BY wake_at LIMIT $1`,
+    [limit],
+  );
+  return rows;
+}
+
 /** Human steps whose deadline passed, oldest first – the housekeeping loop expires them. */
 export async function dueAwaitingActions(db: Queryable, limit: number): Promise<Array<{ id: string; execution_id: string }>> {
   const { rows } = await db.query<{ id: string; execution_id: string }>(
@@ -601,7 +622,7 @@ export async function resetForResume(db: Queryable, executionId: string, current
     `UPDATE execution_actions
         SET status = 'PENDING', error = NULL, error_code = NULL, skip_reason = NULL, output = NULL,
             resolved_params = NULL, dispatched_at = NULL, finished_at = NULL,
-            awaiting = NULL, accepted_at = NULL, deadline_at = NULL, updated_at = now()
+            awaiting = NULL, accepted_at = NULL, deadline_at = NULL, wake_at = NULL, updated_at = now()
       WHERE execution_id = $1 AND (status = 'FAILED' OR (status = 'SKIPPED' AND skip_reason = 'failure'))
       RETURNING *`,
     [executionId],
@@ -820,6 +841,7 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
         ...(action.for_each && { forEach: action.for_each }),
         ...(action.parent_id && { parentId: action.parent_id, loopIndex: action.loop_index }),
         ...(action.timeout && { timeout: action.timeout }),
+        ...(action.wake_at && { wakeAt: action.wake_at }),
         ...(action.awaiting && { awaiting: action.awaiting, acceptedAt: action.accepted_at, deadlineAt: action.deadline_at }),
       })),
     }),

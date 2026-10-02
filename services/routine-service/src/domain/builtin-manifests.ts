@@ -32,7 +32,7 @@ const MATH_OPTIONS: ParamSpec['options'] = [
 export const SCRIPTING_MANIFEST: DomainManifest = {
   contract: 1,
   domain: 'scripting',
-  manifestVersion: 1,
+  manifestVersion: 2,
   service: 'routine-service',
   name: 'Scripting',
   description: 'Variables, conditions and calculations between your steps.',
@@ -40,7 +40,7 @@ export const SCRIPTING_MANIFEST: DomainManifest = {
   tint: 'grey',
   order: 90,
   optional: false,
-  prefixes: ['variable', 'condition', 'math'],
+  prefixes: ['variable', 'condition', 'math', 'flow'],
   capabilities: [
     {
       type: 'variable.set',
@@ -90,6 +90,21 @@ export const SCRIPTING_MANIFEST: DomainManifest = {
       output: [{ name: 'result', label: 'Result', type: 'number', example: 42 }],
       sideEffects: false,
       since: 1,
+    },
+    {
+      type: 'flow.wait',
+      kind: 'value',
+      label: 'Wait',
+      sentence: 'Wait for {for} until {until}',
+      description: 'Pauses the routine for a while, or until a time of day.',
+      icon: 'clock',
+      params: [
+        { name: 'for', label: 'For', type: 'duration', placeholder: 'PT1H', hint: 'At most 7 days' },
+        { name: 'until', label: 'Until', type: 'time', placeholder: '17:00', hint: 'The next time it is this late' },
+      ],
+      output: [{ name: 'wokeAt', label: 'Woke at', type: 'text' }],
+      sideEffects: false,
+      since: 2,
     },
   ],
 };

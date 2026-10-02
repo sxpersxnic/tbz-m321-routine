@@ -1,5 +1,6 @@
 import type { ActionForm, FieldKind, ParamField, Tint } from '../action-forms.ts';
 import type { Capability, CatalogDomain, ParamSpec } from '../types.ts';
+import { DURATION_CHOICES, DURATION_LABELS } from './durations.ts';
 
 /**
  * Step forms generated from the manifests (docs/v2/07-web.md §5.1): every catalog capability gets a
@@ -27,6 +28,8 @@ function kindOf(param: ParamSpec): FieldKind {
       return 'date';
     case 'time':
       return 'time';
+    case 'duration':
+      return 'duration';
     case 'ref':
       // the pickers the editor has; a generic collection picker arrives with the first domain that needs one
       if (param.ref?.collection === 'lists' && param.ref.domain === 'tasks') return 'tasklist';
@@ -50,6 +53,7 @@ export function fieldFor(param: ParamSpec): ParamField {
     kind,
     ...(param.required && { required: true }),
     ...(param.options && { options: param.options.map((option) => option.value), optionLabels: Object.fromEntries(param.options.map((option) => [option.value, option.label])) }),
+    ...(kind === 'duration' && { options: DURATION_CHOICES.map((choice) => choice.value), optionLabels: DURATION_LABELS }),
     ...(param.placeholder && { placeholder: param.placeholder }),
     ...(param.hint && { hint: param.hint }),
     ...(param.min !== undefined && { min: param.min }),
