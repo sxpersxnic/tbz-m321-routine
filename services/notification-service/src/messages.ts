@@ -14,7 +14,7 @@ export interface NotificationDraft {
   category: 'action' | 'execution';
   sourceKey: string;
   executionId: string | null;
-  /** For the notification.created event (not stored until M3). */
+  /** The routine it is about (stored from M3). */
   routineId?: string | null;
 }
 

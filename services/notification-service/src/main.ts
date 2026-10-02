@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import {
   Broker,
+  conflict,
   createHttpServer,
   createLogger,
   createPool,
@@ -20,6 +21,7 @@ import {
   withTransaction,
 } from '@routine/service-kit';
 import { deliver, notificationHandlers, type NotificationRow } from './inbox.ts';
+import { answerQuestion, expireQuestion, questionHandlers } from './questions.ts';
 import { NOTIFICATIONS_MANIFEST } from './manifest.ts';
 import {
   NOTIFYING_EVENTS,
@@ -50,6 +52,12 @@ const notificationDto = (row: NotificationRow) => ({
   createdAt: row.created_at,
   readAt: row.read_at,
   resolvedAt: row.resolved_at,
+  kind: row.kind,
+  state: row.state,
+  options: row.options,
+  answer: row.answer,
+  routineId: row.routine_id,
+  expiresAt: row.expires_at,
 });
 
 const chaosFailureRate = envFloat('CHAOS_FAILURE_RATE', 0);
@@ -62,7 +70,8 @@ const domain = startDomain({
   logger,
   queue: 'notification-service.actions',
   chaosFailureRate,
-  handlers: notificationHandlers(logger),
+  handlers: { ...notificationHandlers(logger), ...questionHandlers() },
+  cancel: { 'notification.ask': (command, tools) => expireQuestion(command, tools, logger) },
 });
 
 // Execution events (pub/sub – the producer does not know this consumer)
@@ -108,13 +117,18 @@ const app = createHttpServer({
 });
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/']);
 
-app.get<{ Querystring: { unread?: boolean; category?: 'action' | 'execution' } }>(
+app.get<{ Querystring: { unread?: boolean; category?: 'action' | 'execution'; kind?: 'info' | 'question'; state?: 'open' | 'answered' | 'expired' } }>(
   '/api/v1/notifications',
   {
     schema: {
       querystring: {
         type: 'object',
-        properties: { unread: { type: 'boolean' }, category: { type: 'string', enum: ['action', 'execution'] } },
+        properties: {
+          unread: { type: 'boolean' },
+          category: { type: 'string', enum: ['action', 'execution'] },
+          kind: { type: 'string', enum: ['info', 'question'] },
+          state: { type: 'string', enum: ['open', 'answered', 'expired'] },
+        },
       },
     },
   },
@@ -123,8 +137,9 @@ app.get<{ Querystring: { unread?: boolean; category?: 'action' | 'execution' } }
     const { rows } = await pool.query<NotificationRow>(
       `SELECT * FROM notifications
         WHERE owner_id = $1 AND (NOT $2 OR read_at IS NULL) AND ($3::text IS NULL OR category = $3)
+          AND ($4::text IS NULL OR kind = $4) AND ($5::text IS NULL OR state = $5)
         ORDER BY created_at DESC LIMIT 200`,
-      [user.id, request.query.unread === true, request.query.category ?? null],
+      [user.id, request.query.unread === true, request.query.category ?? null, request.query.kind ?? null, request.query.state ?? null],
     );
     return { items: rows.map(notificationDto) };
   },
@@ -144,6 +159,23 @@ app.post<{ Params: { notificationId: string } }>(
   },
 );
 
+// "Ask me": the answer completes the routine step waiting for it
+app.post<{ Params: { notificationId: string }; Body: { value: string } }>(
+  '/api/v1/notifications/:notificationId/answer',
+  {
+    schema: {
+      params: { type: 'object', required: ['notificationId'], properties: { notificationId: { type: 'string', format: 'uuid' } } },
+      body: { type: 'object', required: ['value'], additionalProperties: false, properties: { value: { type: 'string', minLength: 1, maxLength: 200 } } },
+    },
+  },
+  async (request) => {
+    const user = requireUser(request);
+    const answered = await withTransaction(pool, (tx) => answerQuestion(tx, user.id, request.params.notificationId, request.body.value));
+    request.log.info({ notificationId: answered.id }, 'question answered');
+    return notificationDto(answered);
+  },
+);
+
 app.delete<{ Params: { notificationId: string } }>(
   '/api/v1/notifications/:notificationId',
   { schema: { params: { type: 'object', required: ['notificationId'], properties: { notificationId: { type: 'string', format: 'uuid' } } } } },
@@ -151,8 +183,16 @@ app.delete<{ Params: { notificationId: string } }>(
     const user = requireUser(request);
     // source_key stays unique only while the row exists – a redelivered message after a delete
     // would bring the notification back, which is the lesser evil than losing a first delivery
-    const { rowCount } = await pool.query('DELETE FROM notifications WHERE id = $1 AND owner_id = $2', [request.params.notificationId, user.id]);
-    if (!rowCount) throw notFound('Notification');
+    const { rowCount } = await pool.query(
+      `DELETE FROM notifications WHERE id = $1 AND owner_id = $2 AND NOT (kind = 'question' AND state = 'open')`,
+      [request.params.notificationId, user.id],
+    );
+    if (!rowCount) {
+      // an open question is what a routine waits for – it goes when answered, or skipped on the run
+      const open = await pool.query(`SELECT 1 FROM notifications WHERE id = $1 AND owner_id = $2`, [request.params.notificationId, user.id]);
+      if (open.rowCount) throw conflict('Answer the question first, or skip the step on its run');
+      throw notFound('Notification');
+    }
     return reply.status(204).send();
   },
 );

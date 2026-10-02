@@ -14,6 +14,14 @@ export interface NotificationRow {
   created_at: Date;
   read_at: Date | null;
   resolved_at: Date | null;
+  /** `question`: "Ask me" – answered with one of `options`, completing the step waiting for it. */
+  kind: 'info' | 'question';
+  options: Array<{ value: string; label: string }> | null;
+  answer: { value: string; label: string; answeredAt: string } | null;
+  awaiting_action_id: string | null;
+  expires_at: Date | null;
+  state: 'open' | 'answered' | 'expired';
+  routine_id: string | null;
 }
 
 /**
@@ -27,10 +35,10 @@ export async function deliver(
   emit: Emit = (type, data) => emitEvent(db, SOURCE, type, data),
 ): Promise<{ row: NotificationRow; created: boolean }> {
   const inserted = await db.query<NotificationRow>(
-    `INSERT INTO notifications (id, owner_id, title, body, priority, category, source_key, execution_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `INSERT INTO notifications (id, owner_id, title, body, priority, category, source_key, execution_id, routine_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (source_key) DO NOTHING RETURNING *`,
-    [randomUUID(), draft.ownerId, draft.title, draft.body, draft.priority, draft.category, draft.sourceKey, draft.executionId],
+    [randomUUID(), draft.ownerId, draft.title, draft.body, draft.priority, draft.category, draft.sourceKey, draft.executionId, draft.routineId ?? null],
   );
   const row = inserted.rows[0];
   if (row) {

@@ -39,7 +39,7 @@ you* · a checklist routine whose items appear as tasks and tick off the run · 
   - Manifest: `task.await` (`kind: 'human'`), manifestVersion bump.
   - Tests: [services/task-service.md §10](../services/task-service.md) human-step cases.
 
-- [ ] **M3-05 · `notification.ask` in notification-service**
+- [x] **M3-05 · `notification.ask` in notification-service**
   - Migration, handler, `POST /notifications/:id/answer`, cancel → `expired`,
     `notification.answered` event. Manifest bump.
 
