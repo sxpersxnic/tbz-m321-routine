@@ -59,7 +59,11 @@ login() { # token from Keycloak: client routine-cli (password grant, for scripts
   [[ -n $TOKEN && $TOKEN != null ]] || fail "no token received"
 }
 
-user_id() { curl -sS -H "authorization: Bearer $TOKEN" "$GATEWAY/auth/realms/routine/protocol/openid-connect/userinfo" | jq -r .sub; }
+# user_id → the `sub` of $TOKEN, the id the services use as owner (read from the JWT itself: the userinfo
+# endpoint answers only tokens with the openid scope, so it is no reliable source for a password-grant token)
+user_id() {
+  jq -Rr 'split(".")[1] // "" | gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - length % 4) % 4)) | @base64d | fromjson | .sub // empty' <<<"$TOKEN" 2>/dev/null
+}
 
 create_routine() { # create_routine JSON → prints id (routine is activated)
   local response id
@@ -117,8 +121,6 @@ rabbit_publish() { # rabbit_publish EXCHANGE ROUTING_KEY PAYLOAD_JSON – fails 
     jq -r '.routed')
   [[ $routed == true ]] || fail "message to $1/$2 was not routed – the test would have checked nothing"
 }
-
-count() { api GET "$1" | jq '.items | length'; }
 
 recreate() { # recreate SERVICE [ENV=VALUE...] – redeploys a single service with changed configuration
   local service=$1; shift
@@ -336,7 +338,7 @@ scenario_failover() {
 scenario_idempotency() {
   title "Idempotency"
   login
-  local rid eid key first second action_id owner before after envelope
+  local rid eid key first second action_id owner envelope since dlq_before tasks
   step "a) Duplicate API call with the same Idempotency-Key"
   rid=$(create_routine "$(jq -nc '{name: "Idempotency Demo", trigger: {type: "manual"}, actions: [
       {key: "task", type: "task.create", params: {title: "Create exactly once"}}]}')")
@@ -350,18 +352,33 @@ scenario_idempotency() {
   step "b) The same ActionRequested message is delivered twice"
   action_id=$(execution "$first" | jq -r '.actions[0].id')
   owner=$(user_id)
-  before=$(count /api/v1/tasks)
+  [[ $owner =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail "no owner id in the access token (sub: '$owner')"
+  read -r dlq_before _ _ <<<"$(queue task-service.actions.dlq)"
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   envelope=$(jq -nc --arg mid "$(uuid)" --arg aid "$action_id" --arg eid "$first" --arg rid "$rid" --arg owner "$owner" '{
     messageId: $mid, type: "ActionRequested", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $eid,
     data: {actionId: $aid, executionId: $eid, routineId: $rid, ownerId: $owner, actionKey: "task", actionType: "task.create", params: {title: "Create exactly once"}}}')
   # not inside $(…): a failing check in a subshell would not stop the scenario
   rabbit_publish routine.actions action.task.create "$envelope" && info "delivery 1 → routed to task-service.actions"
   rabbit_publish routine.actions action.task.create "$envelope" && info "delivery 2 → routed to task-service.actions"
-  sleep 2
-  after=$(count /api/v1/tasks)
-  info "tasks before: $before, after: $after"
-  [[ $before == "$after" ]] || fail "the duplicate created an extra task"
-  docker compose logs --no-log-prefix --since 30s task-service routine-service 2>/dev/null | grep "$action_id" | jq -r 'select(.msg | test("duplicate")) | "    \(.service): \(.msg)"' | head -4
+
+  # Both deliveries must reach the handler and be recognised as duplicates (the action already ran in a).
+  # A message the domain kit rejects goes to the DLQ instead – then nothing was deduplicated.
+  local deadline=$((SECONDS + 20)) duplicates=0 dlq=$dlq_before
+  while ((SECONDS < deadline)); do
+    duplicates=$(docker compose logs --no-log-prefix --since "$since" task-service 2>/dev/null |
+      jq -R --arg aid "$action_id" 'fromjson? | select(.actionId == $aid and .msg == "duplicate command – result sent again")' | jq -s length)
+    read -r dlq _ _ <<<"$(queue task-service.actions.dlq)"
+    ((dlq > dlq_before)) && fail "the message landed in task-service.actions.dlq ($dlq_before → $dlq) – the handler never saw it, nothing was deduplicated"
+    ((duplicates >= 2)) && break
+    sleep 1
+  done
+  info "\"duplicate command – result sent again\" logged $duplicates×, task-service.actions.dlq: $dlq message(s)"
+  ((duplicates >= 2)) || fail "expected 2 duplicate log lines for action $action_id, got $duplicates"
+
+  tasks=$(api GET /api/v1/tasks | jq --arg eid "$first" '[.items[] | select(.sourceExecutionId == $eid)] | length')
+  info "tasks of execution $first: $tasks"
+  [[ $tasks == 1 ]] || fail "expected exactly one task for the action, found $tasks"
   ok "duplicates detected (actionId = idempotency key) → ignored, result only reported again"
 }
 
