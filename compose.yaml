@@ -211,8 +211,9 @@ services:
       # service accounts (confidential clients in the realm) – the same secret goes to the service itself
       INTEGRATION_WORKER_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:-dev-integration-worker-secret}
     healthcheck:
-      # the image has no curl/wget – plain bash against the management port
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]
+      # the image has no curl/wget – plain bash against the management port. Check the status line, not
+      # the body: a not-ready body still holds "UP" (the "Graceful Shutdown" sub-check) next to a 503.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '^HTTP/1.1 200 ' <&3"]
       interval: 5s
       timeout: 3s
       retries: 60

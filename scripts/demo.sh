@@ -51,24 +51,12 @@ api() { # api METHOD PATH [JSON]
   curl "${args[@]}"
 }
 
-login() {
-  local attempts=${LOGIN_RETRIES:-10} i
-  for i in $(seq 1 "$attempts"); do
-    if TOKEN=$(curl -sS -f "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" ... | jq -r .access_token) \
-      && [[ -n $TOKEN && $TOKEN != null ]]; then
-      return 0
-    fi
-    ((i < attempts)) && sleep 1
-  done
-  fail "Login failed – is the system running? (docker compose up -d --wait)"
+login() { # token from Keycloak: client routine-cli (password grant, for scripts only – the web app uses the code flow)
+  TOKEN=$(curl -sS -f "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" -d grant_type=password -d client_id=routine-cli \
+    --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASSWORD" | jq -r .access_token) \
+    || fail "Login failed – is the system running? (docker compose up -d --wait)"
+  [[ -n $TOKEN && $TOKEN != null ]] || fail "no token received"
 }
-
-#login() { # token from Keycloak: client routine-cli (password grant, for scripts only – the web app uses the code flow)
-#  TOKEN=$(curl -sS -f "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" -d grant_type=password -d client_id=routine-cli \
-#    --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASSWORD" | jq -r .access_token) \
-#    || fail "Login failed – is the system running? (docker compose up -d --wait)"
-#  [[ -n $TOKEN && $TOKEN != null ]] || fail "no token received"
-#}
 
 user_id() { curl -sS -H "authorization: Bearer $TOKEN" "$GATEWAY/auth/realms/routine/protocol/openid-connect/userinfo" | jq -r .sub; }
 
