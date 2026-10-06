@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/start-routine-requested.v1.schema.json",
+  "title": "StartRoutineRequested v1",
+  "description": "Start a routine because something happened (docs/v2/05-messaging.md §4.3). Routing key: routine.start on routine.commands. routine-service creates the run with the idempotency key (duplicates are no-ops) and drops the command when the routine is inactive, deleted, or its current version no longer has this trigger.",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "StartRoutineRequested"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "routineId",
+        "ownerId",
+        "routineVersion",
+        "trigger",
+        "idempotencyKey",
+        "depth"
+      ],
+      "properties": {
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "routineVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "the version whose trigger matched"
+        },
+        "trigger": {
+          "type": "object",
+          "required": [
+            "type",
+            "event",
+            "eventMessageId",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "event"
+            },
+            "event": {
+              "type": "string",
+              "description": "the trigger type, e.g. task.completed"
+            },
+            "eventMessageId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "data": {
+              "type": "object",
+              "description": "the event's data"
+            }
+          }
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "pattern": "^event:",
+          "description": "event:<eventMessageId>"
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "event-chain depth: the event's origin.depth (0 when a person caused it)"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

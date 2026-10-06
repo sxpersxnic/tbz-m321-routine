@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/routine-saved.v1.schema.json",
+  "title": "RoutineSaved v1",
+  "description": "A routine was created, edited, activated, deactivated or restored (docs/v2/05-messaging.md §4.2). Routing key: routine.saved. trigger-service keeps its subscriptions from it; a lower version than the one stored is ignored.",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "RoutineSaved"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "routineId",
+        "ownerId",
+        "version",
+        "active",
+        "name",
+        "trigger"
+      ],
+      "properties": {
+        "routineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "description": "the routine's full trigger definition (docs/v2/06-engine.md §2) – event-carried state, consumers never call back",
+          "properties": {
+            "type": {
+              "enum": [
+                "manual",
+                "schedule",
+                "webhook",
+                "event",
+                "sun"
+              ]
+            },
+            "event": {
+              "type": "string"
+            },
+            "filter": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "operator"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string"
+                  },
+                  "operator": {
+                    "type": "string"
+                  },
+                  "value": {}
+                }
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "areaId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

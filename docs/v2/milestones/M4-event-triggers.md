@@ -11,7 +11,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
 
 ---
 
-- [ ] **M4-01 · Contracts**
+- [x] **M4-01 · Contracts**
   - Schemas: `RoutineSaved`, `RoutineDeleted`, `StartRoutineRequested`, and the generic domain
     event envelope (`domain-event.v1.schema.json`: `ownerId`, `occurredAt`, optional `areaId`,
     `origin`). One schema per task event type, extending it.

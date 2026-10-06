@@ -219,4 +219,13 @@ describe('tasks domain (04 §7)', { skip: needsDatabase }, () => {
       assert.ok((await outbox()).some((row) => row.routing_key === 'task.reopened' && row.payload.data.taskId === first.id));
     });
   });
+
+  it('every task event it emitted fits its contract (domain-event.v1 and the type\'s own schema)', async () => {
+    const events = (await outbox()).filter((row) => row.routing_key.startsWith('task.'));
+    assert.ok(events.length >= 5, 'the tests above emitted events');
+    for (const event of events) {
+      assert.deepEqual(contractErrors('domain-event.v1.schema.json', event.payload), [], event.routing_key);
+      assert.deepEqual(contractErrors(`${event.routing_key.replace('.', '-')}.v1.schema.json`, event.payload), [], event.routing_key);
+    }
+  });
 });

@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/task-reopened.v1.schema.json",
+  "title": "TaskReopened v1",
+  "description": "A done task was opened again (or a step task asked again after its run was resumed). Routing key: task.reopened on domain.events (docs/v2/services/task-service.md §4).",
+  "allOf": [
+    {
+      "$ref": "domain-event.v1.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "TaskReopened"
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "title",
+        "listId",
+        "listName",
+        "areaId",
+        "priority",
+        "dueDate",
+        "kind",
+        "sourceRoutineId"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "listId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "listName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "areaId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "priority": {
+          "enum": [
+            "low",
+            "normal",
+            "high"
+          ]
+        },
+        "dueDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        },
+        "kind": {
+          "enum": [
+            "task",
+            "step"
+          ]
+        },
+        "sourceRoutineId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
+      }
+    }
+  }
+}
