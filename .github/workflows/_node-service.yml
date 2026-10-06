@@ -10,6 +10,11 @@ on:
         description: directory name under services/
         required: true
         type: string
+      database:
+        description: start a Postgres for tests that need one (TEST_DATABASE_URL, e.g. the routine engine tests)
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   check:
@@ -25,6 +30,12 @@ jobs:
         run: npx biome lint services/${{ inputs.service }}
       - name: Typecheck (only this service and what it imports)
         run: npx tsc -p services/${{ inputs.service }}/tsconfig.json
+      - name: Test database
+        if: inputs.database
+        run: |
+          docker run -d --name test-db -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:17-alpine
+          for attempt in $(seq 1 30); do docker exec test-db pg_isready -U postgres -h 127.0.0.1 && break; sleep 1; done
+          echo "TEST_DATABASE_URL=postgres://postgres:test@localhost:5432/postgres" >> "$GITHUB_ENV"
       - name: Tests (unit + contract tests)
         run: |
           if [ -d services/${{ inputs.service }}/test ]; then

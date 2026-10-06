@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { createEnvelope, PermanentError } from '@routine/service-kit';
 import { contractErrors } from '../../../contracts/validate.ts';
-import { actionCompleted, parseSendNotification, readExecutionEvent } from '../src/messages.ts';
+import { NOTIFYING_EVENTS, readExecutionEvent, readExecutionResumed, sendDraft } from '../src/messages.ts';
 
 const base = { executionId: randomUUID(), routineId: randomUUID(), ownerId: randomUUID(), routineName: 'Weekly Review' };
 const v2Fields = { notification: { title: 'Routine completed', body: 'All done' }, priority: 'high' };
@@ -46,20 +46,67 @@ describe('ExecutionCompleted reader – every phase of expand and contract', () 
 });
 
 describe('notification.send', () => {
-  const request = (params: Record<string, unknown>) =>
-    createEnvelope({
-      type: 'ActionRequested',
-      version: 1,
-      source: 'routine-service',
-      data: { actionId: randomUUID(), executionId: base.executionId, routineId: base.routineId, ownerId: base.ownerId, actionKey: 'n', actionType: 'notification.send', params },
-    });
+  const command = (params: Record<string, unknown>) => ({ actionId: randomUUID(), executionId: base.executionId, routineId: base.routineId, ownerId: base.ownerId, params });
 
   it('rejects a missing title permanently (no retries)', () => {
-    assert.throws(() => parseSendNotification(request({ body: 'x' })), PermanentError);
+    assert.throws(() => sendDraft(command({ body: 'x' })), PermanentError);
+    assert.throws(() => sendDraft(command({ body: 'x' })), { code: 'INVALID_PARAMS' });
   });
 
-  it('produces a valid ActionCompleted', () => {
-    const { ref } = parseSendNotification(request({ title: 'Hallo' }));
-    assert.deepEqual(contractErrors('action-completed.v1.schema.json', actionCompleted(ref, { notificationId: randomUUID() }, 'n@1', false)), []);
+  it('keys the notification on the action, so a duplicate delivers nothing twice', () => {
+    const cmd = command({ title: 'Hallo', body: { a: 1 }, priority: 'high' });
+    assert.deepEqual(sendDraft(cmd), {
+      ownerId: base.ownerId,
+      title: 'Hallo',
+      body: '{"a":1}',
+      priority: 'high',
+      category: 'action',
+      sourceKey: `action:${cmd.actionId}`,
+      executionId: base.executionId,
+      routineId: base.routineId,
+    });
+  });
+});
+
+describe('failure notifications and resume', () => {
+  const failed = (resumeCount?: number) =>
+    createEnvelope({ type: 'ExecutionFailed', version: 1, source: 'routine-service', data: { ...base, reason: 'Action "call" failed', ...(resumeCount !== undefined && { resumeCount }) } });
+
+  it('keeps one notification per failure: the first keeps the v1 key, a failure after a resume gets its own', () => {
+    assert.equal(readExecutionEvent(failed(), 'tolerant').sourceKey, `execution:${base.executionId}:failed`);
+    assert.equal(readExecutionEvent(failed(0), 'tolerant').sourceKey, `execution:${base.executionId}:failed`);
+    assert.equal(readExecutionEvent(failed(2), 'tolerant').sourceKey, `execution:${base.executionId}:failed:2`);
+  });
+
+  it('reads ExecutionResumed, and only notifies for completed and failed runs', () => {
+    const resumed = createEnvelope({
+      type: 'ExecutionResumed',
+      version: 1,
+      source: 'routine-service',
+      data: { executionId: base.executionId, routineId: base.routineId, ownerId: base.ownerId, fromActionKey: 'call', resumedBy: base.ownerId, resumeCount: 1 },
+    });
+    assert.deepEqual(contractErrors('execution-resumed.v1.schema.json', resumed), []);
+    assert.deepEqual(readExecutionResumed(resumed), { executionId: base.executionId, ownerId: base.ownerId });
+    assert.ok(!NOTIFYING_EVENTS.has('ExecutionResumed'));
+    assert.ok(!NOTIFYING_EVENTS.has('ExecutionWaitingForYou'), 'future execution events are ignored, not dead-lettered');
+  });
+});
+
+describe('routine health', () => {
+  it('turns RoutineUnhealthy into one high-priority notification per streak, linked to the failed run', () => {
+    const unhealthy = createEnvelope({
+      type: 'RoutineUnhealthy',
+      version: 1,
+      source: 'routine-service',
+      data: { routineId: base.routineId, ownerId: base.ownerId, routineName: 'Backup', consecutiveFailures: 3, lastErrorCode: 'NOT_FOUND', executionId: base.executionId },
+    });
+    assert.deepEqual(contractErrors('routine-unhealthy.v1.schema.json', unhealthy), []);
+    assert.ok(NOTIFYING_EVENTS.has('RoutineUnhealthy'));
+    const draft = readExecutionEvent(unhealthy, 'tolerant');
+    assert.equal(draft.title, '"Backup" failed 3 times in a row');
+    assert.equal(draft.priority, 'high');
+    assert.equal(draft.category, 'action', 'shown on the Notifications page, unlike run outcomes');
+    assert.equal(draft.executionId, base.executionId);
+    assert.equal(draft.sourceKey, `routine:${base.routineId}:unhealthy:${base.executionId}`);
   });
 });

@@ -144,6 +144,12 @@ paths:
           in: header
           required: false
           schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: false
+        description: 'The answers to the routine''s questions ("Ask when run?"): checked against its inputs, defaults filled in; readable as {{input.<name>}}.'
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, properties: { inputs: { type: object } } }
       responses:
         '202':
           description: execution accepted
@@ -154,6 +160,7 @@ paths:
         '200':
           description: already triggered with this Idempotency-Key
           content: { application/json: { schema: { $ref: '#/components/schemas/Execution' } } }
+        '422': { description: 'the answers don''t fit the questions (errors lists why), or answers for a routine without questions', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
         '400': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409':
@@ -260,6 +267,148 @@ paths:
         '200': { description: execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /api/v1/routines/{routineId}/versions:
+    parameters: [{ $ref: '#/components/parameters/RoutineId' }]
+    get:
+      summary: Version history, newest first – every write that bumped the routine's version
+      operationId: listRoutineVersions
+      responses:
+        '200':
+          description: versions with their definitions (the web diffs neighbouring ones)
+          content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/RoutineVersion' } } } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/versions/{version}:
+    parameters:
+      - { $ref: '#/components/parameters/RoutineId' }
+      - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      summary: One version with its full definition
+      operationId: getRoutineVersion
+      responses:
+        '200': { description: version, content: { application/json: { schema: { $ref: '#/components/schemas/RoutineVersion' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/routines/{routineId}/versions/{version}/restore:
+    parameters:
+      - { $ref: '#/components/parameters/RoutineId' }
+      - { name: version, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      summary: Restore an old version – saved as a new version equal to it (history is never rewritten)
+      operationId: restoreRoutineVersion
+      responses:
+        '200': { description: the routine at its new version, content: { application/json: { schema: { $ref: '#/components/schemas/Routine' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+
+  /api/v1/catalog:
+    get:
+      summary: Every domain's current manifest – what routines can use (docs/v2/04-domain-platform.md §4.5)
+      description: |
+        Manifests as the registry holds them (schema: contracts/schemas/domain-manifest.v1.schema.json),
+        each with `enabled` for the caller (until M5 every domain counts as enabled). The ETag
+        covers every manifest version: send If-None-Match to get 304 while nothing changed.
+      operationId: getCatalog
+      responses:
+        '200':
+          description: catalog
+          headers: { ETag: { schema: { type: string } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  domains:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '../schemas/domain-manifest.v1.schema.json'
+                        - { type: object, properties: { enabled: { type: boolean } } }
+        '304': { description: unchanged since the ETag in If-None-Match }
+
+  /api/v1/routines/validate:
+    post:
+      summary: Validate a routine against the catalog without saving it
+      operationId: validateRoutine
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RoutineInput' } } } }
+      responses:
+        '200':
+          description: 'issues: what saving would refuse (empty = valid); warnings: advice'
+          content: { application/json: { schema: { type: object, properties: { issues: { type: array, items: { type: string } }, warnings: { type: array, items: { type: string } } } } } }
+
+  /api/v1/routines/test-step:
+    post:
+      summary: '"Try this step": a test run of one step of a saved routine'
+      description: |
+        Creates an execution with kind = test holding the step (it may be unsaved). References
+        resolve against a sample run – `sampleExecutionId`, else the routine's last run – whose
+        completed steps are copied into the test run. Only side-effect-free steps really run
+        (scripting, weather.get, summary.generate); others are SKIPPED with skipReason test.
+        Poll GET /api/v1/executions/{id}. Test runs are not listed, counted or announced, and are
+        deleted after TEST_RUN_TTL_MS (1 h).
+      operationId: testStep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [routineId, action]
+              properties:
+                routineId: { type: string, format: uuid }
+                action: { $ref: '#/components/schemas/ActionInput' }
+                sampleExecutionId: { type: string, format: uuid }
+      responses:
+        '201': { description: the test run, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/InvalidRoutine' }
+
+  /api/v1/executions/{executionId}/resume:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: '"Retry from here": a FAILED execution goes on from its failed step'
+      description: |
+        Completed steps keep their results. The failed step (same actionId, so workers see the same
+        idempotency key) and the steps skipped because of the failure run again – with the routine's
+        current settings when the step still exists with the same key and type. Steps skipped by a
+        condition stay skipped. Publishes ExecutionResumed.
+      operationId: resumeExecution
+      responses:
+        '200': { description: the resumed execution (RUNNING), content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the execution is not FAILED (or was cancelled), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /api/v1/executions/{executionId}/actions/{actionKey}/skip:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: actionKey, in: path, required: true, schema: { type: string } }
+    post:
+      summary: Skip a human step that waits for you – the run goes on without it
+      description: |
+        The step becomes SKIPPED (skipReason user), its item is closed (ActionCancelRequested with
+        reason skipped) and the run continues (docs/v2/06-engine.md §5).
+      operationId: skipStep
+      responses:
+        '200': { description: the execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the step does not wait for a person, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /api/v1/executions/{executionId}/cancel:
+    parameters:
+      - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      summary: Cancel a run that hasn't finished
+      description: |
+        Every unfinished step becomes SKIPPED (skipReason user), waiting human items are closed
+        (ActionCancelRequested, reason runCancelled), and the run ends FAILED with errorCode CANCELLED.
+        No ExecutionFailed is published and the routine's health is unchanged. A cancelled run can't be resumed.
+      operationId: cancelExecution
+      responses:
+        '200': { description: the cancelled execution, content: { application/json: { schema: { $ref: '#/components/schemas/ExecutionDetail' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { description: the run has finished already, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -307,6 +456,8 @@ components:
         PENDING: { type: integer }
         RUNNING: { type: integer }
         WAITING: { type: integer }
+        WAITING_FOR_YOU: { type: integer }
+        DELAYED: { type: integer }
         COMPLETED: { type: integer }
         FAILED: { type: integer }
 
@@ -334,6 +485,22 @@ components:
           required: [type]
           description: started by POST /api/v1/hooks/{token}; the URL is returned as `webhookPath`
           properties: { type: { const: webhook } }
+        - type: object
+          required: [type, event]
+          description: 'started by trigger-service when the domain event happens and every filter row holds; steps read its fields as {{trigger.event.<field>}}'
+          properties:
+            type: { const: event }
+            event: { type: string, description: 'a trigger type from the catalog, e.g. task.completed', examples: [task.completed] }
+            filter:
+              type: array
+              maxItems: 5
+              items:
+                type: object
+                required: [field, operator]
+                properties:
+                  field: { type: string, description: 'one of the trigger''s fields' }
+                  operator: { enum: [equals, notEquals, contains, notContains, greaterThan, lessThan, isEmpty, isNotEmpty] }
+                  value: {}
 
     ActionInput:
       type: object
@@ -362,6 +529,14 @@ components:
           type: string
           maxLength: 200
           description: 'One {{…}} reference to a list. The action runs once per item (in parallel, at most 50), each run reads {{item}} and {{index}}. Later steps read {{actions.<key>.items}} and {{actions.<key>.count}}.'
+        timeout:
+          type: object
+          description: '"If you don''t get to it" – only on steps you do yourself (capability kind human): after `after` the step is skipped or fails (AWAIT_EXPIRED).'
+          required: [after, then]
+          additionalProperties: false
+          properties:
+            after: { type: string, description: 'ISO 8601 duration, e.g. PT2H' }
+            then: { enum: [skip, fail] }
 
     RoutineInput:
       type: object
@@ -374,6 +549,12 @@ components:
         actions: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/ActionInput' } }
         icon: { $ref: '#/components/schemas/RoutineIcon' }
         color: { $ref: '#/components/schemas/RoutineColor' }
+        alertAfterFailures: { type: [integer, 'null'], minimum: 1, maximum: 10, description: 'notify after this many failures in a row; null = never; omitted = unchanged (2 for a new routine)' }
+        inputs:
+          type: [array, 'null']
+          maxItems: 10
+          description: '"Ask when run?" – manual routines only; each answer is {{input.<name>}}'
+          items: { $ref: '#/components/schemas/RunInputSpec' }
 
     RoutineIcon:
       type: [string, 'null']
@@ -416,15 +597,55 @@ components:
         icon: { type: [string, 'null'], description: 'chosen symbol; null = derived from the first action' }
         color: { type: [string, 'null'], description: 'chosen colour; null = derived from the first action' }
         version: { type: integer }
+        alertAfterFailures: { type: [integer, 'null'], description: 'RoutineUnhealthy after this many failures in a row; null = never' }
+        inputs: { type: array, items: { $ref: '#/components/schemas/RunInputSpec' }, description: 'questions asked when run by hand; empty = none' }
+        health:
+          type: object
+          description: 'counters updated when a run finishes; the 30-day ones also recomputed nightly'
+          properties:
+            consecutiveFailures: { type: integer }
+            lastSuccessAt: { type: [string, 'null'], format: date-time }
+            lastFailureAt: { type: [string, 'null'], format: date-time }
+            runs30d: { type: integer }
+            failures30d: { type: integer }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
+    RunInputSpec:
+      type: object
+      required: [name, label, type]
+      additionalProperties: false
+      properties:
+        name: { type: string, pattern: '^[a-z][a-zA-Z0-9]*$' }
+        label: { type: string }
+        type: { enum: [text, number, date, choice, ref] }
+        required: { type: boolean }
+        default: { description: 'used when the question is left empty' }
+        options: { type: array, items: { type: object, properties: { value: { type: string }, label: { type: string } } }, description: 'choice: at least 2' }
+        ref: { type: object, properties: { domain: { type: string }, collection: { type: string } } }
+
     ExecutionStatus:
       type: string
-      enum: [PENDING, RUNNING, WAITING, COMPLETED, FAILED]
+      enum: [PENDING, RUNNING, WAITING, WAITING_FOR_YOU, DELAYED, COMPLETED, FAILED]
       description: |
         PENDING → RUNNING → COMPLETED; RUNNING → WAITING (retry scheduled or no
-        worker responding) → RUNNING; any time → FAILED on a permanent error.
+        worker responding) → RUNNING; RUNNING → WAITING_FOR_YOU (only human steps
+        in flight) or DELAYED (only "Wait" steps in flight) → RUNNING; any time →
+        FAILED on a permanent error (docs/v2/06-engine.md §1).
+
+    ErrorCode:
+      description: Why an action failed (docs/v2/05-messaging.md §6, contracts/schemas/action-failed.v1.schema.json).
+      enum: [NOT_FOUND, UNAUTHORIZED, FORBIDDEN_HOST, TIMEOUT, UNREACHABLE, RATE_LIMITED, INVALID_PARAMS, TEMPLATE_ERROR, NOT_AVAILABLE, REFERENCE_GONE, SUBROUTINE_FAILED, AWAIT_EXPIRED, QUOTA_EXCEEDED, AI_REFUSED, INPUT_TOO_LARGE, CONFLICT, CANCELLED, INTERNAL]
+
+    RoutineVersion:
+      type: object
+      properties:
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        origin: { enum: [create, edit, appearance, activate, deactivate, webhook, restore, backfill], description: 'the kind of write that produced this version (backfill = the version current when history started)' }
+        definition:
+          type: object
+          description: 'name, description, trigger, actions, icon, color, active – no webhook token'
 
     Execution:
       type: object
@@ -433,13 +654,26 @@ components:
         routineId: { type: string, format: uuid }
         routineName: { type: string }
         status: { $ref: '#/components/schemas/ExecutionStatus' }
-        trigger: { enum: [manual, schedule, webhook, routine], description: 'routine = called by a routine.run step of another routine' }
+        trigger: { enum: [manual, schedule, webhook, routine, event], description: 'routine = called by a routine.run step of another routine; event = started by an event trigger' }
+        triggerEvent:
+          type: object
+          description: 'event runs only: the event that started the run ("Why did this run?")'
+          properties:
+            event: { type: string, description: 'trigger type, e.g. task.completed' }
+            eventMessageId: { type: string, format: uuid }
+            data: { type: object, description: 'the event''s data – readable as {{trigger.event.<field>}}' }
+        depth: { type: integer, minimum: 0, description: 'event-chain depth: 0 unless a routine''s own action caused the starting event' }
         calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
+        resumeCount: { type: integer, minimum: 0, description: 'how often the execution was resumed ("Retry from here")' }
+        routineVersion: { type: [integer, 'null'], description: 'the routine version the run used; null for runs before v2' }
+        kind: { enum: [live, test], description: 'test = a "Try this step" run (only returned by GET /executions/{id})' }
+        inputs: { type: object, description: 'the answers to the routine''s questions (runs by hand only)' }
         scheduledFor: { type: [string, 'null'], format: date-time }
         correlationId: { type: string, description: shared ID in all logs and messages of this execution }
         traceId: { type: [string, 'null'], description: 'OpenTelemetry trace of the execution (Jaeger: /trace/{traceId}); added to v1 additively' }
         currentStep: { type: integer }
         error: { type: [string, 'null'] }
+        errorCode: { oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }], description: 'why a FAILED run failed (error code of its failed step); null otherwise and for runs that failed before v2' }
         createdAt: { type: string, format: date-time }
         startedAt: { type: [string, 'null'], format: date-time }
         finishedAt: { type: [string, 'null'], format: date-time }
@@ -459,16 +693,22 @@ components:
                   key: { type: string }
                   type: { type: string }
                   step: { type: integer }
-                  status: { enum: [PENDING, DISPATCHED, RETRYING, COMPLETED, FAILED, SKIPPED] }
+                  status: { enum: [PENDING, DISPATCHED, RETRYING, AWAITING_USER, SCHEDULED, COMPLETED, FAILED, SKIPPED], description: 'AWAITING_USER = a human step waits for a person; SCHEDULED = a Wait step sleeps until wakeAt' }
                   attempts: { type: integer }
                   params: { type: object, description: resolved parameters (after dispatch) }
                   output: { type: [object, 'null'] }
                   error: { type: [string, 'null'] }
+                  errorCode: { oneOf: [{ $ref: '#/components/schemas/ErrorCode' }, { type: 'null' }] }
+                  skipReason: { enum: [condition, failure, expired, user, test, null], description: 'why a SKIPPED action was skipped; null otherwise and for runs before v2' }
                   processedBy: { type: [string, 'null'], description: 'service instance, e.g. integration-worker@3f2a…, or routine-engine for scripting actions' }
                   runIf: { type: object, description: 'as defined in the routine' }
                   forEach: { type: string, description: 'as defined in the routine; the action is then expanded into child actions' }
                   parentId: { type: string, format: uuid, description: 'set on the actions a forEach step was expanded into' }
                   loopIndex: { type: integer, description: 'position of the item this child action works on' }
+                  timeout: { type: object, description: 'as defined in the routine (human steps)' }
+                  awaiting: { type: object, description: 'a human step''s item: { kind: task | question | checkIn, refId, title }' }
+                  acceptedAt: { type: [string, 'null'], format: date-time, description: 'since when the step waits for a person' }
+                  deadlineAt: { type: [string, 'null'], format: date-time, description: 'when it expires (with a timeout)' }
                   dispatchedAt: { type: [string, 'null'], format: date-time }
                   finishedAt: { type: [string, 'null'], format: date-time }
             log:

@@ -13,5 +13,7 @@
     "noUnusedLocals": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts"],
+  // unit tests of pure modules run with node --test (root `npm test`) and are typechecked with tsconfig.test.json
+  "exclude": ["src/**/*.test.ts"]
 }

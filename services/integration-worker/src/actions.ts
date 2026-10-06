@@ -1,7 +1,9 @@
-import { PermanentError, TransientError } from '@routine/service-kit';
+import { PermanentError, TransientError, type ErrorCode } from '@routine/service-kit';
 
 export interface ActionEnvironment {
   actionId: string;
+  /** `test`: answer with a preview instead of acting (only steps whose manifest says `preview`). */
+  mode?: 'live' | 'test';
   externalApiUrl: string;
   /** Hostnames http.request may call ('*' = any) – prevents SSRF against internal services. */
   allowedHosts: string[];
@@ -16,6 +18,7 @@ const MAX_REDIRECTS = 5;
 /** Larger answers are cut off instead of being buffered – a routine must not exhaust the worker's memory. */
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_TEXT_OUTPUT = 2_000;
+const INVALID_PARAMS = { code: 'INVALID_PARAMS' } as const;
 
 interface Outgoing {
   method: string;
@@ -24,9 +27,9 @@ interface Outgoing {
 }
 
 function assertAllowedTarget(url: URL, environment: ActionEnvironment) {
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new PermanentError('only http(s) URLs are allowed');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new PermanentError('only http(s) URLs are allowed', INVALID_PARAMS);
   if (!environment.allowedHosts.includes('*') && !environment.allowedHosts.includes(url.hostname)) {
-    throw new PermanentError(`host "${url.hostname}" is not on the allow-list`);
+    throw new PermanentError(`host "${url.hostname}" is not on the allow-list`, { code: 'FORBIDDEN_HOST' });
   }
 }
 
@@ -45,7 +48,9 @@ async function call(url: URL, outgoing: Outgoing, environment: ActionEnvironment
     try {
       response = await fetch(target, { ...request, redirect: 'manual', signal });
     } catch (error) {
-      throw new TransientError(`request to ${target.host} failed: ${error instanceof Error ? error.message : String(error)}`);
+      // AbortSignal.timeout rejects with a DOMException named TimeoutError; anything else is the connection
+      const code = error instanceof Error && error.name === 'TimeoutError' ? 'TIMEOUT' : 'UNREACHABLE';
+      throw new TransientError(`request to ${target.host} failed: ${error instanceof Error ? error.message : String(error)}`, { code });
     }
     const location = response.headers.get('location');
     if (!REDIRECT_STATUSES.has(response.status) || !location) return response;
@@ -66,12 +71,23 @@ async function call(url: URL, outgoing: Outgoing, environment: ActionEnvironment
   }
 }
 
-/** 5xx / 429 may heal → retry. Other 4xx will never succeed → fail permanently. */
+/** Error code for an unsuccessful HTTP status (docs/v2/05-messaging.md §6). */
+export function statusErrorCode(status: number): ErrorCode {
+  if (status === 404 || status === 410) return 'NOT_FOUND';
+  if (status === 401 || status === 403) return 'UNAUTHORIZED';
+  if (status === 429) return 'RATE_LIMITED';
+  if (status === 408) return 'TIMEOUT';
+  if (status >= 500) return 'UNREACHABLE';
+  return 'INVALID_PARAMS';
+}
+
+/** 5xx / 429 / 408 may heal → retry. Other 4xx will never succeed → fail permanently. */
 function assertSuccess(response: Response, what: string) {
   if (response.ok) return;
   const message = `${what} answered ${response.status} ${response.statusText}`;
-  if (response.status >= 500 || response.status === 429 || response.status === 408) throw new TransientError(message);
-  throw new PermanentError(message);
+  const code = statusErrorCode(response.status);
+  if (response.status >= 500 || response.status === 429 || response.status === 408) throw new TransientError(message, { code });
+  throw new PermanentError(message, { code });
 }
 
 /** Streams the body and stops after MAX_BODY_BYTES instead of buffering whatever the server sends. */
@@ -106,7 +122,7 @@ async function readBody(response: Response): Promise<unknown> {
 
 async function getWeather(params: Record<string, unknown>, environment: ActionEnvironment): Promise<Output> {
   const city = params.city;
-  if (typeof city !== 'string' || city.trim() === '') throw new PermanentError('param "city" is required');
+  if (typeof city !== 'string' || city.trim() === '') throw new PermanentError('param "city" is required', INVALID_PARAMS);
   const url = new URL('/weather', environment.externalApiUrl);
   url.searchParams.set('city', city);
   const response = await call(url, { method: 'GET', headers: {} }, environment);
@@ -125,11 +141,11 @@ async function httpRequest(params: Record<string, unknown>, environment: ActionE
   try {
     url = new URL(String(params.url));
   } catch {
-    throw new PermanentError('param "url" is not a valid URL');
+    throw new PermanentError('param "url" is not a valid URL', INVALID_PARAMS);
   }
   assertAllowedTarget(url, environment);
   const method = String(params.method ?? 'GET').toUpperCase();
-  if (!METHODS.has(method)) throw new PermanentError(`unsupported method ${method}`);
+  if (!METHODS.has(method)) throw new PermanentError(`unsupported method ${method}`, INVALID_PARAMS);
 
   const headers: Record<string, string> = {};
   if (params.headers && typeof params.headers === 'object') {
@@ -148,7 +164,7 @@ async function httpRequest(params: Record<string, unknown>, environment: ActionE
 
 function generateSummary(params: Record<string, unknown>): Output {
   const title = params.title;
-  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required');
+  if (typeof title !== 'string' || title.trim() === '') throw new PermanentError('param "title" is required', INVALID_PARAMS);
   const lines: string[] = [];
   if (params.sections && typeof params.sections === 'object') {
     for (const [name, value] of Object.entries(params.sections)) {
@@ -167,13 +183,15 @@ async function sendEmail(params: Record<string, unknown>, environment: ActionEnv
   const to = (Array.isArray(params.to) ? params.to : String(params.to ?? '').split(/[,;]/))
     .map((address) => String(address).trim())
     .filter(Boolean);
-  if (to.length === 0) throw new PermanentError('param "to" is required');
+  if (to.length === 0) throw new PermanentError('param "to" is required', INVALID_PARAMS);
   const invalid = to.find((address) => !EMAIL.test(address));
-  if (invalid) throw new PermanentError(`"${invalid}" is not an e-mail address`);
-  if (to.length > 20) throw new PermanentError('at most 20 recipients');
+  if (invalid) throw new PermanentError(`"${invalid}" is not an e-mail address`, INVALID_PARAMS);
+  if (to.length > 20) throw new PermanentError('at most 20 recipients', INVALID_PARAMS);
   const subject = params.subject;
-  if (typeof subject !== 'string' || subject.trim() === '') throw new PermanentError('param "subject" is required');
+  if (typeof subject !== 'string' || subject.trim() === '') throw new PermanentError('param "subject" is required', INVALID_PARAMS);
   const body = params.body === undefined ? '' : typeof params.body === 'string' ? params.body : JSON.stringify(params.body);
+  // a test run: everything checked, nothing sent (the manifest declares email.send with `preview`)
+  if (environment.mode === 'test') return { preview: { to: to.join(', '), subject }, wouldDo: `Send e-mail "${subject}" to ${to.join(', ')}` };
 
   const url = new URL('/mail/messages', environment.externalApiUrl);
   const response = await call(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to, subject, body }) }, environment);
@@ -193,6 +211,6 @@ export async function executeAction(type: string, params: Record<string, unknown
     case 'email.send':
       return sendEmail(params, environment);
     default:
-      throw new PermanentError(`integration-worker cannot handle action type ${type}`);
+      throw new PermanentError(`integration-worker cannot handle action type ${type}`, { code: 'NOT_AVAILABLE' });
   }
 }

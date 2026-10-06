@@ -1,18 +1,4 @@
-import type {
-  ActionType,
-  Execution,
-  ExecutionDetail,
-  ExecutionStats,
-  ExecutionStatus,
-  Notification,
-  Routine,
-  RoutineInput,
-  SystemStatus,
-  Task,
-  TaskList,
-  TaskListInput,
-  User,
-} from './types.ts';
+import type { ActionDefinition, CatalogDomain, DeadLetterQueue, Execution, ExecutionDetail, ExecutionStats, ExecutionStatus, Notification, RegistryEntry, Routine, RoutineInput, RoutineVersion, SystemStatus, Task, TaskList, TaskListInput, TriggerDecision, User } from './types.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -141,19 +127,31 @@ const send = async <T>(method: string, path: string, body?: unknown) => (await r
 // ---------------------------------------------------------------- endpoints
 
 export const api = {
-  actionTypes: async () => (await get<{ items: ActionType[] }>('/api/v1/action-types')).items,
+  /** The catalog; with the ETag of what we have, 304 means "still current". */
+  catalog: async (etag?: string): Promise<{ status: 200; etag: string | null; domains: CatalogDomain[] } | { status: 304 }> => {
+    try {
+      const response = await request<{ domains: CatalogDomain[] }>('GET', '/api/v1/catalog', undefined, etag ? { 'if-none-match': etag } : {});
+      return { status: 200, etag: response.headers.get('etag'), domains: response.data.domains };
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 304) return { status: 304 };
+      throw error;
+    }
+  },
 
   routines: async () => (await get<{ items: Routine[] }>('/api/v1/routines')).items,
   routine: (id: string) => get<Routine>(`/api/v1/routines/${id}`),
+  routineVersions: async (id: string) => (await get<{ items: RoutineVersion[] }>(`/api/v1/routines/${id}/versions`)).items,
+  /** Saves an old version as the next one. */
+  restoreVersion: (id: string, version: number) => send<Routine>('POST', `/api/v1/routines/${id}/versions/${version}/restore`),
   createRoutine: (input: RoutineInput) => send<Routine>('POST', '/api/v1/routines', input),
   updateRoutine: (id: string, input: RoutineInput) => send<Routine>('PUT', `/api/v1/routines/${id}`, input),
   setAppearance: (id: string, appearance: { icon?: string | null; color?: string | null }) =>
     send<Routine>('PATCH', `/api/v1/routines/${id}`, appearance),
   deleteRoutine: (id: string) => send<null>('DELETE', `/api/v1/routines/${id}`),
   setActive: (id: string, active: boolean) => send<Routine>('POST', `/api/v1/routines/${id}/${active ? 'activate' : 'deactivate'}`),
-  async trigger(id: string): Promise<Execution> {
+  async trigger(id: string, inputs?: Record<string, unknown>): Promise<Execution> {
     // a fresh idempotency key per click: a network retry of this request never starts a second run
-    const { data } = await request<Execution>('POST', `/api/v1/routines/${id}/executions`, undefined, {
+    const { data } = await request<Execution>('POST', `/api/v1/routines/${id}/executions`, inputs ? { inputs } : undefined, {
       'idempotency-key': crypto.randomUUID(),
     });
     return data;
@@ -174,6 +172,12 @@ export const api = {
   routineExecutions: async (id: string, limit = 20) =>
     (await get<{ items: Execution[] }>(`/api/v1/routines/${id}/executions?limit=${limit}`)).items,
   execution: (id: string) => get<ExecutionDetail>(`/api/v1/executions/${id}`),
+  /** "Try this step": a test run of one step of a saved routine, with the values of its last run. */
+  testStep: (routineId: string, action: ActionDefinition) => send<ExecutionDetail>('POST', '/api/v1/routines/test-step', { routineId, action }),
+  /** "Retry from here": a failed run goes on from its failed step. */
+  resume: (id: string) => send<ExecutionDetail>('POST', `/api/v1/executions/${id}/resume`),
+  /** Skips a step that waits for you – the run goes on without it. */
+  skipStep: (id: string, actionKey: string) => send<ExecutionDetail>('POST', `/api/v1/executions/${id}/actions/${encodeURIComponent(actionKey)}/skip`),
   executionStats: (hours = 24) => get<ExecutionStats>(`/api/v1/executions/stats?hours=${hours}`),
 
   tasks: async (status?: Task['status']) => (await get<{ items: Task[] }>(`/api/v1/tasks${status ? `?status=${status}` : ''}`)).items,
@@ -184,7 +188,7 @@ export const api = {
   updateTaskList: (id: string, input: Partial<TaskListInput>) => send<TaskList>('PATCH', `/api/v1/task-lists/${id}`, input),
   /** Deletes the list's tasks too. */
   deleteTaskList: (id: string) => send<null>('DELETE', `/api/v1/task-lists/${id}`),
-  setTaskStatus: (id: string, status: Task['status']) => send<Task>('PATCH', `/api/v1/tasks/${id}`, { status }),
+  setTaskStatus: (id: string, status: 'OPEN' | 'DONE') => send<Task>('PATCH', `/api/v1/tasks/${id}`, { status }),
 
   /** Only what routine steps sent – run outcomes live on the Runs page, not in the inbox. */
   notifications: async (unread = false) => {
@@ -192,7 +196,17 @@ export const api = {
     return (await get<{ items: Notification[] }>(`/api/v1/notifications?${query}`)).items;
   },
   markRead: (id: string) => send<Notification>('POST', `/api/v1/notifications/${id}/read`),
+  /** Answers a question – the routine waiting for it goes on. */
+  answer: (id: string, value: string) => send<Notification>('POST', `/api/v1/notifications/${id}/answer`, { value }),
   deleteNotification: (id: string) => send<null>('DELETE', `/api/v1/notifications/${id}`),
 
+  /** trigger-service's last decisions for one routine ("Why did this run?"). */
+  triggerLog: async (routineId: string) => (await get<{ items: TriggerDecision[] }>(`/api/v1/triggers/log?routineId=${encodeURIComponent(routineId)}`)).items,
+
   system: () => get<SystemStatus>('/api/v1/system/status'),
+  deadLetters: async () => (await get<{ items: DeadLetterQueue[] }>('/api/v1/system/dead-letters')).items,
+  registry: () => get<{ staleAfterMs: number; items: RegistryEntry[] }>('/api/v1/system/registry'),
+  replayDeadLetters: (queue: string) => send<{ moved: number }>('POST', `/api/v1/system/dead-letters/${encodeURIComponent(queue)}/replay`),
+  discardDeadLetters: (queue: string, messageIds: string[]) =>
+    send<{ discarded: number }>('POST', `/api/v1/system/dead-letters/${encodeURIComponent(queue)}/discard`, { messageIds }),
 };

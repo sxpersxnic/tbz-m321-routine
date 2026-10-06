@@ -19,13 +19,17 @@ Every scenario can be shown in the terminal (`scripts/demo.sh <scenario>`) or in
 | --- | --- | --- |
 | Main workflow (§17) | `scripts/demo.sh main` | Routine "Weekly Review": weather + task in parallel, summary, notification; `PENDING → RUNNING → COMPLETED`; which worker processed what; Jaeger link |
 | Retry | `scripts/demo.sh retry` | External service answers 503 twice → retries after 1 s and 5 s, execution `WAITING`, then `COMPLETED`. HTTP 404 → `FAILED` immediately, follow-up action `SKIPPED` |
+| Resume | `scripts/demo.sh resume` | A step calls an endpoint that doesn't exist → `FAILED`, `errorCode NOT_FOUND`. The endpoint is fixed, `POST …/resume` → the same run goes on from the failed step: the completed step keeps its result, the failed one reruns with the same `actionId`, `COMPLETED`; the failure notification is marked resolved. Also: fix by editing the step, then resume; resuming a completed run → 409 |
+| Registry | `scripts/demo.sh registry` | The five domains (tasks, notifications, connections, routines, scripting) are registered and online. A task ticked through the API publishes `TaskCompleted` on `domain.events` – a temporary queue makes it visible. A task-service manifest of the next version that drops `task.complete` without deprecating it is refused ("removed without being deprecated first"), the current version stays, and the refusal shows under Infrastructure → Registry |
+| Human steps | `scripts/demo.sh human-step` | A *Morning checklist* (3 × *Do yourself*, then *Ask me*) runs: `WAITING_FOR_YOU`, its three items appear as step tasks; ticking them moves the run on to the question; answering it completes the run (a second answer → 409). The same checklist with *skip after 3 s* on every human step completes on its own: all four steps `SKIPPED` (`expired`), the tasks `CANCELLED`, the question `expired` |
+| Event triggers | `scripts/demo.sh event-trigger` | *When a task in Work is completed → notify me*: completing a task in Work starts the routine (`trigger: event`, started by `task.completed` "Write report"), its notification reads `{{trigger.event.title}}`. A task in another list is logged as `filtered`, no run. A routine that adds a task to the list it watches runs once; its own `task.created` is logged as `loop`. trigger-service stopped while five tasks are completed: the events wait in `trigger-service.events`, and after the restart all five runs start |
 | Resilience (§18) | `scripts/demo.sh resilience` | integration-worker stopped → message waits in the queue (0 consumers), the API and other routines keep working, execution `WAITING`; start the worker → `COMPLETED` |
 | Idempotency | `scripts/demo.sh idempotency` | Same `Idempotency-Key` → same execution. The same `ActionRequested` sent to the broker twice → only one task, logs say "duplicate … ignored" |
 | Scaling | `scripts/demo.sh scale` | 16 parallel actions with 1 vs. 4 worker replicas; duration and distribution per instance |
 | Failover | `scripts/demo.sh failover` | The RabbitMQ node leading the queues is killed mid-run → new leader, run `COMPLETED`, UI shows `2/3 nodes`. One replica of every service is killed → 100/100 requests OK, a new run completes. All Keycloak replicas stopped → signed-in users keep working, a new sign-in answers 503 (retry later) ([availability.md](availability.md)) |
 | Schedule | `scripts/demo.sh schedule` | Cron `*/15 * * * * *` fires twice |
 | Webhook | `scripts/demo.sh webhook` | An external `curl` without a user token starts a routine; the JSON body becomes step input; a retry with the same `Idempotency-Key` returns the same run; after rotating the URL the old one answers 404 |
-| Evolution | `scripts/demo.sh evolution` | ExecutionCompleted v1 → expand → consumer update → v2; the breaking change lands in the DLQ and is replayed after the fix |
+| Evolution | `scripts/demo.sh evolution` | ExecutionCompleted v1 → expand → consumer update → v2; the breaking change lands in the DLQ and is replayed after the fix – through the gateway's dead-letter API, which *Replay* on Infrastructure uses (admins) |
 | Tracing | `scripts/demo.sh trace <correlationId>` | Logs of all services for one execution, sorted by time |
 
 ### Manually in the UI (for the presentation)
@@ -37,8 +41,9 @@ Every scenario can be shown in the terminal (`scripts/demo.sh <scenario>`) or in
 3. **Infrastructure** shows the live topology. For the resilience demo, run `docker compose stop integration-worker` in the terminal
    and start a routine → the edge to the worker turns red (0 consumers), 1 message waits, and after 10 s the run becomes `WAITING`;
    `docker compose start integration-worker` → the edge turns green, the run becomes `COMPLETED`.
-4. The "Load Test" template together with `docker compose up -d --scale integration-worker=4` shows the distribution across replicas
-   (run page → Under the hood → worker instances). "Flaky Webhook" shows retries, "Broken Endpoint" a permanent error.
+4. **Infrastructure → Demo scenarios**: *Create & run* on "Load Test" together with `docker compose up -d --scale integration-worker=4`
+   shows the distribution across replicas (run page → Under the hood → worker instances). "Flaky Webhook" shows retries,
+   "Broken Endpoint" a permanent error, "Heartbeat" the scheduler. The page stays on the topology while they run.
 5. The "Webhook Inbox" template shows an external trigger: *Try it* sends a test event through the routine's own URL.
    The routine page shows the URL; *Technical details* has a ready-to-paste `curl` command, and *Run again* on a run
    replays the same webhook data.

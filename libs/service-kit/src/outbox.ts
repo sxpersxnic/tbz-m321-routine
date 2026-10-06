@@ -1,24 +1,26 @@
-import {
-  captureTraceHeaders,
-  errorMessage,
-  runWithTraceHeaders,
-  startLoop,
-  withContext,
-  withTransaction,
-  type Broker,
-  type Logger,
-  type Loop,
-  type Pool,
-  type Queryable,
-} from '@routine/service-kit';
-import type { OutgoingMessage } from './messages.ts';
+import type { Broker } from './broker.ts';
+import { withContext } from './context.ts';
+import { type Pool, type Queryable, withTransaction } from './db.ts';
+import type { Envelope } from './envelope.ts';
+import { errorMessage } from './errors.ts';
+import { type Loop, startLoop } from './lifecycle.ts';
+import type { Logger } from './logger.ts';
+import { captureTraceHeaders, runWithTraceHeaders } from './trace-propagation.ts';
+
+/** A message on its way to the broker: where it goes and what it carries. */
+export interface OutboxMessage {
+  exchange: string;
+  routingKey: string;
+  envelope: Envelope<unknown>;
+}
 
 /**
  * Transactional outbox. `enqueue` must be called with the same transaction
  * client as the state change, so a message is stored if and only if the
  * state change is committed – no lost or phantom messages ("dual write").
+ * The table comes from the kit migration `outbox` (see `runKitMigrations`).
  */
-export async function enqueue(db: Queryable, message: OutgoingMessage): Promise<void> {
+export async function enqueue(db: Queryable, message: OutboxMessage): Promise<void> {
   await db.query(
     `INSERT INTO outbox (message_id, exchange, routing_key, payload, trace_headers, correlation_id)
      VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -37,7 +39,7 @@ interface OutboxRow {
   id: string;
   exchange: string;
   routing_key: string;
-  payload: OutgoingMessage['envelope'];
+  payload: OutboxMessage['envelope'];
   trace_headers: Record<string, string>;
   correlation_id: string;
 }
@@ -56,11 +58,11 @@ export interface OutboxRelayOptions {
  */
 export class OutboxRelay {
   #pool: Pool;
-  #broker: Broker;
+  #broker: Pick<Broker, 'publish'>;
   #logger: Logger;
   #options: OutboxRelayOptions;
 
-  constructor(pool: Pool, broker: Broker, logger: Logger, options: OutboxRelayOptions) {
+  constructor(pool: Pool, broker: Pick<Broker, 'publish'>, logger: Logger, options: OutboxRelayOptions) {
     this.#pool = pool;
     this.#broker = broker;
     this.#logger = logger;

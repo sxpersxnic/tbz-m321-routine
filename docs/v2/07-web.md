@@ -83,14 +83,14 @@ capability('budget.recordTransaction') // → Capability & { domain }
 | --- | --- | --- |
 | `text` | input | pill insertion for `{{…}}` as v1 |
 | `longText` | textarea | |
-| `number`, `integer` | input `inputmode=decimal/numeric` | literal validated, templates allowed |
-| `money` | MoneyInput (currency symbol from profile) | stores a number in major units |
+| `number`, `integer` | input `inputmode=decimal/numeric` | `min` from the manifest; a number input as in v1, so no `{{…}}` pills (M2) |
+| `money` | MoneyInput (currency symbol from profile) | stores a number in major units; a plain number input until the profile exists (M5) |
 | `boolean` | switch | |
-| `date` | segmented *Today · Tomorrow · In N days · Pick date* → `+Nd` or `YYYY-MM-DD` | |
+| `date` | segmented *Today · Tomorrow · In days · Date* → `+Nd` or `YYYY-MM-DD` | tapping the chosen segment clears an optional date; a `{{…}}` value stays editable as text |
 | `time` | time input | |
-| `duration` | amount + unit select → ISO 8601 | |
+| `duration` | amount + unit select → ISO 8601 | a text input until a manifest uses it |
 | `choice` | segmented control (≤ 4 options) or select | labels from `options` |
-| `ref` | RefPicker: select filled from the collection's `list` endpoint, *+ New* when the domain supports it | stores the id, shows the label |
+| `ref` | RefPicker: select filled from the collection's `list` endpoint, *+ New* when the domain supports it | stores the id, shows the label. M2: `tasks/lists` and `routines` use v1's pickers; the generic RefPicker comes with the first collection without one (M5) |
 | `list`, `object`, `value` | v1 `value` / `json` / `keyvalue` editors | |
 
 `advanced: true` params go under *More options*. Required params show the v1 inline error
@@ -101,6 +101,15 @@ style.
 `SentenceView` renders `capability.sentence` by replacing `{param}` with a token showing the
 param's display value (ref label, formatted money, relative date). This replaces the per-type
 `actionSentence` switch in `action-forms.ts` for every catalog capability.
+
+An empty required param shows its label; an empty optional one is left out with the words
+leading to it (back to a comma, else one word): `Create task {title}, due {dueDate}` reads
+*Create task [Pay rent]* without a date. Until the RefPicker loads collections, a ref token
+names what was picked (*list*), not its label.
+
+The ten v1 step types keep their hand-tuned sentences as overrides (they say more than the
+manifest sentence, e.g. *· important*); `web/src/forms/v1-sentences.fixture.json` guards that they
+read as before.
 
 ### 5.3 Overrides
 
@@ -114,6 +123,11 @@ Groups: *Suggested* (capabilities whose params can be filled from the previous s
 max 3), *You* (all `kind: 'human'`), one group per enabled domain in profile order,
 *Scripting*. Search matches label, description and domain name.
 
+A step is *suggested* when the previous step outputs a field named like one of its required
+params (`task.create` → `taskId` → *Move task*, *Complete task*); own domain first, then by how
+many params fit. Domain order is the manifests' `order` until the profile has one (M5). While
+searching there are no suggestions; Enter adds the first match.
+
 ### 5.5 Test a step
 
 *Try this step* on values, scripting steps and actions with `preview`:
@@ -126,6 +140,14 @@ then show the output inline. The same call fills the **example values** of token
 Domain select → trigger select (from `domain.triggers`) → filter rows *field · operator ·
 value* (fields from `trigger.fields`, operators from the v1 condition list). Pills for
 `{{trigger.event.<field>}}` become available in steps.
+
+A `ref` field named after a collection of its domain (`listId` → task lists, `routineId` →
+routines) gets that picker instead of an id field. The trigger sentence (`lib/event-trigger.ts`)
+fills `{filter}` with the conditions in words (*"in Work"*, *"with title containing "rent""*),
+any other `{field}` from an *is* condition on it or its `…Id` (*"When "Backup" fails"*, else
+*"any routine"*), and appends the conditions when the sentence has no `{filter}`. *Why did this
+run?* shows the event's fields, trigger-service's decision for it and its last decisions for the
+routine (`GET /api/v1/triggers/log`).
 
 ## 6. Today
 

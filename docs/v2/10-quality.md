@@ -5,6 +5,7 @@
 | Layer | Tool | Where | Runs in CI |
 | --- | --- | --- | --- |
 | Unit (pure logic: engine state machine, parsers, filters, diff, money) | `node --test` | `libs/*/test`, `services/*/test`, `web/src/**/*.test.ts` | ✓ |
+| Engine (routine-service transitions against a real Postgres: outbox in, `applyResult` out, no broker) | `node --test` + `TEST_DATABASE_URL` (skipped without it) | `services/routine-service/test/engine*.test.ts`, harness in `test/support/` | ✓ (`_node-service.yml` input `database`) |
 | Contract (every produced message and manifest validates, and parsers read fixtures) | `contracts/validate.ts` | `services/*/test/contracts.test.ts` | ✓ |
 | Domain conformance ([04 §7](04-domain-platform.md)) | node test + in-memory fake broker from the kit | `services/<domain>/test/conformance.test.ts` | ✓ |
 | System (whole stack in Docker) | `scripts/demo.sh <scenario>` | new scenarios per milestone (§3) | ✓ (`system.yml`) |
@@ -28,7 +29,7 @@ or the compose stack: `node web/scripts/a11y.mjs http://localhost:5173`.
 
 ## 3. System test scenarios
 
-Added to `scripts/demo.sh` (each also documented in `docs/demo.md` on the `v2` branch):
+Added to `scripts/demo.sh` (each also documented in `docs/demo.md` on `feat/v2-dev`):
 
 | Scenario | Milestone | Shows |
 | --- | --- | --- |
@@ -48,8 +49,9 @@ Added to `scripts/demo.sh` (each also documented in `docs/demo.md` on the `v2` b
 
 ## 4. Working rules for implementing agents
 
-1. **Branches.** `main` stays the v1 hand-in. Work on `v2/<milestone>` branches cut from `v2`
-   (e.g. `v2/m1-trust`), and open one PR per milestone into `v2`.
+1. **Branches.** `main` stays the v1 hand-in (tag `v1.0.0`). All v2 work happens on the one
+   integration branch `feat/v2-dev`, cut from `v1.0.0`. No per-milestone branches: the
+   milestone boundary is the push (rule 3).
 2. **One work package = one commit** that also ticks its checkbox in the milestone file. A
    large package may be split into commits named *part 1/2*, *part 2/2*. The box is ticked in
    the last one. Commit messages follow the repository's style (`feat(scope): …`,
@@ -93,11 +95,11 @@ home, calendar) is created the same way:
 - [ ] `deploy/stack.yml` entry with the v1 placement/update rules
 - [ ] `.github/workflows/<name>.yml` calling `_node-service.yml`, path filters like the others
 - [ ] gateway: upstream env, route prefix, probe in `/api/v1/system/status`
-- [ ] service account in `SERVICE_ACCOUNTS` if it calls `/internal` endpoints
+- [ ] service account (Keycloak client + `SERVICE_TOKEN_SECRET`, [identity-service.md §6](services/identity-service.md)) if it calls `/internal` endpoints
 - [ ] queues in `definitions.json` if it consumes fixed platform queues. Domain action queues
       are declared by the kit
 - [ ] topology component in the web (`components/topology.tsx`) knows the new node
-- [ ] `docs/architecture.md` service table updated on the `v2` branch
+- [ ] `docs/architecture.md` service table updated on `feat/v2-dev`
 
 ## 6. Definition of done (per work package)
 

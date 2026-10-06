@@ -3,7 +3,7 @@
 #
 # Placement (node labels are set by deploy.sh):
 #   every VM   edge (global), one rabbitmq node, at most one replica of every platform service
-#   vm1        routine.data=true → the five PostgreSQL databases (their volumes live on that VM)
+#   vm1        routine.data=true → the PostgreSQL databases (their volumes live on that VM)
 #   rabbitmq-N routine.rabbitmq=N → one broker node per VM
 #
 # Variables (exported by deploy.sh): TAG, CONFIG_VERSION, PUBLIC_URL, SERVICE_REPLICAS, INTEGRATION_WORKER_REPLICAS and the
@@ -149,6 +149,11 @@ services:
     <<: *postgres
     environment: { POSTGRES_USER: integration, POSTGRES_PASSWORD: "${INTEGRATION_DB_PASSWORD:?}", POSTGRES_DB: integration }
     volumes: [integration-db-data:/var/lib/postgresql/data]
+  # v2 services: one Postgres instance each (compose co-hosts them on domains-db, ADR-12)
+  trigger-db:
+    <<: *postgres
+    environment: { POSTGRES_USER: trigger, POSTGRES_PASSWORD: "${TRIGGER_DB_PASSWORD:?}", POSTGRES_DB: trigger }
+    volumes: [trigger-db-data:/var/lib/postgresql/data]
 
   # ------------------------------------------------------------ platform services
   web:
@@ -171,6 +176,7 @@ services:
       TASK_URL: http://task-service:3000
       NOTIFICATION_URL: http://notification-service:3000
       INTEGRATION_WORKER_URL: http://integration-worker:3000
+      TRIGGER_URL: http://trigger-service:3000
       WEB_URL: http://web:80
       EXTERNAL_API_URL: http://mock-external:8090
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq-1:15672,http://rabbitmq-2:15672,http://rabbitmq-3:15672
@@ -194,8 +200,12 @@ services:
       # a task has the overlay (eth0) and a VM-local bridge – cluster traffic must use the overlay
       KC_CACHE_EMBEDDED_NETWORK_BIND_ADDRESS: match-interface:eth0
       ROUTINE_PUBLIC_URL: ${PUBLIC_URL:?}
+      # service accounts (confidential clients in the realm) – the same secret goes to the service itself
+      INTEGRATION_WORKER_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:?}
+      TRIGGER_SERVICE_TOKEN_SECRET: ${TRIGGER_SERVICE_TOKEN_SECRET:?}
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]
+      # status line, not body: a not-ready body still holds "UP" (the "Graceful Shutdown" sub-check)
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '^HTTP/1.1 200 ' <&3"]
       interval: 5s
       timeout: 3s
       retries: 60
@@ -246,6 +256,7 @@ services:
       <<: *common-env
       OTEL_SERVICE_NAME: integration-worker
       DATABASE_URL: postgres://integration:${INTEGRATION_DB_PASSWORD:?}@integration-db:5432/integration
+      SERVICE_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:?} # its service account (client-credentials)
       EXTERNAL_API_URL: http://mock-external:8090
       HTTP_ALLOWED_HOSTS: mock-external
       PREFETCH: ${INTEGRATION_WORKER_PREFETCH:-1}
@@ -254,6 +265,19 @@ services:
       replicas: ${INTEGRATION_WORKER_REPLICAS:-3} # stateless → docker service scale routine_integration-worker=6
       update_config: { parallelism: 1, order: start-first, failure_action: rollback }
       restart_policy: { condition: any, delay: 2s }
+
+  trigger-service:
+    image: routine/trigger-service:${TAG:-latest}
+    init: true
+    healthcheck: *node-healthcheck
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: trigger-service
+      DATABASE_URL: postgres://trigger:${TRIGGER_DB_PASSWORD:?}@trigger-db:5432/trigger
+      ROUTINE_URL: http://routine-service:3000
+      SERVICE_TOKEN_SECRET: ${TRIGGER_SERVICE_TOKEN_SECRET:?} # its service account (client-credentials)
+      MAX_EVENT_DEPTH: ${MAX_EVENT_DEPTH:-5}
+    deploy: *replicated
 
   # simulated third-party APIs (not part of the platform) – reached only inside the overlay network
   mock-external:
@@ -293,3 +317,4 @@ volumes:
   task-db-data:
   notification-db-data:
   integration-db-data:
+  trigger-db-data:

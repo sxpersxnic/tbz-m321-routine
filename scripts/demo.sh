@@ -13,6 +13,10 @@
 #   schedule     Time-based trigger (cron)
 #   webhook      External event: a public webhook URL starts a routine (idempotent, rotatable)
 #   evolution    Schema evolution with expand-and-contract, including a breaking-change demo
+#   resume       A failed run is fixed and resumed from its failed step ("Retry from here")
+#   registry     Domain platform: five domains registered, a task event on the broker, an incompatible manifest refused
+#   human-step   Humans in the loop: a checklist run finished by ticking tasks and answering, and the expiry path
+#   event-trigger  Event triggers: a completed task in a list starts a routine, filters, loop protection, no start lost
 #   all          All scenarios in sequence (acceptance test)
 #   trace <id>   Logs of all services for a correlation or execution ID
 #   hook <routine> [json]  Call a webhook routine by ID or name, then follow the run (manual testing)
@@ -25,6 +29,7 @@ cd "$(dirname "$0")/.."
 GATEWAY=${GATEWAY:-http://localhost:8080}
 RABBIT=${RABBIT:-http://localhost:15672}
 RABBIT_AUTH=${RABBIT_AUTH:-routine:routine}
+MOCK=${MOCK:-http://localhost:8090}
 EMAIL=${DEMO_EMAIL:-demo@routine.local}
 PASSWORD=${DEMO_PASSWORD:-demo12345}
 TOKEN=""
@@ -55,7 +60,11 @@ login() { # token from Keycloak: client routine-cli (password grant, for scripts
   [[ -n $TOKEN && $TOKEN != null ]] || fail "no token received"
 }
 
-user_id() { curl -sS -H "authorization: Bearer $TOKEN" "$GATEWAY/auth/realms/routine/protocol/openid-connect/userinfo" | jq -r .sub; }
+# user_id → the `sub` of $TOKEN, the id the services use as owner (read from the JWT itself: the userinfo
+# endpoint answers only tokens with the openid scope, so it is no reliable source for a password-grant token)
+user_id() {
+  jq -Rr 'split(".")[1] // "" | gsub("-"; "+") | gsub("_"; "/") | . + ("=" * ((4 - length % 4) % 4)) | @base64d | fromjson | .sub // empty' <<<"$TOKEN" 2>/dev/null
+}
 
 create_routine() { # create_routine JSON → prints id (routine is activated)
   local response id
@@ -113,8 +122,6 @@ rabbit_publish() { # rabbit_publish EXCHANGE ROUTING_KEY PAYLOAD_JSON – fails 
     jq -r '.routed')
   [[ $routed == true ]] || fail "message to $1/$2 was not routed – the test would have checked nothing"
 }
-
-count() { api GET "$1" | jq '.items | length'; }
 
 recreate() { # recreate SERVICE [ENV=VALUE...] – redeploys a single service with changed configuration
   local service=$1; shift
@@ -188,6 +195,55 @@ scenario_retry() {
   ok "FAILED immediately (1 attempt), follow-up action SKIPPED, user is notified"
 }
 
+scenario_resume() {
+  title "Resume: fix it, then retry from the failed step"
+  login
+  local name rid eid before after notification
+  name="backup-$(uuid)"
+  step "A routine whose second step calls an endpoint that does not exist (yet)"
+  rid=$(create_routine "$(jq -nc --arg url "http://mock-external:8090/switch/$name" '{name: "Backup Check", trigger: {type: "manual"}, actions: [
+      {key: "weather", type: "weather.get", params: {city: "Bern"}},
+      {key: "call", type: "http.request", step: 2, params: {url: $url}},
+      {key: "notify", type: "notification.send", step: 3, params: {title: "Backup checked ({{actions.weather.summary}})"}}]}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 FAILED COMPLETED
+  show_actions "$eid"
+  [[ $(execution "$eid" | jq -r .errorCode) == NOT_FOUND ]] || fail "expected errorCode NOT_FOUND"
+  before=$(execution "$eid" | jq -c '{weather: (.actions[] | select(.key=="weather") | {id, output}), call: (.actions[] | select(.key=="call") | .id)}')
+  ok "FAILED with errorCode NOT_FOUND – the web says \"The website said this page doesn't exist\""
+
+  step "Fix it at the source, then POST /api/v1/executions/$eid/resume"
+  curl -sS -f -X PUT "$MOCK/switch/$name" >/dev/null || fail "mock-external not reachable on $MOCK"
+  api POST "/api/v1/executions/$eid/resume" | jq -r '"  status after resume: \(.status), resumed \(.resumeCount)×"'
+  wait_for "$eid" 30 COMPLETED FAILED
+  show_actions "$eid"
+  after=$(execution "$eid" | jq -c '{weather: (.actions[] | select(.key=="weather") | {id, output}), call: (.actions[] | select(.key=="call") | .id)}')
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "expected COMPLETED after the resume"
+  [[ $before == "$after" ]] || fail "the completed step or the failed step's id changed: $before → $after"
+  ok "COMPLETED in the same run: weather kept its result, \"call\" ran again with the same actionId (idempotency key)"
+  show_log "$eid" | grep -E "FAILED|RESUMED|COMPLETED" || true
+  sleep 1
+  notification=$(api GET "/api/v1/notifications?category=execution" | jq -r --arg e "$eid" '[.items[] | select(.executionId==$e and (.title | test("failed")))][0].resolvedAt // empty')
+  [[ -n $notification ]] || fail "the failure notification was not marked resolved"
+  ok "the failure notification is resolved (ExecutionResumed → notification-service)"
+
+  step "Or fix the step itself: edit the routine, then resume"
+  rid=$(create_routine "$(jq -nc '{name: "Broken Endpoint", trigger: {type: "manual"}, actions: [
+      {key: "call", type: "http.request", params: {url: "http://mock-external:8090/status/404"}},
+      {key: "notify", type: "notification.send", params: {title: "fixed by editing the step"}}]}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 FAILED COMPLETED
+  api PUT "/api/v1/routines/$rid" "$(jq -nc '{name: "Broken Endpoint", trigger: {type: "manual"}, actions: [
+      {key: "call", type: "http.request", params: {url: "http://mock-external:8090/status/200"}},
+      {key: "notify", type: "notification.send", params: {title: "fixed by editing the step"}}]}')" >/dev/null
+  api POST "/api/v1/executions/$eid/resume" >/dev/null
+  wait_for "$eid" 30 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r '.actions[] | select(.key=="call") | .params.url') == *"/status/200" ]] || fail "the resumed step did not use the edited URL"
+  ok "the resumed step ran with the routine's current settings"
+  [[ $(api POST "/api/v1/executions/$eid/resume" | jq -r .status) == 409 ]] || fail "resuming a completed run must answer 409"
+  ok "a run that isn't failed can't be resumed (409)"
+}
+
 scenario_resilience() {
   title "Resilience workflow (README §18)"
   login
@@ -257,7 +313,7 @@ scenario_failover() {
   ok "Raft elected a new leader, clients reconnected to another node – $leader rejoined"
 
   step "2. Services: kill one replica of every platform service – under traffic"
-  for service in gateway web keycloak routine-service task-service notification-service integration-worker; do
+  for service in gateway web keycloak routine-service task-service notification-service integration-worker trigger-service; do
     container=$(docker compose ps -q "$service" | head -1)
     docker kill "$container" >/dev/null
     info "killed $(docker inspect -f '{{.Name}}' "$container" | tr -d /)"
@@ -283,7 +339,7 @@ scenario_failover() {
 scenario_idempotency() {
   title "Idempotency"
   login
-  local rid eid key first second action_id owner before after envelope
+  local rid eid key first second action_id owner envelope since dlq_before tasks
   step "a) Duplicate API call with the same Idempotency-Key"
   rid=$(create_routine "$(jq -nc '{name: "Idempotency Demo", trigger: {type: "manual"}, actions: [
       {key: "task", type: "task.create", params: {title: "Create exactly once"}}]}')")
@@ -297,18 +353,33 @@ scenario_idempotency() {
   step "b) The same ActionRequested message is delivered twice"
   action_id=$(execution "$first" | jq -r '.actions[0].id')
   owner=$(user_id)
-  before=$(count /api/v1/tasks)
+  [[ $owner =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail "no owner id in the access token (sub: '$owner')"
+  read -r dlq_before _ _ <<<"$(queue task-service.actions.dlq)"
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   envelope=$(jq -nc --arg mid "$(uuid)" --arg aid "$action_id" --arg eid "$first" --arg rid "$rid" --arg owner "$owner" '{
     messageId: $mid, type: "ActionRequested", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $eid,
     data: {actionId: $aid, executionId: $eid, routineId: $rid, ownerId: $owner, actionKey: "task", actionType: "task.create", params: {title: "Create exactly once"}}}')
   # not inside $(…): a failing check in a subshell would not stop the scenario
   rabbit_publish routine.actions action.task.create "$envelope" && info "delivery 1 → routed to task-service.actions"
   rabbit_publish routine.actions action.task.create "$envelope" && info "delivery 2 → routed to task-service.actions"
-  sleep 2
-  after=$(count /api/v1/tasks)
-  info "tasks before: $before, after: $after"
-  [[ $before == "$after" ]] || fail "the duplicate created an extra task"
-  docker compose logs --no-log-prefix --since 30s task-service routine-service 2>/dev/null | grep "$action_id" | jq -r 'select(.msg | test("duplicate")) | "    \(.service): \(.msg)"' | head -4
+
+  # Both deliveries must reach the handler and be recognised as duplicates (the action already ran in a).
+  # A message the domain kit rejects goes to the DLQ instead – then nothing was deduplicated.
+  local deadline=$((SECONDS + 20)) duplicates=0 dlq=$dlq_before
+  while ((SECONDS < deadline)); do
+    duplicates=$(docker compose logs --no-log-prefix --since "$since" task-service 2>/dev/null |
+      jq -R --arg aid "$action_id" 'fromjson? | select(.actionId == $aid and .msg == "duplicate command – result sent again")' | jq -s length)
+    read -r dlq _ _ <<<"$(queue task-service.actions.dlq)"
+    ((dlq > dlq_before)) && fail "the message landed in task-service.actions.dlq ($dlq_before → $dlq) – the handler never saw it, nothing was deduplicated"
+    ((duplicates >= 2)) && break
+    sleep 1
+  done
+  info "\"duplicate command – result sent again\" logged $duplicates×, task-service.actions.dlq: $dlq message(s)"
+  ((duplicates >= 2)) || fail "expected 2 duplicate log lines for action $action_id, got $duplicates"
+
+  tasks=$(api GET /api/v1/tasks | jq --arg eid "$first" '[.items[] | select(.sourceExecutionId == $eid)] | length')
+  info "tasks of execution $first: $tasks"
+  [[ $tasks == 1 ]] || fail "expected exactly one task for the action, found $tasks"
   ok "duplicates detected (actionId = idempotency key) → ignored, result only reported again"
 }
 
@@ -425,8 +496,8 @@ scenario_evolution() {
   step "Update the consumer – the tolerant reader reads v2 (only notification-service redeployed)"
   recreate notification-service COMPLETION_EVENT_READER=tolerant
   out=$(evolution_run); echo "$out"; [[ $out == *"All actions succeeded"* ]] || fail "the new consumer does not use the v2 fields"
-  info "Replay the event from the DLQ:"
-  scripts/replay-dlq.sh notification-service.execution-events | sed 's/^/    /'
+  info "Replay the event from the DLQ – what \"Replay\" on Infrastructure → Dead letters does (scripts/replay-dlq.sh does the same from a terminal):"
+  api POST /api/v1/system/dead-letters/notification-service.execution-events.dlq/replay | jq -r '"    \(.moved) message(s) moved back to notification-service.execution-events"'
 
   step "Contract – remove the old fields (the producer only sends v2)"
   recreate routine-service EXECUTION_COMPLETED_FORMAT=v2
@@ -453,6 +524,188 @@ scenario_hook() {
   wait_for "$eid" 60 COMPLETED FAILED
   show_actions "$eid"
   note "open in the UI: http://localhost:8080/#/executions/$eid"
+}
+
+registry() { api GET /api/v1/system/registry; }
+
+scenario_registry() {
+  title "Domain registry (M2)"
+  login
+  local names tick task event current manifest envelope before reason q=demo.task-events
+  step "a) Every domain registered its manifest – and keeps its heartbeat"
+  registry | jq -r '.items[] | "  \(.status | . + (" " * (9 - length))) \(.domain | . + (" " * (14 - length))) v\(.version)  \(.service)"'
+  names=$(registry | jq -r '[.items[] | select(.status == "up") | .domain] | sort | join(",")')
+  [[ $names == *connections*notifications*routines*scripting*tasks* ]] || fail "expected five domains online, got: $names"
+  ok "five domains online – the step picker and forms are built from these manifests"
+
+  step "b) Ticking a task publishes task.completed on the domain.events exchange"
+  # nothing consumes task events before M4 (event starts) – a queue of our own makes the message visible
+  curl -sS -f -u "$RABBIT_AUTH" -X PUT "$RABBIT/api/queues/%2F/$q" -H 'content-type: application/json' -d '{"durable":false,"auto_delete":false}' >/dev/null
+  curl -sS -f -u "$RABBIT_AUTH" -X POST "$RABBIT/api/bindings/%2F/e/domain.events/q/$q" -H 'content-type: application/json' -d '{"routing_key":"task.completed"}' >/dev/null
+  task=$(api POST /api/v1/tasks '{"title":"Registry demo – tick me"}' | jq -r .id)
+  api PATCH "/api/v1/tasks/$task" '{"status":"DONE"}' >/dev/null
+  info "task $task ticked"
+  for _ in $(seq 1 20); do
+    event=$(curl -sS -u "$RABBIT_AUTH" -X POST "$RABBIT/api/queues/%2F/$q/get" -H 'content-type: application/json' \
+      -d '{"count":1,"ackmode":"ack_requeue_false","encoding":"auto"}' | jq -c '.[0].payload // empty | fromjson')
+    [[ -n $event ]] && break
+    sleep 0.5
+  done
+  curl -sS -u "$RABBIT_AUTH" -X DELETE "$RABBIT/api/queues/%2F/$q" >/dev/null
+  [[ -n $event ]] || fail "no task.completed event arrived"
+  jq -r '"  \(.type) from \(.source): \(.data.title) (\(.data.listName))"' <<<"$event"
+  [[ $(jq -r .data.taskId <<<"$event") == "$task" ]] || fail "the event is about another task"
+  ok "domain event on the broker (RabbitMQ UI → Exchanges → domain.events)"
+
+  step "c) A new task-service version that drops a step without deprecating it first is refused"
+  current=$(api GET /api/v1/catalog | jq -c '.domains[] | select(.domain == "tasks") | del(.enabled)')
+  manifest=$(jq -c '.manifestVersion += 1 | .capabilities |= map(select(.type != "task.complete"))' <<<"$current")
+  envelope=$(jq -nc --arg mid "$(uuid)" --argjson manifest "$manifest" '{
+    messageId: $mid, type: "DomainRegistered", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $mid,
+    data: {manifest: $manifest, instance: "task-service@demo-fixture"}}')
+  before=$(registry | jq -r '.items[] | select(.domain == "tasks") | .rejected.at // ""')
+  rabbit_publish platform.registry domain.registered "$envelope"
+  for _ in $(seq 1 20); do
+    reason=$(registry | jq -r --arg before "$before" '.items[] | select(.domain == "tasks" and .rejected != null and .rejected.at != $before) | .rejected.reason')
+    [[ -n $reason ]] && break
+    sleep 0.5
+  done
+  [[ -n $reason ]] || fail "the incompatible manifest was not refused"
+  info "refused: $reason"
+  [[ $(registry | jq -r '.items[] | select(.domain == "tasks") | .version') == $(jq -r .manifestVersion <<<"$current") ]] || fail "the current version changed"
+  ok "the accepted version stays current – shown under Infrastructure → Registry"
+}
+
+# a checklist (3 "Do yourself") then "Ask me" – with an optional timeout on every human step
+checklist_routine() { # checklist_routine NAME [TIMEOUT_JSON]
+  local timeout=${2:-null}
+  jq -nc --arg name "$1" --argjson timeout "$timeout" '
+    def human(step): if $timeout == null then step else step + {timeout: $timeout} end;
+    {name: $name, trigger: {type: "manual"}, actions: [
+      human({key: "stretch", type: "task.await", step: 1, params: {title: "Stretch for 5 minutes"}}),
+      human({key: "water", type: "task.await", step: 1, params: {title: "Drink a glass of water"}}),
+      human({key: "plan", type: "task.await", step: 1, params: {title: "Pick the one thing for today"}}),
+      human({key: "mood", type: "notification.ask", step: 2, params: {question: "How did you sleep?", options: ["Well", "Badly"]}})
+    ]}'
+}
+
+step_tasks() { api GET /api/v1/tasks | jq -c --arg eid "$1" '[.items[] | select(.kind == "step" and .sourceExecutionId == $eid)]'; }
+question_of() { api GET '/api/v1/notifications?kind=question' | jq -c --arg eid "$1" '[.items[] | select(.executionId == $eid)][0] // empty'; }
+
+scenario_human_step() {
+  title "Humans in the loop (M3)"
+  login
+  local rid eid tasks question cancelled state skipped
+  step "a) A checklist run waits for you – its items appear as tasks"
+  rid=$(create_routine "$(checklist_routine "Morning checklist (demo)")")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 WAITING_FOR_YOU
+  for _ in $(seq 1 20); do tasks=$(step_tasks "$eid"); [[ $(jq length <<<"$tasks") == 3 ]] && break; sleep 0.5; done
+  jq -r '.[] | "    ☐ \(.title)  (\(.sourceRoutineName))"' <<<"$tasks"
+  [[ $(jq length <<<"$tasks") == 3 ]] || fail "expected 3 step tasks, got $(jq length <<<"$tasks")"
+  ok "three tasks on the Tasks page, grouped under \"Waiting for you\""
+
+  step "b) Ticking them moves the run on – then it asks a question"
+  for task in $(jq -r '.[].id' <<<"$tasks"); do api PATCH "/api/v1/tasks/$task" '{"status":"DONE"}' >/dev/null; done
+  for _ in $(seq 1 30); do question=$(question_of "$eid"); [[ -n $question ]] && break; sleep 0.5; done
+  [[ -n $question ]] || fail "the question was not asked"
+  info "asked: $(jq -r .title <<<"$question")  [$(jq -r '[.options[].label] | join("] [")' <<<"$question")]"
+  [[ $(execution "$eid" | jq -r .status) == WAITING_FOR_YOU ]] || fail "the run should wait for the answer"
+  ok "the run waits for the answer"
+
+  step "c) The answer completes the run, once"
+  api POST "/api/v1/notifications/$(jq -r .id <<<"$question")/answer" '{"value":"Well"}' >/dev/null
+  [[ $(api POST "/api/v1/notifications/$(jq -r .id <<<"$question")/answer" '{"value":"Badly"}' | jq -r .status) == 409 ]] || fail "a second answer must be refused"
+  wait_for "$eid" 30 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "run did not complete"
+  info "answer: $(execution "$eid" | jq -r '.actions[] | select(.key == "mood") | .output.label')"
+  ok "completed – a second answer was refused (409)"
+
+  step "d) Nobody gets to it: every human step skips after 3 s"
+  rid=$(create_routine "$(checklist_routine "Morning checklist (demo, expires)" '{"after":"PT3S","then":"skip"}')")
+  eid=$(trigger "$rid")
+  wait_for "$eid" 30 WAITING_FOR_YOU
+  wait_for "$eid" 40 COMPLETED FAILED
+  [[ $(execution "$eid" | jq -r .status) == COMPLETED ]] || fail "the expired run should complete"
+  show_actions "$eid"
+  skipped=$(execution "$eid" | jq '[.actions[] | select(.status == "SKIPPED" and .skipReason == "expired")] | length')
+  [[ $skipped == 4 ]] || fail "expected 4 expired steps, got $skipped"
+  for _ in $(seq 1 20); do cancelled=$(step_tasks "$eid" | jq '[.[] | select(.status == "CANCELLED")] | length'); [[ $cancelled == 3 ]] && break; sleep 0.5; done
+  [[ $cancelled == 3 ]] || fail "expected 3 cancelled tasks, got $cancelled"
+  for _ in $(seq 1 20); do state=$(question_of "$eid" | jq -r '.state // empty'); [[ $state == expired ]] && break; sleep 0.5; done
+  [[ $state == expired ]] || fail "the question should have expired, is: $state"
+  ok "completed with skipped steps; its tasks are cancelled and the question expired"
+}
+
+runs_of() { api GET "/api/v1/routines/$1/executions" | jq -c '.items'; }
+decisions_of() { api GET "/api/v1/triggers/log?routineId=$1" | jq -c '.items'; }
+new_task() { # new_task TITLE LIST_ID → prints task id
+  api POST /api/v1/tasks "$(jq -nc --arg title "$1" --arg list "$2" '{title: $title, listId: $list}')" | jq -r '.id // empty' | grep . || fail "could not create task $1"
+}
+complete_task() { api PATCH "/api/v1/tasks/$1" '{"status":"DONE"}' >/dev/null; }
+wait_runs() { # wait_runs ROUTINE_ID COUNT TIMEOUT_S → waits until the routine has COUNT completed runs
+  local done
+  for _ in $(seq 1 $(($3 * 2))); do
+    done=$(runs_of "$1" | jq '[.[] | select(.status == "COMPLETED")] | length')
+    [[ $done -ge $2 ]] && return 0
+    sleep 0.5
+  done
+  fail "expected $2 completed runs, got $done"
+}
+
+scenario_event_trigger() {
+  title "Event triggers (M4)"
+  login
+  local suffix work other loop rid lid runs run eid outcomes
+  suffix=$(date +%s)
+  work=$(api POST /api/v1/task-lists "$(jq -nc --arg name "Work $suffix" '{name: $name}')" | jq -r .id)
+  other=$(api POST /api/v1/task-lists "$(jq -nc --arg name "Home $suffix" '{name: $name}')" | jq -r .id)
+  loop=$(api POST /api/v1/task-lists "$(jq -nc --arg name "Loop $suffix" '{name: $name}')" | jq -r .id)
+
+  step "a) \"When a task in Work is completed → notify me\""
+  rid=$(create_routine "$(jq -nc --arg list "$work" '{name: "Work done → tell me (demo)",
+    trigger: {type: "event", event: "task.completed", filter: [{field: "listId", operator: "equals", value: $list}]},
+    actions: [{key: "notify", type: "notification.send", step: 1, params: {title: "Done: {{trigger.event.title}}", body: "In {{trigger.event.listName}}"}}]}')")
+  sleep 2 # RoutineSaved reaches trigger-service's projection
+  complete_task "$(new_task "Write report" "$work")"
+  wait_runs "$rid" 1 30
+  run=$(runs_of "$rid" | jq -c '.[0]')
+  eid=$(jq -r .id <<<"$run")
+  info "run $eid: trigger=$(jq -r .trigger <<<"$run"), started by $(jq -r '.triggerEvent.event + " \"" + .triggerEvent.data.title + "\""' <<<"$run")"
+  info "notification: $(execution "$eid" | jq -r '.actions[0].params.title')"
+  [[ $(execution "$eid" | jq -r '.actions[0].params.title') == "Done: Write report" ]] || fail "{{trigger.event.title}} was not filled in"
+  ok "completed – the step read {{trigger.event.title}}"
+
+  step "b) A task in another list does not pass the filter"
+  complete_task "$(new_task "Water the plants" "$other")"
+  for _ in $(seq 1 20); do outcomes=$(decisions_of "$rid" | jq -r '[.[].outcome] | join(",")'); [[ $outcomes == *filtered* ]] && break; sleep 0.5; done
+  [[ $outcomes == *filtered* ]] || fail "expected a filtered decision, got: $outcomes"
+  [[ $(runs_of "$rid" | jq length) == 1 ]] || fail "the filtered event started a run"
+  ok "logged as filtered, no run (\"Why did this run?\" shows it)"
+
+  step "c) A routine that adds a task to the list it watches runs once – loop protection stops it"
+  lid=$(create_routine "$(jq -nc --arg list "$loop" '{name: "Echo a task (demo)",
+    trigger: {type: "event", event: "task.created", filter: [{field: "listId", operator: "equals", value: $list}]},
+    actions: [{key: "echo", type: "task.create", step: 1, params: {title: "Echo of {{trigger.event.title}}", listId: $list}}]}')")
+  sleep 2
+  new_task "Ping" "$loop" >/dev/null
+  wait_runs "$lid" 1 30
+  for _ in $(seq 1 20); do outcomes=$(decisions_of "$lid" | jq -r '[.[].outcome] | join(",")'); [[ $outcomes == *loop* ]] && break; sleep 0.5; done
+  [[ $outcomes == *loop* ]] || fail "expected a loop decision, got: $outcomes"
+  sleep 2
+  runs=$(runs_of "$lid" | jq length)
+  [[ $runs == 1 ]] || fail "the routine ran $runs times"
+  ok "one run, its own task.created was logged as loop"
+
+  step "d) trigger-service down during a burst of completions – no start is lost"
+  docker compose stop trigger-service >/dev/null 2>&1
+  ok "trigger-service stopped"
+  for n in 1 2 3 4 5; do complete_task "$(new_task "Burst $n" "$work")"; done
+  info "queue trigger-service.events: $(queue trigger-service.events | awk '{print $1}') waiting"
+  docker compose start trigger-service >/dev/null 2>&1
+  ok "trigger-service started"
+  wait_runs "$rid" 6 60
+  ok "all 5 events started their run (6 runs in total)"
 }
 
 scenario_trace() {
@@ -484,11 +737,15 @@ case "${1:-}" in
   schedule) scenario_schedule ;;
   webhook) scenario_webhook ;;
   evolution) scenario_evolution ;;
+  resume) scenario_resume ;;
+  registry) scenario_registry ;;
+  human-step) scenario_human_step ;;
+  event-trigger) scenario_event_trigger ;;
   trace) scenario_trace "${2:-}" ;;
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
+    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_human_step; scenario_event_trigger; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;

@@ -26,9 +26,14 @@ export interface GiveUpInfo {
   permanent: boolean;
 }
 
+/** Declares queues and bindings on a channel – run again after every reconnect. */
+export type TopologySetup = (channel: ConfirmChannel) => Promise<void>;
+
 export interface ConsumeOptions {
-  /** Pre-declared durable queue (see infra/rabbitmq/definitions.json). */
+  /** Durable queue: pre-declared (infra/rabbitmq/definitions.json) or declared by `declare`. */
   queue: string;
+  /** Declares the queue (and its bindings) before consuming – domain services own their topology (ADR-04). */
+  declare?: TopologySetup;
   prefetch?: number;
   /**
    * Backoff schedule. Every entry becomes a dedicated retry queue whose TTL
@@ -121,7 +126,8 @@ export class Broker {
       name: `consumer:${queue}`,
       confirm: true,
       setup: async (ch: ConfirmChannel) => {
-        await ch.checkQueue(queue); // work queue + DLQ are infrastructure, declared by the broker
+        await options.declare?.(ch);
+        await ch.checkQueue(queue); // work queue + DLQ are infrastructure, declared by the broker (or just above)
         for (const delayMs of retryDelaysMs) {
           await ch.assertQueue(retryQueueName(queue, delayMs), {
             durable: true,
@@ -228,6 +234,21 @@ export class Broker {
         // channel already gone – the broker redelivers unacked messages automatically
       }
     }
+  }
+
+  /**
+   * Declares topology on its own channel, again after every reconnect – for a service that
+   * consumes by itself but lets the domain kit declare its queues (integration-worker).
+   */
+  declare(name: string, setup: TopologySetup): void {
+    const channel = this.#connection.createChannel({ name: `topology:${name}`, setup });
+    channel.on('error', (error: Error) => this.#logger.error({ topology: name, err: error.message }, 'topology channel error'));
+    this.#consumers.push(channel);
+  }
+
+  /** Called on every (re-)connection to the broker – e.g. to register a domain again. */
+  onConnect(listener: () => void): void {
+    this.#connection.on('connect', listener);
   }
 
   async close(): Promise<void> {

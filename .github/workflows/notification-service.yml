@@ -31,3 +31,4 @@ jobs:
     uses: ./.github/workflows/_node-service.yml
     with:
       service: notification-service
+      database: true # conformance tests of the notifications domain

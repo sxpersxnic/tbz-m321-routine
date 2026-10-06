@@ -1,0 +1,11 @@
+{
+  "name": "@routine/trigger-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Event triggers: matches domain events against event-triggered routines and asks routine-service to start them.",
+  "type": "module",
+  "dependencies": {
+    "@routine/service-kit": "*",
+    "fastify": "^5.12.4"
+  }
+}

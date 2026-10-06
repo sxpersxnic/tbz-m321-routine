@@ -11,12 +11,14 @@ import {
   instanceId,
   onShutdown,
   runMigrations,
+  startDomain,
   TransientError,
   waitForDatabase,
   withContext,
   type Envelope,
 } from '@routine/service-kit';
 import { executeAction, type ActionEnvironment } from './actions.ts';
+import { CONNECTIONS_MANIFEST } from './manifest.ts';
 import {
   actionCompleted,
   actionFailed,
@@ -81,6 +83,10 @@ async function publishResult(envelope: Envelope<unknown>) {
   await broker.publish(RESULTS_EXCHANGE, RESULT_ROUTING_KEYS[envelope.type], envelope);
 }
 
+// the `connections` domain: the kit declares topology, registers and heartbeats; the worker consumes
+// its queue itself – external calls can't run inside a database transaction (claim/lease stays)
+const domain = startDomain({ manifest: CONNECTIONS_MANIFEST, broker, pool, logger, queue: 'integration-worker.actions', dispatch: false, relay: false });
+
 broker.consume(
   {
     queue: 'integration-worker.actions',
@@ -111,7 +117,7 @@ broker.consume(
       const started = Date.now();
       logger.info({ actionType: command.actionType, attempt: context.attempt }, 'executing action');
       try {
-        const environment: ActionEnvironment = { ...settings, actionId: command.actionId };
+        const environment: ActionEnvironment = { ...settings, actionId: command.actionId, mode: command.mode };
         const output = await executeAction(command.actionType, command.params, environment);
         await pool.query(
           `UPDATE action_executions SET status = 'COMPLETED', output = $2, lease_until = NULL, updated_at = now() WHERE action_id = $1`,
@@ -142,4 +148,4 @@ const app = createHttpServer({
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });
 logger.info({ allowedHosts: settings.allowedHosts }, 'integration-worker ready');
 
-onShutdown(logger, () => app.close(), () => broker.close(), () => pool.end());
+onShutdown(logger, () => app.close(), () => domain.stop(), () => broker.close(), () => pool.end());

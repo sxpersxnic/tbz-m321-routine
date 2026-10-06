@@ -1,11 +1,34 @@
 // Client-side model of the API responses (see contracts/openapi). The web
 // client owns these types – it shares no code with the services.
 
-export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'COMPLETED' | 'FAILED';
-export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+/** WAITING_FOR_YOU: only human steps are in flight; DELAYED: only "Wait" steps (docs/v2/06-engine.md §1). */
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING' | 'WAITING_FOR_YOU' | 'DELAYED' | 'COMPLETED' | 'FAILED';
+/** AWAITING_USER: a human step waits for a person; SCHEDULED: a "Wait" step sleeps. */
+export type ActionStatus = 'PENDING' | 'DISPATCHED' | 'RETRYING' | 'AWAITING_USER' | 'SCHEDULED' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+
+/** Why a step was skipped: its condition, an earlier failure, expiry, the user, or a test run. */
+export type SkipReason = 'condition' | 'failure' | 'expired' | 'user' | 'test';
+
+/** Why an action failed (docs/v2/05-messaging.md §6). */
+export type ErrorCode =
+  | 'NOT_FOUND' | 'UNAUTHORIZED' | 'FORBIDDEN_HOST' | 'TIMEOUT' | 'UNREACHABLE' | 'RATE_LIMITED' | 'INVALID_PARAMS'
+  | 'TEMPLATE_ERROR' | 'NOT_AVAILABLE' | 'REFERENCE_GONE' | 'SUBROUTINE_FAILED' | 'AWAIT_EXPIRED' | 'QUOTA_EXCEEDED'
+  | 'AI_REFUSED' | 'INPUT_TOO_LARGE' | 'CONFLICT' | 'CANCELLED' | 'INTERNAL';
 export type Priority = 'low' | 'normal' | 'high';
 
-export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
+/** One check of an event trigger's filter – the operators of `condition.if`. */
+export interface Condition {
+  field: string;
+  operator: string;
+  value?: unknown;
+}
+
+export type Trigger =
+  | { type: 'manual' }
+  | { type: 'schedule'; cron: string; timezone: string }
+  | { type: 'webhook' }
+  /** Starts when a domain event happens (a trigger type of the catalog) and passes the filter. */
+  | { type: 'event'; event: string; filter?: Condition[] };
 export type TriggerType = Trigger['type'];
 /** How a run started: its routine's trigger, or a "Run routine" step of another routine. */
 export type ExecutionTrigger = TriggerType | 'routine';
@@ -25,6 +48,20 @@ export interface ActionDefinition {
   runIf?: RunIf;
   /** One `{{…}}` reference to a list: the step runs once per item ({{item}}, {{index}}). */
   forEach?: string;
+  /** "If you don't get to it" – steps you do yourself only: skip or fail after `after` (ISO 8601 duration). */
+  timeout?: StepTimeout;
+}
+
+export interface StepTimeout {
+  after: string;
+  then: 'skip' | 'fail';
+}
+
+/** What a step you do yourself waits for: a task to tick, a question to answer. */
+export interface AwaitingItem {
+  kind: 'task' | 'question' | 'checkIn';
+  refId: string;
+  title: string;
 }
 
 export interface Routine {
@@ -41,8 +78,34 @@ export interface Routine {
   icon: string | null;
   color: string | null;
   version: number;
+  /** Notify after this many failures in a row; null = never. */
+  alertAfterFailures: number | null;
+  /** Questions asked when it is run by hand; empty = none. */
+  inputs: RunInputSpec[];
+  health: RoutineHealth;
   createdAt: string;
   updatedAt: string;
+}
+
+/** "Ask when run?" – a question a manual routine asks each time it is run (06-engine §2). */
+export interface RunInputSpec {
+  /** Read as {{input.<name>}}. */
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'date' | 'choice' | 'ref';
+  required?: boolean;
+  default?: unknown;
+  options?: Array<{ value: string; label: string }>;
+  ref?: { domain: string; collection: string };
+}
+
+export interface RoutineHealth {
+  consecutiveFailures: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  /** Finished runs in the last 30 days. */
+  runs30d: number;
+  failures30d: number;
 }
 
 export interface RoutineInput {
@@ -53,15 +116,123 @@ export interface RoutineInput {
   /** Omitted = unchanged, null = taken from the first action. */
   icon?: string | null;
   color?: string | null;
+  /** Omitted = unchanged (2 for a new routine), null = never. */
+  alertAfterFailures?: number | null;
+  inputs?: RunInputSpec[] | null;
   version?: number;
 }
 
-export interface ActionType {
-  type: string;
+/** The kind of write that produced a version (docs/v2/06-engine.md §7). */
+export type VersionOrigin = 'create' | 'edit' | 'appearance' | 'activate' | 'deactivate' | 'webhook' | 'restore' | 'backfill';
+
+/** A routine as its history keeps it. */
+export interface VersionDefinition {
+  name: string;
   description: string;
-  runsIn?: 'engine' | 'worker';
-  requiredParams: string[];
-  example: Record<string, unknown>;
+  trigger: Trigger;
+  actions: ActionDefinition[];
+  icon: string | null;
+  color: string | null;
+  alertAfterFailures?: number | null;
+  active: boolean;
+}
+
+export interface RoutineVersion {
+  version: number;
+  createdAt: string;
+  origin: VersionOrigin;
+  definition: VersionDefinition;
+}
+
+// ---------------------------------------------------------------- catalog (docs/v2/07-web.md §3, copied from 04 §2)
+
+export type ParamType =
+  | 'text' | 'longText' | 'number' | 'integer' | 'money' | 'boolean'
+  | 'date' | 'time' | 'duration' | 'choice' | 'ref' | 'list' | 'object' | 'value';
+
+export interface ParamSpec {
+  name: string;
+  label: string;
+  type: ParamType;
+  required?: boolean;
+  default?: unknown;
+  options?: Array<{ value: string; label: string }>;
+  ref?: { domain: string; collection: string };
+  min?: number;
+  max?: number;
+  placeholder?: string;
+  hint?: string;
+  /** Default true: `{{…}}` allowed. */
+  templating?: boolean;
+  /** Shown under "More options". */
+  advanced?: boolean;
+}
+
+export interface OutputField {
+  name: string;
+  label: string;
+  type: ParamType;
+  example?: unknown;
+}
+
+export type Tint = 'sky' | 'indigo' | 'violet' | 'pink' | 'orange' | 'green' | 'teal' | 'grey';
+
+export interface Capability {
+  type: string;
+  kind: 'action' | 'value' | 'human';
+  label: string;
+  /** `Record {amount} for {category}` – `{param}` placeholders. */
+  sentence: string;
+  description: string;
+  icon?: string;
+  tint?: Tint;
+  params: ParamSpec[];
+  output: OutputField[];
+  sideEffects: boolean;
+  preview?: boolean;
+  human?: { awaits: 'task' | 'question' | 'checkIn'; defaultTimeout?: string };
+  acceptsSecrets?: string[];
+  since: number;
+  deprecated?: { since: number; replacedBy?: string; message: string };
+}
+
+export interface TriggerSpec {
+  type: string;
+  label: string;
+  sentence: string;
+  description: string;
+  fields: OutputField[];
+  since: number;
+  deprecated?: { since: number; replacedBy?: string; message: string };
+}
+
+export interface CollectionSpec {
+  label: string;
+  list: string;
+  idField: string;
+  labelField: string;
+  iconField?: string;
+  tintField?: string;
+}
+
+/** A domain as GET /api/v1/catalog returns it: its manifest, and whether it is on for the user. */
+export interface CatalogDomain {
+  contract: 1;
+  domain: string;
+  manifestVersion: number;
+  service: string;
+  name: string;
+  description: string;
+  icon: string;
+  tint: Tint;
+  order: number;
+  optional: boolean;
+  prefixes: string[];
+  page?: string;
+  collections?: Record<string, CollectionSpec>;
+  capabilities: Capability[];
+  triggers?: TriggerSpec[];
+  enabled: boolean;
 }
 
 export interface Execution {
@@ -72,14 +243,34 @@ export interface Execution {
   trigger: ExecutionTrigger;
   /** The run whose "Run routine" step started this one. */
   calledBy?: string | null;
+  /** How often "Retry from here" was used on this run. */
+  resumeCount: number;
+  /** The routine version the run used – null for runs before v2. */
+  routineVersion: number | null;
+  /** The answers to the routine's questions. */
+  inputs?: Record<string, unknown>;
   scheduledFor: string | null;
   correlationId: string;
   traceId: string | null;
   currentStep: number;
   error: string | null;
+  /** Error code of the failed step – null unless FAILED, and for runs that failed before v2. */
+  errorCode: ErrorCode | null;
+  /** Event runs: the event that started the run. */
+  triggerEvent?: { event: string; eventMessageId: string; data: Record<string, unknown> };
+  /** Event-chain depth: 0 unless a routine's own step caused the starting event. */
+  depth?: number;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+/** One decision of trigger-service for a routine ("Why did this run?"). */
+export interface TriggerDecision {
+  eventMessageId: string;
+  event: string;
+  outcome: 'started' | 'filtered' | 'loop' | 'inactive';
+  at: string;
 }
 
 export type StatusCounts = Partial<Record<ExecutionStatus, number>>;
@@ -102,6 +293,9 @@ export interface ExecutionAction {
   params: Record<string, unknown>;
   output: Record<string, unknown> | null;
   error: string | null;
+  errorCode: ErrorCode | null;
+  /** Why it was skipped – null for runs from before v2. */
+  skipReason: SkipReason | null;
   processedBy: string | null;
   dispatchedAt: string | null;
   finishedAt: string | null;
@@ -110,6 +304,13 @@ export interface ExecutionAction {
   /** Set on the actions a "repeat for each" step was expanded into. */
   parentId?: string;
   loopIndex?: number;
+  timeout?: StepTimeout;
+  /** A step you do yourself, once its item exists: what it waits for, since and until when. */
+  awaiting?: AwaitingItem;
+  acceptedAt?: string | null;
+  deadlineAt?: string | null;
+  /** A Wait step: when it wakes up. */
+  wakeAt?: string;
 }
 
 export interface ExecutionLogEntry {
@@ -151,9 +352,17 @@ export interface Task {
   title: string;
   description: string;
   priority: Priority;
-  status: 'OPEN' | 'DONE';
+  /** CANCELLED: a step task whose step expired, was skipped or whose run was cancelled. */
+  status: 'OPEN' | 'DONE' | 'CANCELLED';
   dueDate: string | null;
   sourceExecutionId: string | null;
+  /** `step`: a routine waits for it ("Do yourself") – ticking it moves the routine on. */
+  kind: 'task' | 'step';
+  sourceRoutineId: string | null;
+  sourceRoutineName: string | null;
+  /** Step tasks of one run form a checklist: the run, and the order they were asked in. */
+  stepGroup: string | null;
+  stepPosition: number | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -167,6 +376,47 @@ export interface Notification {
   executionId: string | null;
   createdAt: string;
   readAt: string | null;
+  /** `question`: "Ask me" – answered with one of `options`. */
+  kind: 'info' | 'question';
+  state: 'open' | 'answered' | 'expired';
+  options: Array<{ value: string; label: string }> | null;
+  answer: { value: string; label: string; answeredAt: string } | null;
+  routineId: string | null;
+}
+
+export interface DeadLetter {
+  messageId: string | null;
+  type: string | null;
+  error: string | null;
+  failedAt: string | null;
+  attempts: number | null;
+  routingKey: string;
+  body: unknown;
+}
+
+/** One domain in the registry (GET /api/v1/system/registry, admin – routine-service.md §4). */
+export interface RegistryEntry {
+  domain: string;
+  name: string | null;
+  service: string;
+  builtIn: boolean;
+  version: number | null;
+  versions: number[];
+  digest: string | null;
+  registeredAt: string | null;
+  lastHeartbeatAt: string;
+  status: 'up' | 'stale' | 'rejected';
+  rejected: { reason: string; manifestVersion: number | null; digest: string | null; service: string | null; instance: string; at: string } | null;
+  bindings: string[];
+  usage: Record<string, number>;
+}
+
+export interface DeadLetterQueue {
+  queue: string;
+  workQueue: string;
+  count: number;
+  /** Up to 20 messages from the head (a peek). */
+  sample: DeadLetter[];
 }
 
 export interface QueueStatus {
@@ -190,6 +440,8 @@ export interface User {
   id: string;
   email: string;
   displayName: string;
+  /** `admin` opens the system views (dead letters …); every signed-in user is `user`. */
+  roles: Array<'user' | 'admin'>;
 }
 
 export const TERMINAL_STATUSES: ReadonlySet<ExecutionStatus> = new Set(['COMPLETED', 'FAILED']);

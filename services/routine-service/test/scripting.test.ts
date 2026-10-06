@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { calculate, conditionMet, ControlError, evaluateCondition, evaluateControlAction, setVariable } from '../src/domain/control.ts';
+import { calculate, conditionMet, ControlError, evaluateCondition, setVariable } from '../src/domain/control.ts';
+import { evaluateControlAction } from '../src/domain/scripting.ts';
 import { validateRoutine, type RoutineInput } from '../src/domain/definition.ts';
 
 const result = (left: unknown, operator: string, right?: unknown) => evaluateCondition({ left, operator, right }).result;
@@ -18,6 +21,17 @@ describe('scripting actions', () => {
     assert.equal(result([], 'isNotEmpty'), false);
     assert.throws(() => result('warm', 'greaterThan', 20), ControlError);
     assert.throws(() => result(1, 'between', 2), ControlError);
+  });
+
+  it('follows the shared condition table (contracts/fixtures/conditions.json, also trigger-service filters)', () => {
+    const table = JSON.parse(readFileSync(join(import.meta.dirname, '..', '..', '..', 'contracts', 'fixtures', 'conditions.json'), 'utf8')) as {
+      cases: Array<{ operator: string; left?: unknown; right?: unknown; result: boolean | 'error' }>;
+    };
+    for (const { operator, left, right, result: expected } of table.cases) {
+      const label = `${JSON.stringify(left)} ${operator} ${JSON.stringify(right)}`;
+      if (expected === 'error') assert.throws(() => result(left, operator, right), ControlError, label);
+      else assert.equal(result(left, operator, right), expected, label);
+    }
   });
 
   it('calculates and refuses what makes no sense', () => {

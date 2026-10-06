@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://routine.example/contracts/schemas/action-awaiting-user.v1.schema.json",
+  "title": "ActionAwaitingUser v1",
+  "description": "A human step's item was created and waits for a person (docs/v2/05-messaging.md §4.1). The step completes later with ActionCompleted. Routing key: action.awaiting-user",
+  "allOf": [
+    {
+      "$ref": "envelope.schema.json"
+    }
+  ],
+  "properties": {
+    "type": {
+      "const": "ActionAwaitingUser"
+    },
+    "version": {
+      "const": 1
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "actionId",
+        "executionId",
+        "actionType",
+        "awaiting",
+        "processedBy"
+      ],
+      "properties": {
+        "actionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actionType": {
+          "type": "string"
+        },
+        "awaiting": {
+          "type": "object",
+          "required": [
+            "kind",
+            "refId",
+            "title"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "task",
+                "question",
+                "checkIn"
+              ]
+            },
+            "refId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "dueAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "processedBy": {
+          "type": "string"
+        },
+        "duplicate": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

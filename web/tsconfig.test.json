@@ -1,0 +1,7 @@
+{
+  // unit tests of pure modules (node --test): the web's settings, plus Node's types for node:test
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["vite/client", "node"] },
+  "include": ["src/**/*.test.ts"],
+  "exclude": []
+}

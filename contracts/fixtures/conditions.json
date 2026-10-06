@@ -1,0 +1,31 @@
+{
+  "description": "Semantics of the condition operators (condition.if, event trigger filters – docs/v2/06-engine.md §2). Shared by routine-service (domain/control.ts) and trigger-service (matching.ts), which each implement them; both test against this table. result \"error\" = the comparison is not possible (condition.if fails the step, a filter does not match).",
+  "cases": [
+    { "operator": "equals", "left": "NOT_FOUND", "right": "NOT_FOUND", "result": true },
+    { "operator": "equals", "left": "5", "right": 5, "result": true, "note": "numbers compare as numbers" },
+    { "operator": "equals", "left": "5.0", "right": "5", "result": true },
+    { "operator": "equals", "left": "Abc", "right": "abc", "result": false, "note": "equals is case-sensitive" },
+    { "operator": "equals", "left": null, "right": "", "result": true, "note": "nothing equals empty text" },
+    { "operator": "equals", "left": { "a": 1 }, "right": "{\"a\":1}", "result": true, "note": "objects compare as their JSON" },
+    { "operator": "notEquals", "left": "work", "right": "home", "result": true },
+    { "operator": "notEquals", "left": 3, "right": "3", "result": false },
+    { "operator": "contains", "left": "Pay the RENT", "right": "rent", "result": true, "note": "contains is case-insensitive" },
+    { "operator": "contains", "left": "groceries", "right": "rent", "result": false },
+    { "operator": "contains", "left": ["a", "b", 3], "right": "3", "result": true, "note": "a list contains an equal item" },
+    { "operator": "contains", "left": ["apple pie"], "right": "apple", "result": false, "note": "list items must be equal, not contain" },
+    { "operator": "notContains", "left": "Pay the rent", "right": "tax", "result": true },
+    { "operator": "greaterThan", "left": "10", "right": 9, "result": true },
+    { "operator": "greaterThan", "left": 2, "right": "10", "result": false, "note": "not compared as text" },
+    { "operator": "greaterThan", "left": "high", "right": 3, "result": "error" },
+    { "operator": "lessThan", "left": -1.5, "right": "0", "result": true },
+    { "operator": "lessThan", "left": null, "right": 1, "result": "error" },
+    { "operator": "isEmpty", "left": "   ", "result": true },
+    { "operator": "isEmpty", "left": [], "result": true },
+    { "operator": "isEmpty", "left": {}, "result": true },
+    { "operator": "isEmpty", "left": null, "result": true },
+    { "operator": "isEmpty", "left": 0, "result": false, "note": "0 is a value" },
+    { "operator": "isNotEmpty", "left": "x", "result": true },
+    { "operator": "isNotEmpty", "left": false, "result": true },
+    { "operator": "between", "left": 1, "right": 2, "result": "error", "note": "unknown operator" }
+  ]
+}

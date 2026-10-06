@@ -145,20 +145,12 @@ export function calculate(params: Record<string, unknown>): Output {
 
 export const VARIABLE_NAME = /^[a-zA-Z_][a-zA-Z0-9_]{0,39}$/;
 
-const EVALUATORS: Record<string, (params: Record<string, unknown>) => Output> = {
+/** Variables, conditions and calculations; text and list steps live in text-list.ts (scripting.ts has them all). */
+export const CONTROL_EVALUATORS: Record<string, (params: Record<string, unknown>) => Output> = {
   'condition.if': evaluateCondition,
   'variable.set': setVariable,
   'math.calculate': calculate,
 };
-
-/** Types the engine evaluates itself. */
-export const CONTROL_ACTION_TYPES: ReadonlySet<string> = new Set(Object.keys(EVALUATORS));
-
-export function evaluateControlAction(type: string, params: Record<string, unknown>): Output {
-  const evaluate = EVALUATORS[type];
-  if (!evaluate) throw new ControlError(`${type} is not a scripting action`);
-  return evaluate(params);
-}
 
 /** Whether a step with `runIf` runs: its condition step must have run and produced the expected result. */
 export function conditionMet(condition: { status: string; output: Record<string, unknown> | null }, expected: boolean): boolean {

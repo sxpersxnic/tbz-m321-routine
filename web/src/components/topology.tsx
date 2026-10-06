@@ -17,6 +17,7 @@ const NODES: Node[] = [
   { id: 'keycloak', label: 'Keycloak', x: 450, y: 80 },
   { id: 'routine-service', label: 'routine-service', x: 450, y: 235 },
   { id: 'rabbitmq', label: 'RabbitMQ', x: 720, y: 235, kind: 'broker' },
+  { id: 'trigger-service', label: 'trigger-service', x: 720, y: 100 },
   { id: 'task-service', label: 'task-service', x: 1000, y: 90 },
   { id: 'integration-worker', label: 'integration-worker', x: 1000, y: 235 },
   { id: 'notification-service', label: 'notification-service', x: 1000, y: 380 },
@@ -35,7 +36,8 @@ const QUEUE_EDGES: QueueEdge[] = [
   { from: 'rabbitmq', to: 'task-service', queues: ['task-service.actions'] },
   { from: 'rabbitmq', to: 'integration-worker', queues: ['integration-worker.actions'] },
   { from: 'rabbitmq', to: 'notification-service', queues: ['notification-service.actions', 'notification-service.execution-events'] },
-  { from: 'rabbitmq', to: 'routine-service', queues: ['routine-service.triggers', 'routine-service.action-results'] },
+  { from: 'rabbitmq', to: 'routine-service', queues: ['routine-service.triggers', 'routine-service.action-results', 'routine-service.commands'] },
+  { from: 'rabbitmq', to: 'trigger-service', queues: ['trigger-service.events', 'trigger-service.routines'] },
 ];
 
 const HTTP_EDGES: Array<[string, string]> = [

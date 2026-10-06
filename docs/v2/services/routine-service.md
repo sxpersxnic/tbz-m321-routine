@@ -56,8 +56,10 @@ New or changed endpoints. All v1 endpoints stay.
 | `GET /internal/v1/routines?trigger=event` | M4 | service token (trigger-service): active event-triggered routines for resync |
 | `GET /api/v1/system/registry` | M2 | admin: domains, versions, heartbeats, rejections, usage counts |
 
-**Cancel note:** a cancelled run gets status `FAILED` with `error_code = 'CANCELLED'` (add to
-the code list) and `ExecutionFailed` is **not** published for cancellations.
+**Cancel note:** a cancelled run gets status `FAILED` with `error_code = 'CANCELLED'` (stored
+on the execution, `executions.error_code`) and `ExecutionFailed` is **not** published for
+cancellations. It doesn't count for health and can't be resumed. In-flight worker steps become
+`SKIPPED` (`user`), so their late results change nothing.
 
 Routine DTO additions: `inputs`, `areaId`, `habit`, `alertAfterFailures`, `origin`,
 `skipNext`, `pausedUntil`, `health: { consecutiveFailures, lastSuccessAt, lastFailureAt, runs30d, failures30d }`,

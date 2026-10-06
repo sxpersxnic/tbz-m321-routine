@@ -2,8 +2,8 @@
  * Translation between this service's internal model and the message contracts
  * in contracts/schemas. Nothing outside this file knows the wire format.
  */
-import { createEnvelope, PermanentError, type Envelope } from '@routine/service-kit';
-import type { ExecutionTrigger } from './domain/definition.ts';
+import { createEnvelope, PermanentError, toErrorCode, type Envelope, type ErrorCode } from '@routine/service-kit';
+import type { ExecutionTrigger, TriggerDefinition, TriggerEvent } from './domain/definition.ts';
 
 export const SOURCE = 'routine-service';
 
@@ -80,7 +80,7 @@ export function subRoutineResult(input: {
           version: 1,
           source: SOURCE,
           correlationId: input.correlationId,
-          data: { ...ref, error: { code: 'SubRoutineFailed', message: input.outcome.error }, attempts: 1 },
+          data: { ...ref, error: { code: 'SUBROUTINE_FAILED', message: input.outcome.error }, attempts: 1 },
         }),
       };
 }
@@ -93,6 +93,8 @@ export function actionRequested(input: {
   actionKey: string;
   actionType: string;
   params: Record<string, unknown>;
+  /** How the step runs (04-domain-platform §3.1): mode live | test, routine name, position, event depth. */
+  context?: { mode: 'live' | 'test'; routineName: string; stepIndex: number; stepCount: number; depth: number };
   correlationId: string;
   causationId?: string;
 }): OutgoingMessage {
@@ -113,6 +115,7 @@ export function actionRequested(input: {
         actionKey: input.actionKey,
         actionType: input.actionType,
         params: input.params,
+        ...(input.context && { context: input.context }),
       },
     }),
   };
@@ -127,7 +130,7 @@ export function actionRequested(input: {
 export type CompletionEventFormat = 'v1' | 'expand' | 'v2';
 
 export function executionCompleted(
-  input: { executionId: string; routineId: string; ownerId: string; routineName: string; correlationId: string; durationMs: number },
+  input: { executionId: string; routineId: string; ownerId: string; routineName: string; correlationId: string; durationMs: number; depth?: number },
   format: CompletionEventFormat,
 ): OutgoingMessage {
   const common = {
@@ -135,6 +138,7 @@ export function executionCompleted(
     routineId: input.routineId,
     ownerId: input.ownerId,
     routineName: input.routineName,
+    depth: input.depth ?? 0,
   };
   const legacyMessage = `Routine "${input.routineName}" completed`;
   const v2Fields = {
@@ -171,6 +175,12 @@ export function executionFailed(input: {
   routineName: string;
   reason: string;
   failedActionKey: string | null;
+  failedActionType?: string | null;
+  errorCode?: ErrorCode | null;
+  /** How often the run was resumed before this failure – consumers key their notification on it. */
+  resumeCount?: number;
+  /** Event-chain depth of the run – trigger-service derives this event's origin from it. */
+  depth?: number;
   correlationId: string;
 }): OutgoingMessage {
   return {
@@ -188,6 +198,193 @@ export function executionFailed(input: {
         routineName: input.routineName,
         reason: input.reason,
         failedActionKey: input.failedActionKey,
+        failedActionType: input.failedActionType ?? null,
+        errorCode: input.errorCode ?? null,
+        resumeCount: input.resumeCount ?? 0,
+        depth: input.depth ?? 0,
+      },
+    }),
+  };
+}
+
+/** A routine failed `consecutiveFailures` times in a row – its alert threshold (06-engine §10). */
+export function routineUnhealthy(input: {
+  routineId: string;
+  ownerId: string;
+  routineName: string;
+  consecutiveFailures: number;
+  lastErrorCode: ErrorCode | null;
+  executionId: string;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'routine.unhealthy',
+    envelope: createEnvelope({
+      type: 'RoutineUnhealthy',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        routineName: input.routineName,
+        consecutiveFailures: input.consecutiveFailures,
+        lastErrorCode: input.lastErrorCode,
+        executionId: input.executionId,
+      },
+    }),
+  };
+}
+
+/** A failed run was resumed from its failed step (06-engine §6). */
+export function executionResumed(input: {
+  executionId: string;
+  routineId: string;
+  ownerId: string;
+  fromActionKey: string;
+  resumedBy: string;
+  resumeCount: number;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'execution.resumed',
+    envelope: createEnvelope({
+      type: 'ExecutionResumed',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        executionId: input.executionId,
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        fromActionKey: input.fromActionKey,
+        resumedBy: input.resumedBy,
+        resumeCount: input.resumeCount,
+      },
+    }),
+  };
+}
+
+/**
+ * A routine as it is now – on every write that bumps its version (create, edit, activate, deactivate,
+ * restore, …). Event-carried state: trigger-service keeps its subscriptions from it alone.
+ */
+export function routineSaved(input: {
+  routineId: string;
+  ownerId: string;
+  version: number;
+  active: boolean;
+  name: string;
+  trigger: TriggerDefinition;
+  areaId?: string | null;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'routine.saved',
+    envelope: createEnvelope({
+      type: 'RoutineSaved',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        version: input.version,
+        active: input.active,
+        name: input.name,
+        trigger: input.trigger,
+        areaId: input.areaId ?? null,
+      },
+    }),
+  };
+}
+
+export function routineDeleted(input: { routineId: string; ownerId: string; correlationId: string }): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'routine.deleted',
+    envelope: createEnvelope({
+      type: 'RoutineDeleted',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: { routineId: input.routineId, ownerId: input.ownerId },
+    }),
+  };
+}
+
+/** What a human step waits for (ActionAwaitingUser.awaiting, 05-messaging §4.1). */
+export interface AwaitingItem {
+  kind: 'task' | 'question' | 'checkIn';
+  refId: string;
+  title: string;
+  dueAt?: string | null;
+}
+
+/** Why a human step's item is closed: it expired, the person skipped it on the run, or the run was cancelled. */
+export type CancelReason = 'expired' | 'skipped' | 'runCancelled';
+
+/**
+ * A waiting human step is not needed any more (05-messaging §4.1): it expired, or its run was
+ * cancelled. Routed like the step's ActionRequested, so the domain that holds the item gets it.
+ */
+export function actionCancelRequested(input: {
+  actionId: string;
+  executionId: string;
+  routineId: string;
+  ownerId: string;
+  actionKey: string;
+  actionType: string;
+  reason: CancelReason;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.actions,
+    routingKey: `action.${input.actionType}`,
+    envelope: createEnvelope({
+      type: 'ActionCancelRequested',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        actionId: input.actionId,
+        executionId: input.executionId,
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        actionKey: input.actionKey,
+        actionType: input.actionType,
+        reason: input.reason,
+      },
+    }),
+  };
+}
+
+/** A run entered WAITING_FOR_YOU: only human steps are in flight (06-engine §5). */
+export function executionWaitingForYou(input: {
+  executionId: string;
+  routineId: string;
+  ownerId: string;
+  routineName: string;
+  awaiting: Array<AwaitingItem & { actionKey: string }>;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'execution.waitingForYou',
+    envelope: createEnvelope({
+      type: 'ExecutionWaitingForYou',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        executionId: input.executionId,
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        routineName: input.routineName,
+        awaiting: input.awaiting.map((item) => ({ actionKey: item.actionKey, kind: item.kind, refId: item.refId, title: item.title, dueAt: item.dueAt ?? null })),
       },
     }),
   };
@@ -197,8 +394,23 @@ export function executionFailed(input: {
 
 export type ActionResult =
   | { kind: 'completed'; actionId: string; executionId: string; output: Record<string, unknown>; processedBy: string; duplicate: boolean }
-  | { kind: 'failed'; actionId: string; executionId: string; error: string; attempts: number; processedBy: string }
-  | { kind: 'retry'; actionId: string; executionId: string; attempt: number; nextAttemptInMs: number; error: string; processedBy: string };
+  | { kind: 'failed'; actionId: string; executionId: string; error: string; code: ErrorCode; attempts: number; processedBy: string }
+  | { kind: 'retry'; actionId: string; executionId: string; attempt: number; nextAttemptInMs: number; error: string; processedBy: string }
+  | { kind: 'awaiting'; actionId: string; executionId: string; awaiting: AwaitingItem; processedBy: string };
+
+const AWAITING_KINDS = new Set(['task', 'question', 'checkIn']);
+
+/** ActionAwaitingUser.awaiting – a kind this service doesn't know is still something a person does. */
+function awaitingItem(value: unknown): AwaitingItem {
+  const item = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const kind = typeof item.kind === 'string' && AWAITING_KINDS.has(item.kind) ? (item.kind as AwaitingItem['kind']) : 'task';
+  return {
+    kind,
+    refId: typeof item.refId === 'string' ? item.refId : '',
+    title: typeof item.title === 'string' && item.title !== '' ? item.title : 'A step for you',
+    ...(typeof item.dueAt === 'string' && { dueAt: item.dueAt }),
+  };
+}
 
 function requireString(data: Record<string, unknown>, field: string): string {
   const value = data[field];
@@ -228,7 +440,15 @@ export function parseActionResult(envelope: Envelope): ActionResult {
         duplicate: data.duplicate === true,
       };
     case 'ActionFailed':
-      return { kind: 'failed', actionId, executionId, processedBy, error: errorText(data.error), attempts: Number(data.attempts ?? 1) };
+      return {
+        kind: 'failed',
+        actionId,
+        executionId,
+        processedBy,
+        error: errorText(data.error),
+        code: toErrorCode(data.error && typeof data.error === 'object' ? (data.error as { code?: unknown }).code : undefined),
+        attempts: Number(data.attempts ?? 1),
+      };
     case 'ActionRetryScheduled':
       return {
         kind: 'retry',
@@ -239,12 +459,72 @@ export function parseActionResult(envelope: Envelope): ActionResult {
         attempt: Number(data.attempt ?? 1),
         nextAttemptInMs: Number(data.nextAttemptInMs ?? 0),
       };
+    case 'ActionAwaitingUser':
+      return { kind: 'awaiting', actionId, executionId, processedBy, awaiting: awaitingItem(data.awaiting) };
     default:
       throw new PermanentError(`unsupported message type ${envelope.type}`);
   }
 }
 
+export type RegistryMessage =
+  | { kind: 'registered'; manifest: unknown; digest: string | undefined; instance: string }
+  | { kind: 'heartbeat'; domain: string; manifestVersion: number; instance: string };
+
+/** DomainRegistered / DomainHeartbeat (tolerant: the manifest itself is validated by the registry). */
+export function parseRegistryMessage(envelope: Envelope): RegistryMessage {
+  const data = envelope.data;
+  const instance = typeof data.instance === 'string' ? data.instance : 'unknown';
+  if (envelope.type === 'DomainRegistered') {
+    return { kind: 'registered', manifest: data.manifest, digest: typeof data.digest === 'string' ? data.digest : undefined, instance };
+  }
+  if (envelope.type === 'DomainHeartbeat') {
+    return { kind: 'heartbeat', domain: requireString(data, 'domain'), manifestVersion: Number(data.manifestVersion ?? 0), instance };
+  }
+  throw new PermanentError(`unsupported message type ${envelope.type}`);
+}
+
 export function parseRoutineTriggered(envelope: Envelope): { executionId: string } {
   if (envelope.type !== 'RoutineTriggered') throw new PermanentError(`unsupported message type ${envelope.type}`);
   return { executionId: requireString(envelope.data, 'executionId') };
+}
+
+/** A StartRoutineRequested command (05-messaging §4.3), as routine-service reads it. */
+export interface StartRoutineCommand {
+  routineId: string;
+  ownerId: string;
+  routineVersion: number;
+  event: TriggerEvent;
+  idempotencyKey: string;
+  depth: number;
+}
+
+/**
+ * Reads StartRoutineRequested (tolerant reader: extra fields are ignored, a missing depth is 0).
+ *
+ * @example parseStartRoutineRequested(envelope) // → { routineId, ownerId, routineVersion: 7, event: { event: 'task.completed', … }, idempotencyKey: 'event:…', depth: 1 }
+ */
+export function parseStartRoutineRequested(envelope: Envelope): StartRoutineCommand {
+  if (envelope.type !== 'StartRoutineRequested') throw new PermanentError(`unsupported message type ${envelope.type}`);
+  const { data } = envelope;
+  const trigger = data.trigger;
+  if (!trigger || typeof trigger !== 'object' || (trigger as Record<string, unknown>).type !== 'event') {
+    throw new PermanentError('StartRoutineRequested without an event trigger');
+  }
+  const eventData = (trigger as Record<string, unknown>).data;
+  const routineVersion = data.routineVersion;
+  if (!Number.isInteger(routineVersion)) throw new PermanentError('StartRoutineRequested without a routineVersion');
+  const depth = data.depth ?? 0;
+  if (!Number.isInteger(depth) || (depth as number) < 0) throw new PermanentError('StartRoutineRequested with an invalid depth');
+  return {
+    routineId: requireString(data, 'routineId'),
+    ownerId: requireString(data, 'ownerId'),
+    routineVersion: routineVersion as number,
+    event: {
+      event: requireString(trigger as Record<string, unknown>, 'event'),
+      eventMessageId: requireString(trigger as Record<string, unknown>, 'eventMessageId'),
+      data: eventData && typeof eventData === 'object' && !Array.isArray(eventData) ? (eventData as Record<string, unknown>) : {},
+    },
+    idempotencyKey: requireString(data, 'idempotencyKey'),
+    depth: depth as number,
+  };
 }

@@ -18,7 +18,11 @@
     },
     { "name": "routine.actions.unrouted", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
     { "name": "routine.action-results", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
-    { "name": "routine.events", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+    { "name": "routine.events", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "routine.commands", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "domain.events", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "today.cards", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "platform.registry", "vhost": "/", "type": "topic", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
   ],
   "queues": [
     {
@@ -69,6 +73,38 @@
       "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "notification-service.execution-events.dlq" }
     },
     { "name": "notification-service.execution-events.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
+    {
+      "name": "routine-service.registry",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "routine-service.registry.dlq" }
+    },
+    { "name": "routine-service.registry.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
+    {
+      "name": "routine-service.commands",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "routine-service.commands.dlq" }
+    },
+    { "name": "routine-service.commands.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
+    {
+      "name": "trigger-service.events",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "trigger-service.events.dlq" }
+    },
+    { "name": "trigger-service.events.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
+    {
+      "name": "trigger-service.routines",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": { "x-queue-type": "quorum", "x-delivery-limit": 10, "x-dead-letter-exchange": "", "x-dead-letter-routing-key": "trigger-service.routines.dlq" }
+    },
+    { "name": "trigger-service.routines.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } },
     { "name": "routine.unrouted-actions", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum", "x-delivery-limit": -1 } }
   ],
   "bindings": [
@@ -81,6 +117,13 @@
     { "source": "routine.actions", "vhost": "/", "destination": "integration-worker.actions", "destination_type": "queue", "routing_key": "action.email.#", "arguments": {} },
     { "source": "routine.actions", "vhost": "/", "destination": "notification-service.actions", "destination_type": "queue", "routing_key": "action.notification.#", "arguments": {} },
     { "source": "routine.events", "vhost": "/", "destination": "notification-service.execution-events", "destination_type": "queue", "routing_key": "execution.#", "arguments": {} },
+    { "source": "routine.events", "vhost": "/", "destination": "notification-service.execution-events", "destination_type": "queue", "routing_key": "routine.unhealthy", "arguments": {} },
+    { "source": "platform.registry", "vhost": "/", "destination": "routine-service.registry", "destination_type": "queue", "routing_key": "domain.*", "arguments": {} },
+    { "source": "routine.commands", "vhost": "/", "destination": "routine-service.commands", "destination_type": "queue", "routing_key": "routine.start", "arguments": {} },
+    { "source": "domain.events", "vhost": "/", "destination": "trigger-service.events", "destination_type": "queue", "routing_key": "#", "arguments": {} },
+    { "source": "routine.events", "vhost": "/", "destination": "trigger-service.events", "destination_type": "queue", "routing_key": "execution.*", "arguments": {} },
+    { "source": "routine.events", "vhost": "/", "destination": "trigger-service.routines", "destination_type": "queue", "routing_key": "routine.saved", "arguments": {} },
+    { "source": "routine.events", "vhost": "/", "destination": "trigger-service.routines", "destination_type": "queue", "routing_key": "routine.deleted", "arguments": {} },
     { "source": "routine.actions.unrouted", "vhost": "/", "destination": "routine.unrouted-actions", "destination_type": "queue", "routing_key": "", "arguments": {} }
   ]
 }

@@ -12,6 +12,7 @@ COPY services/routine-service/package.json services/routine-service/
 COPY services/task-service/package.json services/task-service/
 COPY services/notification-service/package.json services/notification-service/
 COPY services/integration-worker/package.json services/integration-worker/
+COPY services/trigger-service/package.json services/trigger-service/
 COPY services/mock-external/package.json services/mock-external/
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 

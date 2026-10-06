@@ -78,8 +78,8 @@ redirects back to <http://localhost:5173>. Another Keycloak: `VITE_KEYCLOAK_URL=
 | One trace across all services | Run page → **Open in Jaeger** |
 | Are messages waiting? | **Infrastructure** page, or the queues in RabbitMQ management |
 | What happens when a worker is down? | `docker compose stop integration-worker`, start a routine, watch **Infrastructure**, then `docker compose start integration-worker` |
-| Retries and permanent errors | Templates **Flaky Webhook** and **Broken Endpoint** |
-| Load across replicas | `docker compose up -d --scale integration-worker=4`, then template **Load Test** |
+| Retries and permanent errors | Infrastructure → Demo scenarios **Flaky Webhook** and **Broken Endpoint** |
+| Load across replicas | `docker compose up -d --scale integration-worker=4`, then Infrastructure → Demo scenarios **Load Test** |
 
 The chaos switches in [demo.md](demo.md#chaos-switches-optional) inject duplicate messages and random failures.
 

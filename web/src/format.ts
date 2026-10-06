@@ -1,4 +1,6 @@
 import { previewCron } from './cron.ts';
+import type { Catalog } from './catalog/catalog.ts';
+import { eventTriggerSentence, eventWords, type NameOf } from './lib/event-trigger.ts';
 import type { ExecutionTrigger, Trigger } from './types.ts';
 
 const locale = 'en-GB';
@@ -49,9 +51,14 @@ export const CRON_PRESETS: CronPreset[] = [
   { label: 'Every 30 seconds', cron: '*/30 * * * * *' },
 ];
 
-export function describeTrigger(trigger: Trigger): string {
+/**
+ * When a routine runs, in words. An event trigger reads as its sentence ("When a task in Work is
+ * completed") – with the catalog; without one, the event type in words.
+ */
+export function describeTrigger(trigger: Trigger, catalog?: Pick<Catalog, 'trigger'>, nameOf?: NameOf): string {
   if (trigger.type === 'manual') return 'Manual';
   if (trigger.type === 'webhook') return 'Webhook';
+  if (trigger.type === 'event') return catalog ? eventTriggerSentence(catalog, trigger, nameOf) : `When ${eventWords(trigger.event)}`;
   const preset = CRON_PRESETS.find((candidate) => candidate.cron === trigger.cron);
   if (preset) return preset.label;
   // a cron expression is never the answer to "when does this run?" – say it in words if we can
@@ -59,8 +66,8 @@ export function describeTrigger(trigger: Trigger): string {
   return preview.ok && preview.text ? preview.text : 'Custom schedule';
 }
 
-export const TRIGGER_ICONS: Record<Trigger['type'], string> = { manual: 'play', schedule: 'clock', webhook: 'link' };
-export const TRIGGER_WORDS: Record<ExecutionTrigger, string> = { manual: 'Manual', schedule: 'Scheduled', webhook: 'Webhook', routine: 'Called by a routine' };
+export const TRIGGER_ICONS: Record<Trigger['type'], string> = { manual: 'play', schedule: 'clock', webhook: 'link', event: 'bolt' };
+export const TRIGGER_WORDS: Record<ExecutionTrigger, string> = { manual: 'Manual', schedule: 'Scheduled', webhook: 'Webhook', routine: 'Called by a routine', event: 'Started by an event' };
 
 /** The full URL an external system calls – the API is always served from the same origin as the UI. */
 export const webhookUrl = (path: string) => `${window.location.origin}${path}`;
@@ -81,7 +88,8 @@ export function splitInstance(processedBy: string | null): { service: string; in
 }
 
 // same host the UI was opened on – localhost for compose, the VM's address in the 3-VM deployment
-const toolUrl = (port: number) => `${window.location.protocol}//${window.location.hostname}:${port}`;
+// (outside a browser – unit tests of modules importing this file – there is no window and no tool URL)
+const toolUrl = (port: number) => (typeof window === 'undefined' ? '' : `${window.location.protocol}//${window.location.hostname}:${port}`);
 export const JAEGER_URL = toolUrl(16686);
 export const RABBITMQ_URL = toolUrl(15672);
 
