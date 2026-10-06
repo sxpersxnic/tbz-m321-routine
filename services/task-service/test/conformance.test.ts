@@ -178,6 +178,7 @@ describe('tasks domain (04 §7)', { skip: needsDatabase }, () => {
       assert.equal((completed[0].payload.data.output as { taskId: string }).taskId, task.id);
       const event = (await outbox()).find((row) => row.routing_key === 'task.completed' && row.payload.data.taskId === task.id);
       assert.equal(event?.payload.data.kind, 'step');
+      assert.equal(event?.payload.data.origin, undefined, 'a person ticked it (HTTP): no origin, so it may start any routine');
 
       await assert.rejects(tick(task.id, 'OPEN'), { status: 409 }, 'a done step stays done');
       await run(cancelOf(envelope, 'runCancelled')); // cancel after the tick: ignored

@@ -43,7 +43,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
     routine-service `control.ts` tests and trigger-service tests), loop protection, outbox,
     `match_log`, `GET /api/v1/triggers/log`.
 
-- [ ] **M4-07 · `origin` on domain events**
+- [x] **M4-07 · `origin` on domain events**
   - Kit `emitEvent` sets `origin` automatically when called from a capability handler
     (`context.depth + 1`, `executionId`, `routineId`, `actionId`). HTTP-caused events have no
     origin.
