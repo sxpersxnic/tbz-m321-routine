@@ -34,7 +34,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
     `/api/v1/triggers`). Queues `trigger-service.events` and `trigger-service.routines` in
     `definitions.json`. Service account `trigger-service` (it calls routine-service `/internal`).
 
-- [ ] **M4-05 · trigger-service: projection + resync**
+- [x] **M4-05 · trigger-service: projection + resync**
   - `subscriptions` from `RoutineSaved`/`RoutineDeleted`, version rule, automatic resync on an
     empty table, `POST /internal/v1/resync`.
 

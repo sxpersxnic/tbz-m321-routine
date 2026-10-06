@@ -13,7 +13,7 @@ creates executions itself.
 CREATE TABLE subscriptions (
   routine_id       uuid PRIMARY KEY,
   owner_id         uuid        NOT NULL,
-  event_type       text        NOT NULL,
+  event_type       text,                                 -- NULL = tombstone (no event trigger any more, or deleted)
   filter           jsonb       NOT NULL DEFAULT '[]',     -- Condition[] (06-engine.md §2)
   routine_version  integer     NOT NULL,
   active           boolean     NOT NULL,
@@ -36,14 +36,18 @@ CREATE TABLE match_log (                                      -- last 7 days, fo
 | Method & path | Purpose |
 | --- | --- |
 | `GET /api/v1/triggers/log?routineId=` | last 50 match decisions for the owner's routine (routes via gateway prefix `/api/v1/triggers`) |
-| `POST /internal/v1/resync` | service token or admin: rebuild `subscriptions` from routine-service `GET /internal/v1/routines?trigger=event` |
+| `POST /internal/v1/resync` | service token (callers in `INTERNAL_CALLERS`): rebuild `subscriptions` from routine-service `GET /internal/v1/routines?trigger=event` |
+| `POST /api/v1/triggers/resync` | the same for an admin, through the gateway (user tokens never open `/internal`) |
 
 On startup, if `subscriptions` is empty, the service resyncs automatically.
 
 ## 4. Behaviour
 
 **Projection** (queue `trigger-service.routines`): `RoutineSaved` → upsert when
-`trigger.type = 'event'` and `routine_version` ≥ stored, else delete. `RoutineDeleted` → delete.
+`trigger.type = 'event'` and `routine_version` ≥ stored, else a tombstone (`event_type` NULL) with
+that version. `RoutineDeleted` → a tombstone no save outranks. Tombstones keep a late, older
+`RoutineSaved` from bringing a subscription back. **Resync** applies the list with the same rule
+and removes rows the list lacks unless they changed after the list was requested.
 
 **Matching** (queue `trigger-service.events`, prefetch 50):
 
