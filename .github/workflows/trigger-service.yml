@@ -1,0 +1,34 @@
+name: trigger-service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/trigger-service/**
+      - libs/**
+      - contracts/**
+      - docker/node-service.Dockerfile
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/trigger-service.yml
+      - .github/workflows/_node-service.yml
+  pull_request:
+    paths:
+      - services/trigger-service/**
+      - libs/**
+      - contracts/**
+      - docker/node-service.Dockerfile
+      - package-lock.json
+      - biome.json
+      - tsconfig.json
+      - .github/workflows/trigger-service.yml
+      - .github/workflows/_node-service.yml
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/_node-service.yml
+    with:
+      service: trigger-service
+      database: true # projection and matching tests run against Postgres

@@ -130,6 +130,35 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "trigger-service",
+      "name": "Service account: trigger-service",
+      "description": "Service-to-service calls to /internal endpoints: client-credentials grant, 15-minute tokens for aud routine-internal only.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${TRIGGER_SERVICE_TOKEN_SECRET:dev-trigger-service-secret}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "900"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience routine-internal",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "routine-internal",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [

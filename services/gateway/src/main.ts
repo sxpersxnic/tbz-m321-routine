@@ -20,6 +20,7 @@ const upstreams = {
   routine: env('ROUTINE_URL', 'http://routine-service:3000'),
   task: env('TASK_URL', 'http://task-service:3000'),
   notification: env('NOTIFICATION_URL', 'http://notification-service:3000'),
+  trigger: env('TRIGGER_URL', 'http://trigger-service:3000'),
   web: env('WEB_URL', 'http://web:80'),
 };
 
@@ -37,6 +38,7 @@ const routes: Array<{ prefix: string; upstream: string }> = [
   { prefix: '/api/v1/tasks', upstream: upstreams.task },
   { prefix: '/api/v1/task-lists', upstream: upstreams.task },
   { prefix: '/api/v1/notifications', upstream: upstreams.notification },
+  { prefix: '/api/v1/triggers', upstream: upstreams.trigger },
 ];
 
 /** Everything except webhook calls requires a valid token. */
@@ -89,6 +91,7 @@ const probes: Record<string, string> = {
   'task-service': `${upstreams.task}/health`,
   'notification-service': `${upstreams.notification}/health`,
   'integration-worker': `${env('INTEGRATION_WORKER_URL', 'http://integration-worker:3000')}/health`,
+  'trigger-service': `${upstreams.trigger}/health`,
   'mock-external': `${env('EXTERNAL_API_URL', 'http://mock-external:8090')}/health`,
 };
 

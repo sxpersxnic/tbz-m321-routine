@@ -14,6 +14,9 @@ const QUEUE_WORDS: Record<string, { one: string; many: string }> = {
   'notification-service.execution-events.dlq': { one: 'run result could not be read by the inbox', many: 'run results could not be read by the inbox' },
   'routine-service.action-results.dlq': { one: 'step result could not be applied', many: 'step results could not be applied' },
   'routine-service.triggers.dlq': { one: 'run could not be started', many: 'runs could not be started' },
+  'routine-service.commands.dlq': { one: 'event-triggered run could not be started', many: 'event-triggered runs could not be started' },
+  'trigger-service.events.dlq': { one: 'event could not be checked against your routines', many: 'events could not be checked against your routines' },
+  'trigger-service.routines.dlq': { one: 'routine change did not reach the event triggers', many: 'routine changes did not reach the event triggers' },
 };
 
 const describe = (queue: DeadLetterQueue) => {

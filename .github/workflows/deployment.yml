@@ -43,6 +43,8 @@ jobs:
           NOTIFICATION_DB_PASSWORD: ci
           INTEGRATION_DB_PASSWORD: ci
           INTEGRATION_WORKER_TOKEN_SECRET: ci
+          TRIGGER_DB_PASSWORD: ci
+          TRIGGER_SERVICE_TOKEN_SECRET: ci
       - name: RabbitMQ definitions and Keycloak realm are valid JSON
         run: jq empty infra/rabbitmq/definitions.json infra/keycloak/realm-routine.json
       - name: shellcheck

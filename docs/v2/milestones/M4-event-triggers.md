@@ -29,7 +29,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
   - Tests: duplicate command → one execution. Inactive routine → dropped. Stale version whose
     trigger changed → dropped.
 
-- [ ] **M4-04 · trigger-service: scaffold**
+- [x] **M4-04 · trigger-service: scaffold**
   - The full [10-quality.md §5](../10-quality.md) checklist (default compose profile, gateway route
     `/api/v1/triggers`). Queues `trigger-service.events` and `trigger-service.routines` in
     `definitions.json`. Service account `trigger-service` (it calls routine-service `/internal`).

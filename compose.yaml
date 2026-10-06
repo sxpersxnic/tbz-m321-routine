@@ -184,6 +184,7 @@ services:
       TASK_URL: http://task-service:3000
       NOTIFICATION_URL: http://notification-service:3000
       INTEGRATION_WORKER_URL: http://integration-worker:3000
+      TRIGGER_URL: http://trigger-service:3000
       WEB_URL: http://web:80
       EXTERNAL_API_URL: http://mock-external:8090
       RABBITMQ_MANAGEMENT_URL: http://rabbitmq-1:15672,http://rabbitmq-2:15672,http://rabbitmq-3:15672
@@ -210,6 +211,7 @@ services:
       ROUTINE_PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8080}} # allowed redirect after sign-in
       # service accounts (confidential clients in the realm) – the same secret goes to the service itself
       INTEGRATION_WORKER_TOKEN_SECRET: ${INTEGRATION_WORKER_TOKEN_SECRET:-dev-integration-worker-secret}
+      TRIGGER_SERVICE_TOKEN_SECRET: ${TRIGGER_SERVICE_TOKEN_SECRET:-dev-trigger-service-secret}
     healthcheck:
       # the image has no curl/wget – plain bash against the management port. Check the status line, not
       # the body: a not-ready body still holds "UP" (the "Graceful Shutdown" sub-check) next to a 503.
@@ -285,6 +287,24 @@ services:
       CHAOS_FAILURE_RATE: ${INTEGRATION_CHAOS_FAILURE_RATE:-0}
     depends_on:
       integration-db: { condition: service_healthy }
+      <<: *broker-ready
+
+  # ------------------------------------------------------------ v2 services (default profile: trigger, today, connector)
+  # starts event-triggered routines: matches domain events against its projection of the routines
+  trigger-service:
+    <<: *node-service
+    build: { <<: *build, args: { SERVICE: trigger-service } }
+    image: routine/trigger-service:latest
+    deploy: *replicated
+    environment:
+      <<: *common-env
+      OTEL_SERVICE_NAME: trigger-service
+      DATABASE_URL: postgres://trigger:trigger@domains-db:5432/trigger
+      ROUTINE_URL: http://routine-service:3000
+      SERVICE_TOKEN_SECRET: ${TRIGGER_SERVICE_TOKEN_SECRET:-dev-trigger-service-secret} # its service account (client-credentials)
+      MAX_EVENT_DEPTH: ${MAX_EVENT_DEPTH:-5}
+    depends_on:
+      domains-db: { condition: service_healthy }
       <<: *broker-ready
 
   # simulated third-party APIs (not part of the platform)

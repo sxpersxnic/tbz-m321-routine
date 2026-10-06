@@ -312,7 +312,7 @@ scenario_failover() {
   ok "Raft elected a new leader, clients reconnected to another node – $leader rejoined"
 
   step "2. Services: kill one replica of every platform service – under traffic"
-  for service in gateway web keycloak routine-service task-service notification-service integration-worker; do
+  for service in gateway web keycloak routine-service task-service notification-service integration-worker trigger-service; do
     container=$(docker compose ps -q "$service" | head -1)
     docker kill "$container" >/dev/null
     info "killed $(docker inspect -f '{{.Name}}' "$container" | tr -d /)"

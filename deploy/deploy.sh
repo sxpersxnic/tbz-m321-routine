@@ -29,7 +29,7 @@ SECRETS=${SECRETS:-${INVENTORY%.env}.secrets.env}
 GENERATED=deploy/.generated
 STACK=${STACK:-routine}
 NODES=(1 2 3)
-IMAGES=(gateway keycloak routine-service task-service notification-service integration-worker mock-external web)
+IMAGES=(gateway keycloak routine-service task-service notification-service integration-worker trigger-service mock-external web)
 
 bold=$'\033[1m'; green=$'\033[32m'; red=$'\033[31m'; dim=$'\033[2m'; reset=$'\033[0m'
 step() { printf "\n%s▶ %s%s\n" "$bold" "$*" "$reset"; }
@@ -63,7 +63,7 @@ TAG=${TAG:-$(default_tag)}
 # ------------------------------------------------------------------ secrets
 SECRET_NAMES=(RABBITMQ_PASSWORD RABBITMQ_ERLANG_COOKIE KEYCLOAK_ADMIN_PASSWORD
   KEYCLOAK_DB_PASSWORD ROUTINE_DB_PASSWORD TASK_DB_PASSWORD NOTIFICATION_DB_PASSWORD INTEGRATION_DB_PASSWORD
-  INTEGRATION_WORKER_TOKEN_SECRET)
+  TRIGGER_DB_PASSWORD INTEGRATION_WORKER_TOKEN_SECRET TRIGGER_SERVICE_TOKEN_SECRET)
 
 load_secrets() { # generate what is missing (first run, or a secret added later), then export all
   touch "$SECRETS" && chmod 600 "$SECRETS"

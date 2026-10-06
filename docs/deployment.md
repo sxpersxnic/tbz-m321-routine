@@ -44,7 +44,8 @@ on different VMs and moves them when a VM fails.*
 | `rabbitmq-1..3` | one per VM (label `routine.rabbitmq=N`) | 3 replicas per quorum queue, one per VM – one VM can fail |
 | gateway, keycloak, routine, task, notification, web | 2 replicas each, `max_replicas_per_node: 1` | Never both replicas on the same VM; the two Keycloak replicas form one cluster across the VMs (discovery through keycloak-db, cluster traffic bound to the overlay interface) |
 | integration-worker | 3 replicas, anywhere | Competing consumers, scale freely |
-| 5 PostgreSQL databases (keycloak, routine, task, notification, integration) | vm1 (label `routine.data=true`) | A volume lives on one VM; pinning keeps the data where the database runs |
+| trigger-service (v2) | 2 replicas, `max_replicas_per_node: 1` | Like the other platform services |
+| PostgreSQL databases (keycloak, routine, task, notification, integration, trigger) | vm1 (label `routine.data=true`) | A volume lives on one VM; pinning keeps the data where the database runs |
 | jaeger, mock-external | anywhere, 1 replica | Not in the critical path; rescheduled on VM failure (Jaeger loses its in-memory traces) |
 
 ## 2. Why Docker Swarm
