@@ -38,7 +38,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
   - `subscriptions` from `RoutineSaved`/`RoutineDeleted`, version rule, automatic resync on an
     empty table, `POST /internal/v1/resync`.
 
-- [ ] **M4-06 · trigger-service: matching**
+- [x] **M4-06 · trigger-service: matching**
   - Filter evaluation (shared fixture file `contracts/fixtures/conditions.json` used by both
     routine-service `control.ts` tests and trigger-service tests), loop protection, outbox,
     `match_log`, `GET /api/v1/triggers/log`.

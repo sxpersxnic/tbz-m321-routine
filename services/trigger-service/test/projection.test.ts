@@ -118,7 +118,7 @@ describe('resync routes', () => {
     server.addHook('preHandler', async (request) => {
       if (roles) request.user = { id: randomUUID(), email: 'a@routine.local', roles };
     });
-    registerRoutes(server, { resync: async () => ({ stored: 2, removed: 0 }) });
+    registerRoutes(server, { resync: async () => ({ stored: 2, removed: 0 }), decisions: async () => [] });
     return server;
   };
 

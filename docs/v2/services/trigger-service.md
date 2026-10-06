@@ -51,8 +51,9 @@ and removes rows the list lacks unless they changed after the list was requested
 
 **Matching** (queue `trigger-service.events`, prefetch 50):
 
-1. Read `ownerId` and the event type (routing key). Load active subscriptions for
-   `(ownerId, eventType)`.
+1. Read `ownerId` and the event type (from the envelope `type`, the inverse of
+   `eventTypeName` – a retried message comes back with the queue name as routing key). Load the
+   subscriptions for `(ownerId, eventType)`; an inactive one logs `inactive`.
 2. For each: evaluate `filter` against the event data with the **same operators** as
    `condition.if` (copy `evaluateCondition` semantics: numbers compare as numbers, `contains` is
    case-insensitive). Mismatch → log `filtered`.
@@ -66,7 +67,11 @@ Duplicate events produce duplicate `StartRoutineRequested` messages. routine-ser
 dedupes them by idempotency key (ADR-08).
 
 Execution events (`execution.completed`, `execution.failed`) from `routine.events` are
-handled identically. Their `origin` is derived: `{ routineId, depth: execution.depth }`.
+handled identically. Their `origin` is derived: `{ routineId, depth: execution.depth + 1 }` (the
+events carry the run's `depth`; + 1 like a domain event a step causes, so a chain of routines
+starting on each other's failures stops at the same depth). A redelivered event is decided only
+once: `match_log` is unique per `(event_message_id, routine_id)` and a start is sent only with a
+new log row.
 
 ## 8. Configuration
 

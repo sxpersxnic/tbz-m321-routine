@@ -25,6 +25,7 @@ import {
   startLoop,
   waitForDatabase,
 } from '@routine/service-kit';
+import { listDecisions, matchEvent, purgeDecisions, readEvent } from './matching.ts';
 import { parseRoutineMessage } from './messages.ts';
 import { applyRoutineMessage, projectionEmpty, resync } from './projection.ts';
 import { routineClient } from './routine-client.ts';
@@ -54,7 +55,7 @@ const app = createHttpServer({
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/']);
 // /internal/** only for these service accounts; admins resync through /api/v1/triggers/resync
 installServiceAuth(app, createServiceTokenVerifier(env('JWKS_URL')), envList('INTERNAL_CALLERS', []));
-registerRoutes(app, { resync: resyncNow });
+registerRoutes(app, { resync: resyncNow, decisions: (ownerId, routineId) => listDecisions(pool, ownerId, routineId) });
 
 // ------------------------------------------------------------ projection (trigger-service.md §4)
 
@@ -63,6 +64,16 @@ broker.consume({ queue: 'trigger-service.routines', retryDelaysMs: [1_000, 5_000
   const outcome = await applyRoutineMessage(pool, message);
   const routineId = message.kind === 'saved' ? message.routine.routineId : message.routineId;
   logger.debug({ routineId, event: envelope.type, outcome }, 'subscription projected');
+});
+
+// ------------------------------------------------------------ matching (trigger-service.md §4)
+
+const maxDepth = envInt('MAX_EVENT_DEPTH', 5);
+broker.consume({ queue: 'trigger-service.events', prefetch: 50, retryDelaysMs: [1_000, 5_000] }, async (envelope) => {
+  const event = readEvent(envelope);
+  if (!event) return; // no owner, or not a trigger type – no routine can start on it
+  const counts = await matchEvent(pool, event, maxDepth);
+  if (counts.started + counts.filtered + counts.loop + counts.inactive > 0) logger.info({ event: event.type, eventMessageId: event.messageId, ...counts }, 'event matched');
 });
 
 // an empty projection (first start, lost volume) is rebuilt from routine-service – retried until it works
@@ -83,6 +94,8 @@ const relayLoop = relay.start();
 let housekeepingRuns = 0;
 const housekeepingLoop = startLoop('housekeeping', 60_000, logger, async () => {
   if (housekeepingRuns++ % 30 === 0) await relay.purgePublished();
+  const purged = await purgeDecisions(pool);
+  if (purged > 0) logger.info({ purged }, 'decisions older than 7 days removed');
 });
 
 await app.listen({ host: '0.0.0.0', port: envInt('PORT', 3000) });

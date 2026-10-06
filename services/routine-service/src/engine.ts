@@ -114,9 +114,16 @@ function startRefusal(routine: RoutineRow | null, command: StartRoutineCommand):
   return null;
 }
 
-/** Whether event data passes every condition of an event trigger's filter (same operators as condition.if). */
+/** Whether event data passes every condition of an event trigger's filter (same operators as condition.if; an impossible comparison does not match). */
 function filterMatches(filter: Condition[], data: Record<string, unknown>): boolean {
-  return filter.every(({ field, operator, value }) => evaluateCondition({ operator, left: data[field], right: value }).result === true);
+  return filter.every(({ field, operator, value }) => {
+    try {
+      return evaluateCondition({ operator, left: data[field], right: value }).result === true;
+    } catch (error) {
+      if (error instanceof ControlError) return false;
+      throw error;
+    }
+  });
 }
 
 /** `processed_by` of what the engine did itself (scripting actions, loop expansion). */
