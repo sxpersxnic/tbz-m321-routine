@@ -7,6 +7,8 @@ import { ConfirmDialog, CopyButton, Empty, ErrorNote, Icon, JsonBlock, Menu, Sec
 import { ActionFlow, AppearanceDialog, routineLook, RunHistory, StatusIcon, type Appearance } from '../components/visual.tsx';
 import { dateTime, dayClock, describeTrigger, relative, testPayload, TRIGGER_ICONS, webhookUrl } from '../format.ts';
 import { navigate, useNow, usePolling } from '../hooks.ts';
+import { useCatalog } from '../catalog/store.ts';
+import { useRefNames } from '../catalog/ref-names.ts';
 import { healthLine } from '../lib/health.ts';
 import type { Routine } from '../types.ts';
 import { ExecutionRow } from './Executions.tsx';
@@ -81,8 +83,12 @@ function useSetActive(routine: Routine, onChange: () => void) {
   return { set, active: override ?? routine.active };
 }
 
-/** "Manual" / "Every weekday at 07:30" – when, as a label. */
-const whenText = (routine: Routine) => describeTrigger(routine.trigger);
+/** "Manual" / "Every weekday at 07:30" / "When a task in Work is completed" – when, as a label. */
+function useWhenText(routine: Routine | undefined): string {
+  const catalog = useCatalog();
+  const nameOf = useRefNames(routine?.trigger.type === 'event');
+  return routine ? describeTrigger(routine.trigger, catalog, nameOf) : '';
+}
 
 /**
  * A routine as a Shortcuts-style tile in its own colour and symbol,
@@ -96,6 +102,7 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
   const { set, active } = useSetActive(routine, onChanged);
   const look = routineLook(routine);
   const health = healthLine(routine.health);
+  const when = useWhenText(routine);
   return (
     <article className={`tile tint-${look.tint} ${active ? '' : 'paused'}`}>
       <a className="tile-link" href={`#/routines/${routine.id}`}>
@@ -106,7 +113,7 @@ export function RoutineTile({ routine, onChanged, level = 3 }: { routine: Routin
         <Heading className="tile-name">{routine.name}</Heading>
         <span className="tile-when">
           <Icon name={TRIGGER_ICONS[routine.trigger.type]} size={13} />
-          <span className="ellipsis">{whenText(routine)}</span>
+          <span className="ellipsis">{when}</span>
         </span>
         {health && <span className={`tile-health ${health.failing ? 'failing' : ''}`}>{health.failing && <Icon name="warning" size={12} />}{health.text}</span>}
       </a>
@@ -222,6 +229,7 @@ export function RoutineDetail({ id }: { id: string }) {
   const [testError, setTestError] = useState<string>();
   const routine = usePolling(() => api.routine(id), 5000, [id]);
   const executions = usePolling(() => api.routineExecutions(id, 40), 2000, [id]);
+  const when = useWhenText(routine.data);
 
   if (routine.error && !routine.data) {
     return (
@@ -367,9 +375,9 @@ export function RoutineDetail({ id }: { id: string }) {
         <div className="fact">
           <span className="glyph tint-sky" aria-hidden="true"><Icon name={TRIGGER_ICONS[r.trigger.type]} size={18} /></span>
           <span className="grow">
-            <span className="fact-label">{whenText(r)}</span>
+            <span className="fact-label">{when}</span>
             <span className="fact-value">
-              {!r.active ? 'Paused' : r.nextRunAt ? relative(r.nextRunAt, now) : r.trigger.type === 'webhook' ? 'On each call' : r.trigger.type === 'manual' ? 'On demand' : '–'}
+              {!r.active ? 'Paused' : r.nextRunAt ? relative(r.nextRunAt, now) : r.trigger.type === 'webhook' ? 'On each call' : r.trigger.type === 'manual' ? 'On demand' : r.trigger.type === 'event' ? 'Each time it happens' : '–'}
             </span>
             {r.active && r.nextRunAt && <span className="fact-sub">{dayClock(r.nextRunAt)}</span>}
             {r.webhookPath && (

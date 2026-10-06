@@ -784,6 +784,26 @@ a.outcome-card:hover { background: var(--surface-2); }
 .question-required { padding-bottom: 8px; }
 .q-head p { color: var(--muted); font-size: 14px; }
 
+/* event trigger (07 §5.6): area → event → "Only when" rows of field · comparison · value */
+.event-trigger { display: flex; flex-direction: column; gap: 12px; }
+.event-select { flex: 1 1 220px; }
+.filter-rows { margin: 0; padding: 0; min-width: 0; border: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.filter-rows legend { font-size: 14px; font-weight: 600; margin-bottom: 4px; padding: 0; }
+.filter-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; align-items: center; width: 100%; }
+.filter-row .span-all { grid-column: 1 / -1; }
+@media (max-width: 560px) {
+  .filter-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .filter-value { grid-column: 1 / 3; grid-row: 2; }
+}
+
+/* "Why did this run?" */
+.why-it-ran { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.why-line { margin: 0; }
+.why-heading { margin: 6px 0 0; font-size: 14px; }
+.decision-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.decision-started { color: var(--ok); }
+.decision-loop { color: var(--warn); }
+
 .choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .choice {
   display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 14px; text-align: left;

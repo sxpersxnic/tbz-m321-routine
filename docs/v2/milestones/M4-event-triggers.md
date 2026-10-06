@@ -50,7 +50,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
   - Tests: a routine that creates a task in list X, triggered by `task.created` in list X →
     runs once, then `loop` in the match log.
 
-- [ ] **M4-08 · Web: event trigger editor**
+- [x] **M4-08 · Web: event trigger editor**
   - [07 §5.6](../07-web.md). Pills `{{trigger.event.<field>}}`. Routine tiles and hero show the
     trigger sentence (*"When a task is completed in Work"*). Run detail shows *Started by
     "task completed: Write report"* and a *Why did this run?* disclosure from the match log.

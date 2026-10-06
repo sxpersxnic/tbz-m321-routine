@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GLOBAL_REFERENCES, LOOP_OUTPUTS, WEBHOOK_REFERENCES, actionLabel, conditionWords, formOf, type ParamField } from '../action-forms.ts';
 import { api, ApiError } from '../api.ts';
+import { EventTriggerFields, toFilter, type DraftCondition } from '../components/event-trigger-editor.tsx';
 import { useToast } from '../components/toast.tsx';
-import { runsInTest } from '../catalog/catalog.ts';
+import { runsInTest, type Catalog } from '../catalog/catalog.ts';
 import { pickerGroups } from '../catalog/picker.ts';
 import { useCatalog } from '../catalog/store.ts';
 import { shortValue, TryStep } from '../components/try-step.tsx';
@@ -17,6 +18,7 @@ import { navigate, usePolling, useRouteParam, useUnsavedGuard } from '../hooks.t
 import { FREQUENCIES, parseSchedule, toCron, WEEKDAYS, withFrequency, type Frequency } from '../schedule.ts';
 import { ALERT_CHOICES } from '../lib/health.ts';
 import { stepTimeout } from '../lib/waiting.ts';
+import { eventReferences, eventTriggerSentence, refPicker, type NameOf } from '../lib/event-trigger.ts';
 import { TEMPLATES } from '../templates.ts';
 import type { ActionDefinition, RoutineInput, StepTimeout, Trigger, TriggerType } from '../types.ts';
 
@@ -47,6 +49,9 @@ interface Draft {
   triggerType: TriggerType;
   cron: string;
   timezone: string;
+  /** Event trigger: the trigger type (e.g. task.completed) and its filter rows. */
+  event: string;
+  filter: DraftCondition[];
   actions: DraftAction[];
   /** "Tell me after N failures in a row" – null = never. */
   alertAfterFailures: number | null;
@@ -148,6 +153,10 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
     triggerType: routine.trigger.type,
     cron: routine.trigger.type === 'schedule' ? routine.trigger.cron : CRON_PRESETS[0].cron,
     timezone: routine.trigger.type === 'schedule' ? routine.trigger.timezone : 'Europe/Zurich',
+    event: routine.trigger.type === 'event' ? routine.trigger.event : '',
+    filter: routine.trigger.type === 'event'
+      ? (routine.trigger.filter ?? []).map((condition) => ({ uid: uid(), field: condition.field, operator: condition.operator, value: condition.value === undefined || condition.value === null ? '' : String(condition.value) }))
+      : [],
     alertAfterFailures: routine.alertAfterFailures === undefined ? 2 : routine.alertAfterFailures,
     questions: (routine.inputs ?? []).map((spec) => fromSpec(spec, uid())),
     actions: routine.actions.map((action) => ({
@@ -165,6 +174,7 @@ function fromRoutine(routine: RoutineInput & { active?: boolean }): Draft {
 
 function toTrigger(draft: Draft): Trigger {
   if (draft.triggerType === 'schedule') return { type: 'schedule', cron: draft.cron.trim(), timezone: draft.timezone.trim() || 'Europe/Zurich' };
+  if (draft.triggerType === 'event') return { type: 'event', event: draft.event, ...(draft.filter.length > 0 && { filter: toFilter(draft.filter) }) };
   return { type: draft.triggerType };
 }
 
@@ -172,6 +182,7 @@ const TRIGGER_CHOICES: Array<{ type: TriggerType; label: string; icon: string }>
   { type: 'manual', label: 'Manual', icon: 'play' },
   { type: 'schedule', label: 'Schedule', icon: 'calendar' },
   { type: 'webhook', label: 'Webhook', icon: 'link' },
+  { type: 'event', label: 'Event', icon: 'bolt' },
 ];
 
 function toInput(draft: Draft): RoutineInput {
@@ -271,9 +282,18 @@ export interface Issue {
 const nameFieldId = 'field-name';
 const fieldId = (actionUid: string, field: string) => `field-${actionUid}-${field}`;
 
-function clientIssues(draft: Draft): Issue[] {
+function clientIssues(draft: Draft, catalog: Catalog): Issue[] {
   const issues: Issue[] = [];
   if (!draft.name.trim()) issues.push({ message: 'Give the routine a name', target: nameFieldId });
+  if (draft.triggerType === 'event') {
+    if (!draft.event) issues.push({ message: 'Choose the event that starts the routine', target: 'field-event' });
+    // an id is what a list or routine condition compares – without one it could never match
+    draft.filter.forEach((condition, index) => {
+      if (refPicker(catalog.trigger(draft.event), condition.field) && !['isEmpty', 'isNotEmpty'].includes(condition.operator) && !condition.value) {
+        issues.push({ message: `Condition ${index + 1}: choose what it is`, target: `field-filter-${condition.uid}` });
+      }
+    });
+  }
   if (draft.actions.length === 0) issues.push({ message: 'Add at least one step' });
   for (const action of draft.actions) {
     const condition = action.runIf && draft.actions.find((candidate) => candidate.uid === action.runIf?.uid);
@@ -321,7 +341,7 @@ const TIMEZONES: string[] = (() => {
 })();
 
 const EMPTY: Draft = {
-  name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', actions: [], alertAfterFailures: 2, questions: [],
+  name: '', description: '', icon: null, color: null, active: true, triggerType: 'manual', cron: CRON_PRESETS[0].cron, timezone: 'Europe/Zurich', event: '', filter: [], actions: [], alertAfterFailures: 2, questions: [],
 };
 
 // ---------------------------------------------------------------- component
@@ -341,6 +361,9 @@ export function RoutineEditor({ id }: { id?: string }) {
   const catalog = useCatalog();
   const taskLists = usePolling(() => api.taskLists(), 0);
   const routineList = usePolling(() => api.routines(), 0);
+  // what the trigger sentence says instead of an id
+  const nameOf: NameOf = (picker, pickedId) =>
+    picker === 'tasklist' ? taskLists.data?.find((list) => list.id === pickedId)?.name : routineList.data?.find((routine) => routine.id === pickedId)?.name;
   // One shared starting value: fromRoutine() mints random uids, so calling it
   // twice would make the draft differ from its own baseline and read as dirty.
   const [initial] = useState<Draft>(EMPTY);
@@ -550,7 +573,7 @@ export function RoutineEditor({ id }: { id?: string }) {
   });
 
   async function save() {
-    const problems = clientIssues(draft);
+    const problems = clientIssues(draft, catalog);
     let input: RoutineInput;
     try {
       input = toInput(draft);
@@ -846,6 +869,22 @@ export function RoutineEditor({ id }: { id?: string }) {
               ))}
             </div>
 
+            {draft.triggerType === 'event' && (
+              <>
+                <EventTriggerFields catalog={catalog} event={draft.event} filter={draft.filter} lists={taskLists.data} routines={routineList.data} selfId={id}
+                  invalid={invalid} onChange={(patch) => update(patch)} />
+                {draft.event && (
+                  <div className="schedule-summary" aria-live="polite">
+                    <Icon name="bolt" size={20} />
+                    <div className="grow">
+                      <strong>{eventTriggerSentence(catalog, { event: draft.event, filter: toFilter(draft.filter) }, nameOf)}</strong>
+                      <span className="hint">What happened is available as <code>{'{{trigger.event.…}}'}</code> in the steps</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
             {draft.triggerType === 'webhook' && (
               <div className="schedule-summary webhook-summary" aria-live="polite">
                 <Icon name="link" size={20} />
@@ -1077,6 +1116,8 @@ export function RoutineEditor({ id }: { id?: string }) {
                                 {/* a manual routine is what another routine calls as a function – offer what it is called with */}
                                 {Object.entries({
                                   ...(draft.triggerType === 'webhook' ? WEBHOOK_REFERENCES : {}),
+                                  // what happened: the event's fields
+                                  ...(draft.triggerType === 'event' ? eventReferences(catalog.trigger(draft.event)) : {}),
                                   // the answers to the questions; without questions, what a calling routine passes
                                   ...(draft.triggerType === 'manual' ? (draft.questions.length > 0 ? questionReferences(draft.questions) : INPUT_REFERENCE) : {}),
                                   ...GLOBAL_REFERENCES,
@@ -1175,7 +1216,11 @@ export function RoutineEditor({ id }: { id?: string }) {
               }))}
                 trigger={{
                   icon: TRIGGER_ICONS[draft.triggerType],
-                  title: draft.triggerType === 'schedule' ? (schedule?.ok && schedule.text) || 'Schedule' : draft.triggerType === 'webhook' ? 'Webhook call' : 'Manual',
+                  title: draft.triggerType === 'schedule'
+                    ? (schedule?.ok && schedule.text) || 'Schedule'
+                    : draft.triggerType === 'webhook' ? 'Webhook call'
+                    : draft.triggerType === 'event' ? (draft.event ? eventTriggerSentence(catalog, { event: draft.event, filter: toFilter(draft.filter) }, nameOf) : 'An event')
+                    : 'Manual',
                 }} />
             )}
             <div style={{ marginTop: 14 }}>

@@ -16,7 +16,19 @@ export type ErrorCode =
   | 'AI_REFUSED' | 'INPUT_TOO_LARGE' | 'CONFLICT' | 'CANCELLED' | 'INTERNAL';
 export type Priority = 'low' | 'normal' | 'high';
 
-export type Trigger = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
+/** One check of an event trigger's filter – the operators of `condition.if`. */
+export interface Condition {
+  field: string;
+  operator: string;
+  value?: unknown;
+}
+
+export type Trigger =
+  | { type: 'manual' }
+  | { type: 'schedule'; cron: string; timezone: string }
+  | { type: 'webhook' }
+  /** Starts when a domain event happens (a trigger type of the catalog) and passes the filter. */
+  | { type: 'event'; event: string; filter?: Condition[] };
 export type TriggerType = Trigger['type'];
 /** How a run started: its routine's trigger, or a "Run routine" step of another routine. */
 export type ExecutionTrigger = TriggerType | 'routine';
@@ -244,9 +256,21 @@ export interface Execution {
   error: string | null;
   /** Error code of the failed step – null unless FAILED, and for runs that failed before v2. */
   errorCode: ErrorCode | null;
+  /** Event runs: the event that started the run. */
+  triggerEvent?: { event: string; eventMessageId: string; data: Record<string, unknown> };
+  /** Event-chain depth: 0 unless a routine's own step caused the starting event. */
+  depth?: number;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+/** One decision of trigger-service for a routine ("Why did this run?"). */
+export interface TriggerDecision {
+  eventMessageId: string;
+  event: string;
+  outcome: 'started' | 'filtered' | 'loop' | 'inactive';
+  at: string;
 }
 
 export type StatusCounts = Partial<Record<ExecutionStatus, number>>;

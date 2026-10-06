@@ -1,4 +1,4 @@
-import type { ActionDefinition, CatalogDomain, DeadLetterQueue, Execution, ExecutionDetail, ExecutionStats, ExecutionStatus, Notification, RegistryEntry, Routine, RoutineInput, RoutineVersion, SystemStatus, Task, TaskList, TaskListInput, User } from './types.ts';
+import type { ActionDefinition, CatalogDomain, DeadLetterQueue, Execution, ExecutionDetail, ExecutionStats, ExecutionStatus, Notification, RegistryEntry, Routine, RoutineInput, RoutineVersion, SystemStatus, Task, TaskList, TaskListInput, TriggerDecision, User } from './types.ts';
 
 export class ApiError extends Error {
   status: number;
@@ -199,6 +199,9 @@ export const api = {
   /** Answers a question – the routine waiting for it goes on. */
   answer: (id: string, value: string) => send<Notification>('POST', `/api/v1/notifications/${id}/answer`, { value }),
   deleteNotification: (id: string) => send<null>('DELETE', `/api/v1/notifications/${id}`),
+
+  /** trigger-service's last decisions for one routine ("Why did this run?"). */
+  triggerLog: async (routineId: string) => (await get<{ items: TriggerDecision[] }>(`/api/v1/triggers/log?routineId=${encodeURIComponent(routineId)}`)).items,
 
   system: () => get<SystemStatus>('/api/v1/system/status'),
   deadLetters: async () => (await get<{ items: DeadLetterQueue[] }>('/api/v1/system/dead-letters')).items,

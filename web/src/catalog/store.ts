@@ -18,9 +18,14 @@ interface Cached {
 
 const STORAGE_KEY = 'routine.catalog';
 let state: Cached | null = restore();
-setGeneratedForms(formsFromCatalog(state?.domains ?? []));
+setGeneratedForms(formsFromCatalog(state?.domains ?? []), eventLabels(state?.domains ?? []));
 let loading: Promise<void> | undefined;
 const listeners = new Set<() => void>();
+
+/** Event field name → label, over every trigger of the catalog. */
+function eventLabels(domains: CatalogDomain[]): Record<string, string> {
+  return Object.fromEntries(domains.flatMap((domain) => (domain.triggers ?? []).flatMap((trigger) => trigger.fields.map((field) => [field.name, field.label]))));
+}
 
 function restore(): Cached | null {
   try {
@@ -34,7 +39,7 @@ function restore(): Cached | null {
 function set(next: Cached | null) {
   state = next;
   // pills, history and the editor read forms by type – they follow the catalog
-  setGeneratedForms(formsFromCatalog(next?.domains ?? []));
+  setGeneratedForms(formsFromCatalog(next?.domains ?? []), eventLabels(next?.domains ?? []));
   try {
     if (next) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     else localStorage.removeItem(STORAGE_KEY);

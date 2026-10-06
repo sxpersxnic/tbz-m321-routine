@@ -4,12 +4,14 @@ import { api } from '../api.ts';
 import { Pipeline, Timeline } from '../components/execution.tsx';
 import { RunOutcome } from '../components/onboarding.tsx';
 import { useToast } from '../components/toast.tsx';
-import { CopyButton, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton, StatusBadge } from '../components/ui.tsx';
+import { CopyButton, Disclosure, Empty, ErrorNote, Icon, JsonBlock, Section, Skeleton, StatusBadge } from '../components/ui.tsx';
+import { WhyItRan } from '../components/why-it-ran.tsx';
 import { startRoutine } from './Routines.tsx';
 import { ActionFlow, ActionSentence, Monogram, RoutineGlyph, StatusIcon, statusSymbol, statusTone } from '../components/visual.tsx';
 import { between, clock, dateTime, groupByDay, JAEGER_URL, relative, splitInstance, TRIGGER_WORDS } from '../format.ts';
 import { navigate, useNow, usePolling, useRouteParam } from '../hooks.ts';
 import { FAILURE_ACTION_LABELS, failureCopy, failureField, failureLine } from '../lib/failure-copy.ts';
+import { startedBy } from '../lib/event-trigger.ts';
 import { delayedUntil, doItHref, doneTooLate, moment, waitingLine, waitingSteps } from '../lib/waiting.ts';
 import { TERMINAL_STATUSES, type Execution, type ExecutionAction, type ExecutionDetail as Detail, type ExecutionStatus, type Routine } from '../types.ts';
 
@@ -24,7 +26,7 @@ export function ExecutionRow({ execution, now, hideName, routine, showClock }: {
 }) {
   const running = !TERMINAL_STATUSES.has(execution.status);
   const took = running ? between(execution.startedAt ?? execution.createdAt, null, now) : between(execution.startedAt, execution.finishedAt);
-  const how = TRIGGER_WORDS[execution.trigger];
+  const how = execution.triggerEvent ? `Started by "${startedBy(execution.triggerEvent)}"` : TRIGGER_WORDS[execution.trigger];
   const when = showClock ? clock(execution.createdAt) : relative(execution.createdAt, now);
   // success is the normal case: a tick is enough, words are kept for what needs attention
   const quiet = execution.status === 'COMPLETED';
@@ -232,7 +234,8 @@ export function ExecutionDetail({ id }: { id: string }) {
   const done = e.actions.filter((candidate) => TERMINAL_ACTION.has(candidate.status)).length;
   const running = !TERMINAL_STATUSES.has(e.status);
   const tone = statusTone(e.status);
-  const started = TRIGGER_WORDS[e.trigger];
+  const started = e.triggerEvent ? `Started by "${startedBy(e.triggerEvent)}"` : TRIGGER_WORDS[e.trigger];
+  const triggerEvent = e.triggerEvent;
 
   return (
     <div className="page">
@@ -269,6 +272,13 @@ export function ExecutionDetail({ id }: { id: string }) {
       {e.status === 'FAILED' && <FailureCard e={e} onResume={() => void resume()} resuming={resuming} />}
       {waitingSteps(e).length > 0 && <WaitingCard e={e} now={now} skipping={skipping} onSkip={(key) => void skip(key)} />}
       <RunOutcome actions={e.actions} status={e.status} />
+      {triggerEvent && (
+        <div className="card">
+          <Disclosure summary="Why did this run?">
+            <WhyItRan e={{ ...e, triggerEvent }} routine={routine} now={now} />
+          </Disclosure>
+        </div>
+      )}
 
       <Section id="flow-title" title="Steps">
         <div>

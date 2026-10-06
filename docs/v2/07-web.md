@@ -141,6 +141,14 @@ Domain select → trigger select (from `domain.triggers`) → filter rows *field
 value* (fields from `trigger.fields`, operators from the v1 condition list). Pills for
 `{{trigger.event.<field>}}` become available in steps.
 
+A `ref` field named after a collection of its domain (`listId` → task lists, `routineId` →
+routines) gets that picker instead of an id field. The trigger sentence (`lib/event-trigger.ts`)
+fills `{filter}` with the conditions in words (*"in Work"*, *"with title containing "rent""*),
+any other `{field}` from an *is* condition on it or its `…Id` (*"When "Backup" fails"*, else
+*"any routine"*), and appends the conditions when the sentence has no `{filter}`. *Why did this
+run?* shows the event's fields, trigger-service's decision for it and its last decisions for the
+routine (`GET /api/v1/triggers/log`).
+
 ## 6. Today
 
 - `useLiveToday()`: `GET /api/v1/today`, then `POST /api/v1/today/stream-ticket` → a one-time

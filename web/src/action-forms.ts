@@ -133,10 +133,13 @@ export const WEBHOOK_REFERENCES: Record<string, string> = {
 };
 
 let generated: Record<string, ActionForm> = {};
+/** Labels of the event fields (`{{trigger.event.<field>}}`), by field name – the same across events. */
+let eventFieldLabels: Record<string, string> = {};
 
 /** Called by the catalog store whenever the catalog (re)loads. */
-export function setGeneratedForms(forms: Record<string, ActionForm>): void {
+export function setGeneratedForms(forms: Record<string, ActionForm>, eventLabels: Record<string, string> = {}): void {
   generated = forms;
+  eventFieldLabels = eventLabels;
 }
 
 /** A step type's form: the hand-made override, else the one generated from its manifest. */
@@ -327,6 +330,8 @@ export function describeReference(reference: string, types: Record<string, strin
   if (variable) return variable[1].split('.').join(' › ');
   const body = /^\{\{trigger\.body\.([^}]+)\}\}$/.exec(reference);
   if (body) return `Webhook › ${body[1].split('.').join(' › ')}`;
+  const event = /^\{\{trigger\.event\.([^}]+)\}\}$/.exec(reference);
+  if (event) return `Event › ${eventFieldLabels[event[1]] ?? event[1]}`;
   const match = /^\{\{actions\.([^.}]+)\.([^}]+)\}\}$/.exec(reference);
   if (!match) return reference.slice(2, -2);
   const [, key, field] = match;

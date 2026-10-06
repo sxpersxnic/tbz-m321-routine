@@ -16,6 +16,7 @@
 #   resume       A failed run is fixed and resumed from its failed step ("Retry from here")
 #   registry     Domain platform: five domains registered, a task event on the broker, an incompatible manifest refused
 #   human-step   Humans in the loop: a checklist run finished by ticking tasks and answering, and the expiry path
+#   event-trigger  Event triggers: a completed task in a list starts a routine, filters, loop protection, no start lost
 #   all          All scenarios in sequence (acceptance test)
 #   trace <id>   Logs of all services for a correlation or execution ID
 #   hook <routine> [json]  Call a webhook routine by ID or name, then follow the run (manual testing)
@@ -636,6 +637,77 @@ scenario_human_step() {
   ok "completed with skipped steps; its tasks are cancelled and the question expired"
 }
 
+runs_of() { api GET "/api/v1/routines/$1/executions" | jq -c '.items'; }
+decisions_of() { api GET "/api/v1/triggers/log?routineId=$1" | jq -c '.items'; }
+new_task() { # new_task TITLE LIST_ID → prints task id
+  api POST /api/v1/tasks "$(jq -nc --arg title "$1" --arg list "$2" '{title: $title, listId: $list}')" | jq -r '.id // empty' | grep . || fail "could not create task $1"
+}
+complete_task() { api PATCH "/api/v1/tasks/$1" '{"status":"DONE"}' >/dev/null; }
+wait_runs() { # wait_runs ROUTINE_ID COUNT TIMEOUT_S → waits until the routine has COUNT completed runs
+  local done
+  for _ in $(seq 1 $(($3 * 2))); do
+    done=$(runs_of "$1" | jq '[.[] | select(.status == "COMPLETED")] | length')
+    [[ $done -ge $2 ]] && return 0
+    sleep 0.5
+  done
+  fail "expected $2 completed runs, got $done"
+}
+
+scenario_event_trigger() {
+  title "Event triggers (M4)"
+  login
+  local suffix work other loop rid lid runs run eid outcomes
+  suffix=$(date +%s)
+  work=$(api POST /api/v1/task-lists "$(jq -nc --arg name "Work $suffix" '{name: $name}')" | jq -r .id)
+  other=$(api POST /api/v1/task-lists "$(jq -nc --arg name "Home $suffix" '{name: $name}')" | jq -r .id)
+  loop=$(api POST /api/v1/task-lists "$(jq -nc --arg name "Loop $suffix" '{name: $name}')" | jq -r .id)
+
+  step "a) \"When a task in Work is completed → notify me\""
+  rid=$(create_routine "$(jq -nc --arg list "$work" '{name: "Work done → tell me (demo)",
+    trigger: {type: "event", event: "task.completed", filter: [{field: "listId", operator: "equals", value: $list}]},
+    actions: [{key: "notify", type: "notification.send", step: 1, params: {title: "Done: {{trigger.event.title}}", body: "In {{trigger.event.listName}}"}}]}')")
+  sleep 2 # RoutineSaved reaches trigger-service's projection
+  complete_task "$(new_task "Write report" "$work")"
+  wait_runs "$rid" 1 30
+  run=$(runs_of "$rid" | jq -c '.[0]')
+  eid=$(jq -r .id <<<"$run")
+  info "run $eid: trigger=$(jq -r .trigger <<<"$run"), started by $(jq -r '.triggerEvent.event + " \"" + .triggerEvent.data.title + "\""' <<<"$run")"
+  info "notification: $(execution "$eid" | jq -r '.actions[0].params.title')"
+  [[ $(execution "$eid" | jq -r '.actions[0].params.title') == "Done: Write report" ]] || fail "{{trigger.event.title}} was not filled in"
+  ok "completed – the step read {{trigger.event.title}}"
+
+  step "b) A task in another list does not pass the filter"
+  complete_task "$(new_task "Water the plants" "$other")"
+  for _ in $(seq 1 20); do outcomes=$(decisions_of "$rid" | jq -r '[.[].outcome] | join(",")'); [[ $outcomes == *filtered* ]] && break; sleep 0.5; done
+  [[ $outcomes == *filtered* ]] || fail "expected a filtered decision, got: $outcomes"
+  [[ $(runs_of "$rid" | jq length) == 1 ]] || fail "the filtered event started a run"
+  ok "logged as filtered, no run (\"Why did this run?\" shows it)"
+
+  step "c) A routine that adds a task to the list it watches runs once – loop protection stops it"
+  lid=$(create_routine "$(jq -nc --arg list "$loop" '{name: "Echo a task (demo)",
+    trigger: {type: "event", event: "task.created", filter: [{field: "listId", operator: "equals", value: $list}]},
+    actions: [{key: "echo", type: "task.create", step: 1, params: {title: "Echo of {{trigger.event.title}}", listId: $list}}]}')")
+  sleep 2
+  new_task "Ping" "$loop" >/dev/null
+  wait_runs "$lid" 1 30
+  for _ in $(seq 1 20); do outcomes=$(decisions_of "$lid" | jq -r '[.[].outcome] | join(",")'); [[ $outcomes == *loop* ]] && break; sleep 0.5; done
+  [[ $outcomes == *loop* ]] || fail "expected a loop decision, got: $outcomes"
+  sleep 2
+  runs=$(runs_of "$lid" | jq length)
+  [[ $runs == 1 ]] || fail "the routine ran $runs times"
+  ok "one run, its own task.created was logged as loop"
+
+  step "d) trigger-service down during a burst of completions – no start is lost"
+  docker compose stop trigger-service >/dev/null 2>&1
+  ok "trigger-service stopped"
+  for n in 1 2 3 4 5; do complete_task "$(new_task "Burst $n" "$work")"; done
+  info "queue trigger-service.events: $(queue trigger-service.events | awk '{print $1}') waiting"
+  docker compose start trigger-service >/dev/null 2>&1
+  ok "trigger-service started"
+  wait_runs "$rid" 6 60
+  ok "all 5 events started their run (6 runs in total)"
+}
+
 scenario_trace() {
   local id=${1:?pass a correlation or execution ID}
   title "Logs for $id (all services)"
@@ -668,11 +740,12 @@ case "${1:-}" in
   resume) scenario_resume ;;
   registry) scenario_registry ;;
   human-step) scenario_human_step ;;
+  event-trigger) scenario_event_trigger ;;
   trace) scenario_trace "${2:-}" ;;
   hook) scenario_hook "${2:-}" "${3:-}" ;;
   status) scenario_status ;;
   all)
-    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_human_step; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
+    scenario_main; scenario_retry; scenario_resume; scenario_registry; scenario_human_step; scenario_event_trigger; scenario_idempotency; scenario_resilience; scenario_scale; scenario_schedule; scenario_webhook; scenario_evolution; scenario_failover
     title "All scenarios succeeded"
     ;;
   *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
