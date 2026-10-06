@@ -18,6 +18,7 @@ import {
   listVersions,
   versionDto,
   insertRoutine,
+  listEventRoutines,
   listExecutionActions,
   listExecutions,
   listLog,
@@ -63,13 +64,27 @@ const triggerSchema = {
   required: ['type'],
   additionalProperties: false,
   properties: {
-    type: { type: 'string', enum: ['manual', 'schedule', 'webhook'] },
+    type: { type: 'string', enum: ['manual', 'schedule', 'webhook', 'event'] },
     cron: { type: 'string', minLength: 1 },
     timezone: { type: 'string', minLength: 1 },
+    event: { type: 'string', pattern: '^[a-z][a-z0-9]*\\.[a-z][a-zA-Z0-9]*$' },
+    filter: {
+      type: 'array',
+      maxItems: 5,
+      items: {
+        type: 'object',
+        required: ['field', 'operator'],
+        additionalProperties: false,
+        properties: { field: { type: 'string', minLength: 1, maxLength: 60 }, operator: { type: 'string', minLength: 1 }, value: {} },
+      },
+    },
   },
-  if: { properties: { type: { const: 'schedule' } } },
-  // biome-ignore lint/suspicious/noThenProperty: JSON Schema if/then, not a thenable
-  then: { required: ['type', 'cron'] },
+  allOf: [
+    // biome-ignore lint/suspicious/noThenProperty: JSON Schema if/then, not a thenable
+    { if: { properties: { type: { const: 'schedule' } } }, then: { required: ['type', 'cron'] } },
+    // biome-ignore lint/suspicious/noThenProperty: JSON Schema if/then, not a thenable
+    { if: { properties: { type: { const: 'event' } } }, then: { required: ['type', 'event'] } },
+  ],
 } as const;
 
 const inputSpecSchema = {
@@ -221,6 +236,22 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
     }
   });
 
+  // ------------------------------------------------------------ internal (service tokens only)
+
+  // trigger-service rebuilds its subscriptions from this (resync): every event-triggered routine, in
+  // the shape of RoutineSaved. installServiceAuth (main.ts) admits only allowed service accounts.
+  app.get<{ Querystring: { trigger: 'event' } }>(
+    '/internal/v1/routines',
+    { schema: { querystring: { type: 'object', required: ['trigger'], additionalProperties: false, properties: { trigger: { type: 'string', enum: ['event'] } } } } },
+    async (request) => {
+      if (!request.caller) throw new HttpError(401, 'unauthorized', 'Missing service token');
+      const rows = await listEventRoutines(pool);
+      return {
+        items: rows.map((row) => ({ routineId: row.id, ownerId: row.owner_id, version: row.version, active: row.active, name: row.name, trigger: row.trigger, areaId: null })),
+      };
+    },
+  );
+
   // ------------------------------------------------------------ routines
 
   app.get('/api/v1/routines', async (request) => {
@@ -280,7 +311,7 @@ export function registerRoutes(app: FastifyInstance, deps: { pool: Pool; engine:
     { schema: { params: routineParams } },
     async (request, reply) => {
       const user = requireUser(request);
-      if (!(await deleteRoutine(pool, user.id, request.params.routineId))) throw notFound('Routine');
+      if (!(await withTransaction(pool, (client) => deleteRoutine(client, user.id, request.params.routineId)))) throw notFound('Routine');
       return reply.status(204).send();
     },
   );

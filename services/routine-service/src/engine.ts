@@ -70,6 +70,8 @@ export interface TriggerRequest {
   parent?: { actionId: string; executionId: string; depth: number };
   /** The answers to the routine's questions (validated by the caller). */
   inputs?: Record<string, unknown>;
+  /** What started an event-triggered run (StartRoutineRequested). */
+  event?: { event: string; eventMessageId: string; data: Record<string, unknown>; depth: number };
 }
 
 /** Values of the `variable.set` steps that ran, in run order – a later assignment wins. */
@@ -117,6 +119,7 @@ const TRIGGER_LOG: Record<ExecutionTrigger, (trigger: TriggerRequest) => string>
   routine: () => 'Called by another routine',
   schedule: (trigger) => `Started by schedule (${trigger.scheduledFor?.toISOString()})`,
   webhook: () => 'Started by webhook',
+  event: (trigger) => `Started by ${trigger.event?.event ?? 'an event'}`,
 };
 
 /**

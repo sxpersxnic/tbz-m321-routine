@@ -3,7 +3,7 @@
  * in contracts/schemas. Nothing outside this file knows the wire format.
  */
 import { createEnvelope, PermanentError, toErrorCode, type Envelope, type ErrorCode } from '@routine/service-kit';
-import type { ExecutionTrigger } from './domain/definition.ts';
+import type { ExecutionTrigger, TriggerDefinition } from './domain/definition.ts';
 
 export const SOURCE = 'routine-service';
 
@@ -259,6 +259,55 @@ export function executionResumed(input: {
         resumedBy: input.resumedBy,
         resumeCount: input.resumeCount,
       },
+    }),
+  };
+}
+
+/**
+ * A routine as it is now – on every write that bumps its version (create, edit, activate, deactivate,
+ * restore, …). Event-carried state: trigger-service keeps its subscriptions from it alone.
+ */
+export function routineSaved(input: {
+  routineId: string;
+  ownerId: string;
+  version: number;
+  active: boolean;
+  name: string;
+  trigger: TriggerDefinition;
+  areaId?: string | null;
+  correlationId: string;
+}): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'routine.saved',
+    envelope: createEnvelope({
+      type: 'RoutineSaved',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: {
+        routineId: input.routineId,
+        ownerId: input.ownerId,
+        version: input.version,
+        active: input.active,
+        name: input.name,
+        trigger: input.trigger,
+        areaId: input.areaId ?? null,
+      },
+    }),
+  };
+}
+
+export function routineDeleted(input: { routineId: string; ownerId: string; correlationId: string }): OutgoingMessage {
+  return {
+    exchange: EXCHANGES.events,
+    routingKey: 'routine.deleted',
+    envelope: createEnvelope({
+      type: 'RoutineDeleted',
+      version: 1,
+      source: SOURCE,
+      correlationId: input.correlationId,
+      data: { routineId: input.routineId, ownerId: input.ownerId },
     }),
   };
 }

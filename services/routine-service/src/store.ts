@@ -1,9 +1,9 @@
-import { withTransaction, type ErrorCode, type Pool, type Queryable } from '@routine/service-kit';
+import { currentContext, enqueue, withTransaction, type ErrorCode, type Pool, type Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, StepTimeout, TriggerDefinition } from './domain/definition.ts';
 import type { RoutineInputSpec } from './domain/inputs.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
-import type { AwaitingItem } from './messages.ts';
+import { routineDeleted, routineSaved, type AwaitingItem } from './messages.ts';
 
 // ---------------------------------------------------------------- rows
 
@@ -159,12 +159,27 @@ export function versionDefinition(row: RoutineRow): VersionDefinition {
   };
 }
 
-/** Stores the version a write just produced – call it in that write's transaction. Returns the row for chaining. */
+/**
+ * Stores the version a write just produced and announces it (RoutineSaved, through the outbox) – call
+ * it in that write's transaction. Returns the row for chaining.
+ */
 async function recordVersion(db: Queryable, row: RoutineRow, origin: VersionOrigin, by: string): Promise<RoutineRow> {
   await db.query(
     `INSERT INTO routine_versions (routine_id, version, definition, created_by, origin) VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (routine_id, version) DO NOTHING`,
     [row.id, row.version, JSON.stringify(versionDefinition(row)), by, origin],
+  );
+  await enqueue(
+    db,
+    routineSaved({
+      routineId: row.id,
+      ownerId: row.owner_id,
+      version: row.version,
+      active: row.active,
+      name: row.name,
+      trigger: row.trigger,
+      correlationId: currentContext().correlationId ?? randomUUID(),
+    }),
   );
   return row;
 }
@@ -286,9 +301,18 @@ export async function rotateWebhookToken(db: Queryable, id: string, by: string):
   return recordVersion(db, rows[0], 'webhook', by);
 }
 
+/** Deletes the routine and announces it (RoutineDeleted) – call it in a transaction. */
 export async function deleteRoutine(db: Queryable, ownerId: string, id: string): Promise<boolean> {
   const result = await db.query('DELETE FROM routines WHERE id = $1 AND owner_id = $2', [id, ownerId]);
-  return (result.rowCount ?? 0) > 0;
+  if ((result.rowCount ?? 0) === 0) return false;
+  await enqueue(db, routineDeleted({ routineId: id, ownerId, correlationId: currentContext().correlationId ?? randomUUID() }));
+  return true;
+}
+
+/** Every event-triggered routine, of every owner – trigger-service rebuilds its subscriptions from it. */
+export async function listEventRoutines(db: Queryable): Promise<RoutineRow[]> {
+  const { rows } = await db.query<RoutineRow>(`SELECT * FROM routines WHERE trigger->>'type' = 'event' ORDER BY created_at`);
+  return rows;
 }
 
 /** Locks due routines; SKIP LOCKED lets several scheduler replicas work side by side. */

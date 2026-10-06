@@ -4,11 +4,13 @@ import {
   createHttpServer,
   createLogger,
   createPool,
+  createServiceTokenVerifier,
   createTokenVerifier,
   env,
   envFloat,
   envInt,
   installAuth,
+  installServiceAuth,
   instanceId,
   manifestDigest,
   onShutdown,
@@ -59,6 +61,8 @@ const app = createHttpServer({
 });
 // webhook calls carry their secret in the URL instead of a user token
 installAuth(app, createTokenVerifier(env('JWKS_URL')), ['/api/'], ['/api/v1/hooks/']);
+// /internal/** only for these service accounts (identity-service.md §6)
+installServiceAuth(app, createServiceTokenVerifier(env('JWKS_URL')), ['trigger-service']);
 const staleAfterMs = envInt('REGISTRY_STALE_AFTER_MS', 90_000);
 registerRoutes(app, { pool, engine, catalog, registryStaleAfterMs: staleAfterMs });
 

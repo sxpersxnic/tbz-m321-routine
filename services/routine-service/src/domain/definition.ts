@@ -1,13 +1,28 @@
 import type { ParamSpec } from '@routine/service-kit';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './catalog.ts';
-import { VARIABLE_NAME } from './control.ts';
+import { CONDITION_OPERATORS, VARIABLE_NAME, type ConditionOperator } from './control.ts';
 import { inputSpecIssues, type RoutineInputSpec } from './inputs.ts';
 import { waitIssue } from './wait.ts';
 import { DEFAULT_TIMEZONE, validateSchedule } from './schedule.ts';
 import { referencedActionKeys, templatePaths } from './templates.ts';
 
-export type TriggerDefinition = { type: 'manual' } | { type: 'schedule'; cron: string; timezone: string } | { type: 'webhook' };
+/** One filter row of an event trigger: a field of the event, compared like an If step (control.ts operators). */
+export interface Condition {
+  field: string;
+  operator: ConditionOperator;
+  value?: unknown;
+}
+
+export type TriggerDefinition =
+  | { type: 'manual' }
+  | { type: 'schedule'; cron: string; timezone: string }
+  | { type: 'webhook' }
+  /** Starts when `event` (a trigger type of any domain, e.g. task.completed) happens and every filter holds. */
+  | { type: 'event'; event: string; filter?: Condition[] };
 export type TriggerType = TriggerDefinition['type'];
+
+/** An event trigger checks at most this many conditions (06-engine §2). */
+export const MAX_FILTER_CONDITIONS = 5;
 /** How an execution started: a routine's own trigger, or a `routine.run` step of another routine. */
 export type ExecutionTrigger = TriggerType | 'routine';
 
@@ -47,7 +62,7 @@ export interface Appearance {
 export interface RoutineInput extends Appearance {
   name: string;
   description?: string;
-  trigger: { type: 'manual' } | { type: 'schedule'; cron: string; timezone?: string } | { type: 'webhook' };
+  trigger: { type: 'manual' } | { type: 'schedule'; cron: string; timezone?: string } | { type: 'webhook' } | { type: 'event'; event: string; filter?: Condition[] };
   actions: Array<{ key: string; type: string; step?: number; params?: Record<string, unknown>; runIf?: RunIf; forEach?: string; timeout?: StepTimeout }>;
   /** Tell the owner after this many failures in a row; null = never; omitted = unchanged (2 for a new routine). */
   alertAfterFailures?: number | null;
@@ -244,6 +259,17 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
       if ((path === 'trigger.body' || path.startsWith('trigger.body.')) && input.trigger.type !== 'webhook') {
         issues.push(`action "${action.key}": "{{${path}}}" is only available for webhook triggers`);
       }
+      // the event's fields: only for an event trigger, and only fields its trigger declares
+      if (path === 'trigger.event' || path.startsWith('trigger.event.')) {
+        if (input.trigger.type !== 'event') issues.push(`action "${action.key}": "{{${path}}}" is only available for event triggers`);
+        else {
+          const field = path.split('.')[2];
+          const spec = catalog.trigger(input.trigger.event);
+          if (field && spec && !spec.fields.some((candidate) => candidate.name === field)) {
+            issues.push(`action "${action.key}": the event "${input.trigger.event}" has no field "${field}"`);
+          }
+        }
+      }
     }
     for (const reference of referencedActionKeys({ params: action.params, forEach: action.forEach })) {
       const referencedStep = stepByKey.get(reference);
@@ -262,6 +288,21 @@ export function validateRoutine(input: RoutineInput, catalog: Catalog = BUILTIN_
     trigger = { type: 'schedule', cron: input.trigger.cron, timezone };
   } else if (input.trigger.type === 'webhook') {
     trigger = { type: 'webhook' };
+  } else if (input.trigger.type === 'event') {
+    const event = input.trigger.event;
+    const filter = (input.trigger.filter ?? []).map((condition) => ({
+      field: condition.field,
+      operator: condition.operator,
+      ...(condition.value !== undefined && { value: condition.value }),
+    }));
+    const spec = catalog.trigger(event);
+    if (!spec) issues.push(`unknown event "${event}"`);
+    if (filter.length > MAX_FILTER_CONDITIONS) issues.push(`an event trigger can check at most ${MAX_FILTER_CONDITIONS} conditions`);
+    for (const condition of filter) {
+      if (spec && !spec.fields.some((field) => field.name === condition.field)) issues.push(`unknown field "${condition.field}" of "${event}"`);
+      if (!CONDITION_OPERATORS.includes(condition.operator)) issues.push(`unknown comparison "${String(condition.operator)}"`);
+    }
+    trigger = { type: 'event', event, ...(filter.length > 0 && { filter }) };
   }
 
   const alert = input.alertAfterFailures;

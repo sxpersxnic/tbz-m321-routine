@@ -485,6 +485,22 @@ components:
           required: [type]
           description: started by POST /api/v1/hooks/{token}; the URL is returned as `webhookPath`
           properties: { type: { const: webhook } }
+        - type: object
+          required: [type, event]
+          description: 'started by trigger-service when the domain event happens and every filter row holds; steps read its fields as {{trigger.event.<field>}}'
+          properties:
+            type: { const: event }
+            event: { type: string, description: 'a trigger type from the catalog, e.g. task.completed', examples: [task.completed] }
+            filter:
+              type: array
+              maxItems: 5
+              items:
+                type: object
+                required: [field, operator]
+                properties:
+                  field: { type: string, description: 'one of the trigger''s fields' }
+                  operator: { enum: [equals, notEquals, contains, notContains, greaterThan, lessThan, isEmpty, isNotEmpty] }
+                  value: {}
 
     ActionInput:
       type: object

@@ -16,7 +16,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
     event envelope (`domain-event.v1.schema.json`: `ownerId`, `occurredAt`, optional `areaId`,
     `origin`). One schema per task event type, extending it.
 
-- [ ] **M4-02 · routine-service: event trigger definition + routine events**
+- [x] **M4-02 · routine-service: event trigger definition + routine events**
   - `TriggerDefinition` `event` with `filter` ([06 §2](../06-engine.md)), validated against the
     catalog's triggers. Emit `RoutineSaved` / `RoutineDeleted` from every relevant write (outbox).
     `GET /internal/v1/routines?trigger=event` (service token).

@@ -119,8 +119,12 @@ export async function engineHarness() {
     async api({ roles = ['user'] }: { roles?: Role[] } = {}) {
       const app = createHttpServer({ service: 'routine-service-test', logger });
       app.decorateRequest('user', null);
+      app.decorateRequest('caller', null);
       app.addHook('preHandler', async (request) => {
         request.user = { id: ownerId, email: 'test@routine.local', roles };
+        // stands in for installServiceAuth: a request with x-test-service is that service's call
+        const service = request.headers['x-test-service'];
+        if (request.url.startsWith('/internal/') && typeof service === 'string') request.caller = { service };
       });
       registerRoutes(app, { pool, engine, catalog: catalogStore });
       await app.ready();
