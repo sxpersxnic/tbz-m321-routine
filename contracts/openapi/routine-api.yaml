@@ -654,7 +654,15 @@ components:
         routineId: { type: string, format: uuid }
         routineName: { type: string }
         status: { $ref: '#/components/schemas/ExecutionStatus' }
-        trigger: { enum: [manual, schedule, webhook, routine], description: 'routine = called by a routine.run step of another routine' }
+        trigger: { enum: [manual, schedule, webhook, routine, event], description: 'routine = called by a routine.run step of another routine; event = started by an event trigger' }
+        triggerEvent:
+          type: object
+          description: 'event runs only: the event that started the run ("Why did this run?")'
+          properties:
+            event: { type: string, description: 'trigger type, e.g. task.completed' }
+            eventMessageId: { type: string, format: uuid }
+            data: { type: object, description: 'the event''s data – readable as {{trigger.event.<field>}}' }
+        depth: { type: integer, minimum: 0, description: 'event-chain depth: 0 unless a routine''s own action caused the starting event' }
         calledBy: { type: [string, 'null'], format: uuid, description: 'execution whose routine.run step started this one' }
         resumeCount: { type: integer, minimum: 0, description: 'how often the execution was resumed ("Retry from here")' }
         routineVersion: { type: [integer, 'null'], description: 'the routine version the run used; null for runs before v2' }

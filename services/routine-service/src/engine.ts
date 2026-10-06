@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { currentContext, currentTraceId, enqueue, withTransaction, type ErrorCode, type Logger, type Pool, type PoolClient } from '@routine/service-kit';
-import { conditionMet, ControlError } from './domain/control.ts';
+import { conditionMet, ControlError, evaluateCondition } from './domain/control.ts';
 import { CONTROL_ACTION_TYPES, evaluateControlAction } from './domain/scripting.ts';
 import { decideNext, inFlightStatus, TERMINAL_ACTION_STATUSES, TERMINAL_EXECUTION_STATUSES, type InFlightStatus } from './domain/progress.ts';
 import { BUILTIN_CATALOG, type Catalog, type CatalogCapability } from './domain/catalog.ts';
-import type { ActionDefinition, ExecutionTrigger } from './domain/definition.ts';
+import type { ActionDefinition, Condition, ExecutionTrigger, TriggerEvent } from './domain/definition.ts';
 import { DEFAULT_TIMEZONE } from './domain/schedule.ts';
 import { resolveTemplates, TemplateError, type TemplateScope } from './domain/templates.ts';
 import { wakeAt } from './domain/wait.ts';
@@ -21,6 +21,7 @@ import {
   type ActionResult,
   type CancelReason,
   type CompletionEventFormat,
+  type StartRoutineCommand,
 } from './messages.ts';
 import {
   appendLog,
@@ -71,7 +72,9 @@ export interface TriggerRequest {
   /** The answers to the routine's questions (validated by the caller). */
   inputs?: Record<string, unknown>;
   /** What started an event-triggered run (StartRoutineRequested). */
-  event?: { event: string; eventMessageId: string; data: Record<string, unknown>; depth: number };
+  event?: TriggerEvent;
+  /** Event-chain depth of the new run: the command's, or the calling run's for routine.run. */
+  depth?: number;
 }
 
 /** Values of the `variable.set` steps that ran, in run order – a later assignment wins. */
@@ -98,6 +101,22 @@ function subRoutineOutput(actions: ExecutionActionRow[]): Record<string, unknown
 export function runsInTest(capability: CatalogCapability | undefined): boolean {
   if (!capability) return false;
   return capability.kind === 'value' || !capability.sideEffects || (capability.kind === 'action' && capability.preview === true);
+}
+
+/** Why a StartRoutineRequested must not start `routine` – null when it may. */
+function startRefusal(routine: RoutineRow | null, command: StartRoutineCommand): string | null {
+  if (!routine) return 'routine deleted';
+  if (!routine.active) return 'routine inactive';
+  const { trigger } = routine;
+  if (trigger.type !== 'event' || trigger.event !== command.event.event) return 'trigger changed';
+  // trigger-service matched an older version: its filter decided, the current one has the last word
+  if (routine.version !== command.routineVersion && !filterMatches(trigger.filter ?? [], command.event.data)) return 'filter changed';
+  return null;
+}
+
+/** Whether event data passes every condition of an event trigger's filter (same operators as condition.if). */
+function filterMatches(filter: Condition[], data: Record<string, unknown>): boolean {
+  return filter.every(({ field, operator, value }) => evaluateCondition({ operator, left: data[field], right: value }).result === true);
 }
 
 /** `processed_by` of what the engine did itself (scripting actions, loop expansion). */
@@ -164,6 +183,8 @@ export class ExecutionEngine {
       traceId: currentTraceId(),
       parent: trigger.parent,
       inputs: trigger.inputs ?? null,
+      event: trigger.event ?? null,
+      depth: trigger.depth ?? 0,
     });
     if (!execution) {
       // Lost an insert race: a concurrent request with the same key won (the caller's routine
@@ -199,6 +220,32 @@ export class ExecutionEngine {
     );
     this.#logger.info({ executionId: execution.id, routineId: routine.id, trigger: trigger.type }, 'execution created');
     return { execution, created: true };
+  }
+
+  /**
+   * Handles StartRoutineRequested (05-messaging §4.3): starts the event-triggered run in one
+   * transaction, keyed by the command's idempotency key (a duplicate is a no-op). Logs and drops a
+   * command whose routine is gone, inactive, or no longer starts on this event (its trigger
+   * changed since trigger-service matched, or a newer filter no longer lets the event through).
+   *
+   * @example await engine.startFromEvent(parseStartRoutineRequested(envelope)) // → the run, or null when dropped
+   */
+  async startFromEvent(command: StartRoutineCommand): Promise<ExecutionRow | null> {
+    return withTransaction(this.#pool, async (client) => {
+      const routine = await getRoutine(client, command.ownerId, command.routineId, true);
+      const refusal = startRefusal(routine, command);
+      if (!routine || refusal) {
+        this.#logger.info({ routineId: command.routineId, event: command.event.event, eventMessageId: command.event.eventMessageId, reason: refusal }, 'start command dropped');
+        return null;
+      }
+      const started = await this.createExecution(client, routine, {
+        type: 'event',
+        idempotencyKey: command.idempotencyKey,
+        event: command.event,
+        depth: command.depth,
+      });
+      return started?.execution ?? null;
+    });
   }
 
   /** Handles RoutineTriggered: PENDING → RUNNING and dispatch of the first step. */
@@ -568,6 +615,7 @@ export class ExecutionEngine {
                 type: 'routine',
                 payload: { input: params.input ?? null },
                 parent: { actionId: action.id, executionId: execution.id, depth: execution.call_depth + 1 },
+                depth: execution.depth,
               });
               await appendLog(client, execution.id, 'ACTION_DISPATCHED', `Calls routine "${target.name}" (${started?.execution.id ?? '?'})`, action.key);
               Object.assign(action, { status: 'DISPATCHED', dispatched_at: new Date() });
@@ -637,7 +685,7 @@ export class ExecutionEngine {
                   routineName: execution.routine_name,
                   stepIndex: action.step,
                   stepCount: Math.max(...actions.map((candidate) => candidate.step)),
-                  depth: 0,
+                  depth: execution.depth,
                 },
                 correlationId: execution.correlation_id,
               }),
@@ -669,6 +717,7 @@ export class ExecutionEngine {
                 routineName: execution.routine_name,
                 correlationId: execution.correlation_id,
                 durationMs,
+                depth: execution.depth,
               },
               this.#options.completionEventFormat,
             ),
@@ -697,6 +746,7 @@ export class ExecutionEngine {
               failedActionType: failed?.type ?? null,
               errorCode: failed?.error_code ?? null,
               resumeCount: execution.resume_count,
+              depth: execution.depth,
               correlationId: execution.correlation_id,
             }),
           );
@@ -791,7 +841,11 @@ export class ExecutionEngine {
         trigger: execution.trigger_type,
         startedAt: (execution.started_at ?? new Date()).toISOString(),
       },
-      trigger: { type: execution.trigger_type, body: execution.trigger_payload ?? {} },
+      trigger: {
+        type: execution.trigger_type,
+        body: execution.trigger_payload ?? {},
+        ...(execution.trigger_event && { event: execution.trigger_event.data }),
+      },
       actions: outputs,
       vars,
       ...(action.loop_index !== null && action.loop_index !== undefined ? { item: action.loop_item, index: action.loop_index } : {}),

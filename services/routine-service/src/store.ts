@@ -1,6 +1,6 @@
 import { currentContext, enqueue, withTransaction, type ErrorCode, type Pool, type Queryable } from '@routine/service-kit';
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, StepTimeout, TriggerDefinition } from './domain/definition.ts';
+import type { ActionDefinition, Appearance, ExecutionTrigger, RoutineColor, RoutineDefinition, RunIf, StepTimeout, TriggerDefinition, TriggerEvent } from './domain/definition.ts';
 import type { RoutineInputSpec } from './domain/inputs.ts';
 import type { ActionStatus, ExecutionStatus } from './domain/progress.ts';
 import { routineDeleted, routineSaved, type AwaitingItem } from './messages.ts';
@@ -54,6 +54,10 @@ export interface ExecutionRow {
   kind: 'live' | 'test';
   /** The answers to the routine's questions ("Ask when run?"). */
   inputs: Record<string, unknown> | null;
+  /** What started an event-triggered run: the event, its message id and its data. */
+  trigger_event: TriggerEvent | null;
+  /** Event-chain depth (0 = not caused by a routine's event) – loop protection, 05-messaging §4.3. */
+  depth: number;
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -349,12 +353,14 @@ export async function insertExecution(
     parent?: { actionId: string; executionId: string; depth: number };
     kind?: 'live' | 'test';
     inputs?: Record<string, unknown> | null;
+    event?: TriggerEvent | null;
+    depth?: number;
   },
 ): Promise<ExecutionRow | null> {
   const { rows } = await db.query<ExecutionRow>(
     `INSERT INTO executions (id, routine_id, owner_id, routine_name, trigger_type, scheduled_for, idempotency_key, status, correlation_id, trace_id, trigger_payload,
-                             parent_action_id, parent_execution_id, call_depth, routine_version, kind, inputs)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                             parent_action_id, parent_execution_id, call_depth, routine_version, kind, inputs, trigger_event, depth)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -374,6 +380,8 @@ export async function insertExecution(
       execution.routine.version,
       execution.kind ?? 'live',
       execution.inputs ? JSON.stringify(execution.inputs) : null,
+      execution.event ? JSON.stringify(execution.event) : null,
+      execution.depth ?? 0,
     ],
   );
   return rows[0] ?? null;
@@ -857,6 +865,9 @@ export function executionDto(row: ExecutionRow, actions?: ExecutionActionRow[], 
     routineVersion: row.routine_version,
     kind: row.kind,
     ...(row.inputs && { inputs: row.inputs }),
+    /** "Started by …" / "Why did this run?" (07 §5.6): the event and its data. */
+    ...(row.trigger_event && { triggerEvent: row.trigger_event }),
+    depth: row.depth,
     ...(actions && { triggerPayload: row.trigger_payload }),
     ...(actions && {
       actions: actions.map((action) => ({

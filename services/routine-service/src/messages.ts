@@ -3,7 +3,7 @@
  * in contracts/schemas. Nothing outside this file knows the wire format.
  */
 import { createEnvelope, PermanentError, toErrorCode, type Envelope, type ErrorCode } from '@routine/service-kit';
-import type { ExecutionTrigger, TriggerDefinition } from './domain/definition.ts';
+import type { ExecutionTrigger, TriggerDefinition, TriggerEvent } from './domain/definition.ts';
 
 export const SOURCE = 'routine-service';
 
@@ -130,7 +130,7 @@ export function actionRequested(input: {
 export type CompletionEventFormat = 'v1' | 'expand' | 'v2';
 
 export function executionCompleted(
-  input: { executionId: string; routineId: string; ownerId: string; routineName: string; correlationId: string; durationMs: number },
+  input: { executionId: string; routineId: string; ownerId: string; routineName: string; correlationId: string; durationMs: number; depth?: number },
   format: CompletionEventFormat,
 ): OutgoingMessage {
   const common = {
@@ -138,6 +138,7 @@ export function executionCompleted(
     routineId: input.routineId,
     ownerId: input.ownerId,
     routineName: input.routineName,
+    depth: input.depth ?? 0,
   };
   const legacyMessage = `Routine "${input.routineName}" completed`;
   const v2Fields = {
@@ -178,6 +179,8 @@ export function executionFailed(input: {
   errorCode?: ErrorCode | null;
   /** How often the run was resumed before this failure – consumers key their notification on it. */
   resumeCount?: number;
+  /** Event-chain depth of the run – trigger-service derives this event's origin from it. */
+  depth?: number;
   correlationId: string;
 }): OutgoingMessage {
   return {
@@ -198,6 +201,7 @@ export function executionFailed(input: {
         failedActionType: input.failedActionType ?? null,
         errorCode: input.errorCode ?? null,
         resumeCount: input.resumeCount ?? 0,
+        depth: input.depth ?? 0,
       },
     }),
   };
@@ -482,4 +486,45 @@ export function parseRegistryMessage(envelope: Envelope): RegistryMessage {
 export function parseRoutineTriggered(envelope: Envelope): { executionId: string } {
   if (envelope.type !== 'RoutineTriggered') throw new PermanentError(`unsupported message type ${envelope.type}`);
   return { executionId: requireString(envelope.data, 'executionId') };
+}
+
+/** A StartRoutineRequested command (05-messaging §4.3), as routine-service reads it. */
+export interface StartRoutineCommand {
+  routineId: string;
+  ownerId: string;
+  routineVersion: number;
+  event: TriggerEvent;
+  idempotencyKey: string;
+  depth: number;
+}
+
+/**
+ * Reads StartRoutineRequested (tolerant reader: extra fields are ignored, a missing depth is 0).
+ *
+ * @example parseStartRoutineRequested(envelope) // → { routineId, ownerId, routineVersion: 7, event: { event: 'task.completed', … }, idempotencyKey: 'event:…', depth: 1 }
+ */
+export function parseStartRoutineRequested(envelope: Envelope): StartRoutineCommand {
+  if (envelope.type !== 'StartRoutineRequested') throw new PermanentError(`unsupported message type ${envelope.type}`);
+  const { data } = envelope;
+  const trigger = data.trigger;
+  if (!trigger || typeof trigger !== 'object' || (trigger as Record<string, unknown>).type !== 'event') {
+    throw new PermanentError('StartRoutineRequested without an event trigger');
+  }
+  const eventData = (trigger as Record<string, unknown>).data;
+  const routineVersion = data.routineVersion;
+  if (!Number.isInteger(routineVersion)) throw new PermanentError('StartRoutineRequested without a routineVersion');
+  const depth = data.depth ?? 0;
+  if (!Number.isInteger(depth) || (depth as number) < 0) throw new PermanentError('StartRoutineRequested with an invalid depth');
+  return {
+    routineId: requireString(data, 'routineId'),
+    ownerId: requireString(data, 'ownerId'),
+    routineVersion: routineVersion as number,
+    event: {
+      event: requireString(trigger as Record<string, unknown>, 'event'),
+      eventMessageId: requireString(trigger as Record<string, unknown>, 'eventMessageId'),
+      data: eventData && typeof eventData === 'object' && !Array.isArray(eventData) ? (eventData as Record<string, unknown>) : {},
+    },
+    idempotencyKey: requireString(data, 'idempotencyKey'),
+    depth: depth as number,
+  };
 }

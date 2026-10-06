@@ -22,7 +22,7 @@ that runs when another routine fails · *Why did this run?* on event-started run
     `GET /internal/v1/routines?trigger=event` (service token).
   - Built-in manifest `routines` declares triggers `execution.completed`, `execution.failed`.
 
-- [ ] **M4-03 · routine-service: start command consumer**
+- [x] **M4-03 · routine-service: start command consumer**
   - Queue `routine-service.commands`. Handle `StartRoutineRequested`: checks
     ([05 §4.3](../05-messaging.md)), `createExecution` with trigger `event`, idempotency key,
     `trigger_event` stored, `executions.depth`. Template root `trigger.event.<field>`.

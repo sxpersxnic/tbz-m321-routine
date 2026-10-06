@@ -22,7 +22,7 @@ import {
   withContext,
 } from '@routine/service-kit';
 import { ExecutionEngine } from './engine.ts';
-import { parseActionResult, parseRegistryMessage, parseRoutineTriggered, type CompletionEventFormat } from './messages.ts';
+import { parseActionResult, parseRegistryMessage, parseRoutineTriggered, parseStartRoutineRequested, type CompletionEventFormat } from './messages.ts';
 import { registerRoutes } from './api.ts';
 import { CatalogStore } from './catalog-store.ts';
 import { Scheduler } from './scheduler.ts';
@@ -71,6 +71,12 @@ registerRoutes(app, { pool, engine, catalog, registryStaleAfterMs: staleAfterMs 
 broker.consume({ queue: 'routine-service.triggers', retryDelaysMs: [1_000, 5_000] }, async (envelope) => {
   const { executionId } = parseRoutineTriggered(envelope);
   await withContext({ executionId }, () => engine.start(executionId));
+});
+
+// event-triggered starts from trigger-service (05 §4.3); duplicates are no-ops by idempotency key
+broker.consume({ queue: 'routine-service.commands', retryDelaysMs: [1_000, 5_000] }, async (envelope) => {
+  const command = parseStartRoutineRequested(envelope);
+  await withContext({ routineId: command.routineId }, () => engine.startFromEvent(command));
 });
 
 broker.consume(

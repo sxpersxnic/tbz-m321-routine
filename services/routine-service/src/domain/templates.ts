@@ -11,8 +11,11 @@ const SINGLE_PLACEHOLDER = /^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/;
 export interface TemplateScope {
   routine: { id: string; name: string };
   execution: { id: string; trigger: string; startedAt: string };
-  /** How the run was started; `body` is the JSON a webhook call sent (empty for other triggers). */
-  trigger: { type: string; body: Record<string, unknown> };
+  /**
+   * How the run was started; `body` is the JSON a webhook call sent (empty for other triggers),
+   * `event` the data of the event that started an event-triggered run.
+   */
+  trigger: { type: string; body: Record<string, unknown>; event?: Record<string, unknown> };
   actions: Record<string, unknown>;
   /** Values of `variable.set` steps that already ran. */
   vars: Record<string, unknown>;

@@ -26,6 +26,13 @@ export const MAX_FILTER_CONDITIONS = 5;
 /** How an execution started: a routine's own trigger, or a `routine.run` step of another routine. */
 export type ExecutionTrigger = TriggerType | 'routine';
 
+/** The event behind an event-triggered run (StartRoutineRequested `trigger`, `executions.trigger_event`). */
+export interface TriggerEvent {
+  event: string;
+  eventMessageId: string;
+  data: Record<string, unknown>;
+}
+
 /** Run a step only if an earlier `condition.if` step produced `is`. */
 export interface RunIf {
   action: string;

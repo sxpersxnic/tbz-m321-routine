@@ -66,6 +66,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "how often the execution was resumed before this failure (0 = first failure); consumers keep one notification per failure with it"
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "event-chain depth of the run (0 = not started by an event a routine caused); trigger-service derives the origin of this event from it (docs/v2/services/trigger-service.md §4)"
         }
       },
       "additionalProperties": true
