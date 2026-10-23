@@ -67,7 +67,7 @@
     `/internal/` (checks `aud: routine-internal`, `sub: service:<name>` ∈ allowed) and
     `serviceTokenProvider(name, secret)` (fetches and caches a token, refreshes at 80 % of its
     lifetime).
-  - compose + `deploy/stack.yml`: `SERVICE_ACCOUNTS` and per-service `SERVICE_TOKEN_SECRET`.
+  - compose + `deploy/k8s/`: `SERVICE_ACCOUNTS` and per-service `SERVICE_TOKEN_SECRET`.
   - Tests: user token rejected on `/internal`, service token accepted, unknown service rejected.
 
 - [ ] **M0-08 · New exchanges**

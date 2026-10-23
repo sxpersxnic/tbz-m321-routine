@@ -4,8 +4,6 @@ node_modules/
 .DS_Store
 dist/
 
-# deployment inventories (contain your VM addresses)
-deploy/vms.env
-deploy/local-vms.env
+# deployment secrets and rendered manifests (contain the secrets)
 deploy/*.secrets.env
 deploy/.generated/

@@ -1,0 +1,391 @@
+# Platform services. The stateless ones run two replicas, never both on the same VM, with zero-downtime
+# rolling updates: a new replica must become ready before an old one stops (maxUnavailable: 0).
+# Images: routine/<service>:latest here – deploy.sh sets the tag of the build it imported on every VM.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: routine-common
+data:
+  LOG_LEVEL: info
+  # Keycloak: keys fetched inside the cluster, `iss` is the public realm URL the browser sees (JWT_ISSUER)
+  JWKS_URL: http://keycloak:8080/auth/realms/routine/protocol/openid-connect/certs
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  OTEL_TRACES_EXPORTER: otlp
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+---
+# ------------------------------------------------------------ web client
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  selector: { app: web }
+  ports:
+    - { name: http, port: 80 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - { labelSelector: { matchLabels: { app: web } }, topologyKey: kubernetes.io/hostname }
+      containers:
+        - name: web
+          image: routine/web:latest
+          imagePullPolicy: Never
+          ports:
+            - { name: http, containerPort: 80 }
+          readinessProbe:
+            httpGet: { path: /health, port: 80 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 80 }
+            periodSeconds: 10
+---
+# ------------------------------------------------------------ gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+spec:
+  clusterIP: None # the edge gets every replica's address and fails over per request
+  selector: { app: gateway }
+  ports:
+    - { name: http, port: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: gateway } }
+  template:
+    metadata:
+      labels: { app: gateway }
+    spec:
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - { labelSelector: { matchLabels: { app: gateway } }, topologyKey: kubernetes.io/hostname }
+      containers:
+        - name: gateway
+          image: routine/gateway:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: routine-common }
+            - configMapRef: { name: routine-settings }
+          env:
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: RABBITMQ_PASSWORD } }
+            - { name: AMQP_URL, value: "amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-1.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-2.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-3.rabbitmq-nodes:5672" }
+            - { name: JWT_ISSUER, value: "$(PUBLIC_URL)/auth/realms/routine" }
+            - { name: OTEL_SERVICE_NAME, value: gateway }
+            - { name: ROUTINE_URL, value: "http://routine-service:3000" }
+            - { name: TASK_URL, value: "http://task-service:3000" }
+            - { name: NOTIFICATION_URL, value: "http://notification-service:3000" }
+            - { name: INTEGRATION_WORKER_URL, value: "http://integration-worker:3000" }
+            - { name: WEB_URL, value: "http://web:80" }
+            - { name: EXTERNAL_API_URL, value: "http://mock-external:8090" }
+            - { name: RABBITMQ_MANAGEMENT_URL, value: "http://rabbitmq-1.rabbitmq-nodes:15672,http://rabbitmq-2.rabbitmq-nodes:15672,http://rabbitmq-3.rabbitmq-nodes:15672" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          startupProbe: # a service listens once its database and the broker answer – give it up to 5 min
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 10
+---
+# ------------------------------------------------------------ routine-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: routine-service
+spec:
+  selector: { app: routine-service }
+  ports:
+    - { name: http, port: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routine-service
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: routine-service } }
+  template:
+    metadata:
+      labels: { app: routine-service }
+    spec:
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - { labelSelector: { matchLabels: { app: routine-service } }, topologyKey: kubernetes.io/hostname }
+      containers:
+        - name: routine-service
+          image: routine/routine-service:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: routine-common }
+            - configMapRef: { name: routine-settings }
+          env:
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: RABBITMQ_PASSWORD } }
+            - { name: AMQP_URL, value: "amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-1.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-2.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-3.rabbitmq-nodes:5672" }
+            - { name: JWT_ISSUER, value: "$(PUBLIC_URL)/auth/realms/routine" }
+            - { name: OTEL_SERVICE_NAME, value: routine-service }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: ROUTINE_DB_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://routine:$(DB_PASSWORD)@routine-db:5432/routine" }
+            - { name: EXECUTION_COMPLETED_FORMAT, value: v2 } # schema evolution phase: v1 | expand | v2
+            - { name: WAITING_AFTER_MS, value: "10000" }
+            - { name: CHAOS_DUPLICATE_PUBLISH_RATE, value: "0" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          startupProbe: # a service listens once its database and the broker answer – give it up to 5 min
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 10
+---
+# ------------------------------------------------------------ task-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-service
+spec:
+  selector: { app: task-service }
+  ports:
+    - { name: http, port: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-service
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: task-service } }
+  template:
+    metadata:
+      labels: { app: task-service }
+    spec:
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - { labelSelector: { matchLabels: { app: task-service } }, topologyKey: kubernetes.io/hostname }
+      containers:
+        - name: task-service
+          image: routine/task-service:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: routine-common }
+            - configMapRef: { name: routine-settings }
+          env:
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: RABBITMQ_PASSWORD } }
+            - { name: AMQP_URL, value: "amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-1.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-2.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-3.rabbitmq-nodes:5672" }
+            - { name: JWT_ISSUER, value: "$(PUBLIC_URL)/auth/realms/routine" }
+            - { name: OTEL_SERVICE_NAME, value: task-service }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: TASK_DB_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://task:$(DB_PASSWORD)@task-db:5432/task" }
+            - { name: CHAOS_FAILURE_RATE, value: "0" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          startupProbe: # a service listens once its database and the broker answer – give it up to 5 min
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 10
+---
+# ------------------------------------------------------------ notification-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  selector: { app: notification-service }
+  ports:
+    - { name: http, port: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: notification-service } }
+  template:
+    metadata:
+      labels: { app: notification-service }
+    spec:
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - { labelSelector: { matchLabels: { app: notification-service } }, topologyKey: kubernetes.io/hostname }
+      containers:
+        - name: notification-service
+          image: routine/notification-service:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: routine-common }
+            - configMapRef: { name: routine-settings }
+          env:
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: RABBITMQ_PASSWORD } }
+            - { name: AMQP_URL, value: "amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-1.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-2.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-3.rabbitmq-nodes:5672" }
+            - { name: JWT_ISSUER, value: "$(PUBLIC_URL)/auth/realms/routine" }
+            - { name: OTEL_SERVICE_NAME, value: notification-service }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: NOTIFICATION_DB_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://notification:$(DB_PASSWORD)@notification-db:5432/notification" }
+            - { name: COMPLETION_EVENT_READER, value: tolerant } # consumer version: legacy (v1 only) | tolerant (v1 + v2)
+            - { name: CHAOS_FAILURE_RATE, value: "0" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          startupProbe: # a service listens once its database and the broker answer – give it up to 5 min
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 10
+---
+# ------------------------------------------------------------ integration-worker
+# Competing consumers: stateless → kubectl -n routine scale deployment integration-worker --replicas=6
+apiVersion: v1
+kind: Service
+metadata:
+  name: integration-worker
+spec:
+  selector: { app: integration-worker }
+  ports:
+    - { name: http, port: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: integration-worker
+spec:
+  replicas: 3
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: integration-worker } }
+  template:
+    metadata:
+      labels: { app: integration-worker }
+    spec:
+      enableServiceLinks: false
+      topologySpreadConstraints: # spread over the VMs, but scaling beyond four replicas stays possible
+        - { maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: { matchLabels: { app: integration-worker } } }
+      containers:
+        - name: integration-worker
+          image: routine/integration-worker:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: routine-common }
+            - configMapRef: { name: routine-settings }
+          env:
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: RABBITMQ_PASSWORD } }
+            - { name: AMQP_URL, value: "amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-1.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-2.rabbitmq-nodes:5672,amqp://routine:$(RABBITMQ_PASSWORD)@rabbitmq-3.rabbitmq-nodes:5672" }
+            - { name: JWT_ISSUER, value: "$(PUBLIC_URL)/auth/realms/routine" }
+            - { name: OTEL_SERVICE_NAME, value: integration-worker }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: INTEGRATION_DB_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://integration:$(DB_PASSWORD)@integration-db:5432/integration" }
+            - { name: EXTERNAL_API_URL, value: "http://mock-external:8090" }
+            - { name: HTTP_ALLOWED_HOSTS, value: mock-external }
+            - { name: PREFETCH, value: "1" }
+            - { name: CHAOS_FAILURE_RATE, value: "0" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          startupProbe: # a service listens once its database and the broker answer – give it up to 5 min
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 3000 }
+            periodSeconds: 10
+---
+# ------------------------------------------------------------ mock-external
+# simulated third-party APIs (not part of the platform) – reached only inside the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-external
+spec:
+  selector: { app: mock-external }
+  ports:
+    - { name: http, port: 8090 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-external
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: mock-external } }
+  template:
+    metadata:
+      labels: { app: mock-external }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: mock-external
+          image: routine/mock-external:latest
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: routine-common }
+          env:
+            - { name: OTEL_SERVICE_NAME, value: mock-external }
+            - { name: PORT, value: "8090" }
+          ports:
+            - { name: http, containerPort: 8090 }
+          startupProbe:
+            httpGet: { path: /health, port: 8090 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: 8090 }
+            periodSeconds: 5

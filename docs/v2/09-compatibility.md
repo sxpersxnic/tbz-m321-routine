@@ -40,7 +40,7 @@ and documents rely on.
 
 Contracts → producers in *expand* mode (old and new fields) → consumers → producers contract
 (only if something was ever removed, which v2 plans never do). Each service deploys
-independently. The Swarm stack rolls replicas one by one (v1 `update_config`), so a registry
+independently. Kubernetes rolls replicas one by one (`maxUnavailable: 0`), so a registry
 sees old and new manifest versions side by side for a moment, and the rules in
 [04 §4.3](04-domain-platform.md) handle that.
 

@@ -1,0 +1,67 @@
+# Identity provider – two replicas on different VMs form one cluster (they find each other through
+# keycloak-db, jdbc-ping) and share sessions, so a sign-in survives the loss of either replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  clusterIP: None # the edge gets every replica's address and fails over per request
+  selector: { app: keycloak }
+  ports:
+    - { name: http, port: 8080 }
+    - { name: management, port: 9000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 2
+  strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 1, maxUnavailable: 0 } }
+  selector: { matchLabels: { app: keycloak } }
+  template:
+    metadata:
+      labels: { app: keycloak }
+    spec:
+      enableServiceLinks: false
+      affinity:
+        podAntiAffinity: # never both replicas on the same VM
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - { labelSelector: { matchLabels: { app: keycloak } }, topologyKey: kubernetes.io/hostname }
+      initContainers:
+        # Keycloak exits when its database is not reachable – wait instead of crash-looping into a long back-off
+        - name: wait-for-database
+          image: postgres:17-alpine
+          command: [sh, -c, "until pg_isready -h keycloak-db -U keycloak -q; do sleep 2; done"]
+      containers:
+        - name: keycloak
+          image: routine/keycloak:latest # tag set by deploy.sh
+          imagePullPolicy: Never # built on vm1 and imported on every VM – there is no registry
+          envFrom:
+            - configMapRef: { name: routine-settings } # PUBLIC_URL
+          env:
+            - { name: KC_DB_URL, value: "jdbc:postgresql://keycloak-db:5432/keycloak" }
+            - { name: KC_DB_USERNAME, value: keycloak }
+            - name: KC_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: KEYCLOAK_DB_PASSWORD } }
+            - { name: KC_HOSTNAME, value: "$(PUBLIC_URL)/auth" } # the URL users open – all tokens carry it as issuer
+            - { name: KC_HTTP_ENABLED, value: "true" }
+            - { name: KC_PROXY_HEADERS, value: xforwarded }
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin }
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: KEYCLOAK_ADMIN_PASSWORD } }
+            - { name: ROUTINE_PUBLIC_URL, value: "$(PUBLIC_URL)" } # allowed redirect after sign-in
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+          startupProbe:
+            httpGet: { path: /auth/health/started, port: 9000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /auth/health/ready, port: 9000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /auth/health/live, port: 9000 }
+            periodSeconds: 10
+            failureThreshold: 6

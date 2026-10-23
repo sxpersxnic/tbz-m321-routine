@@ -13,7 +13,7 @@ screen · *Install Routine* in the browser · Settings → Delivery · *Your wee
 ---
 
 - [ ] **M8-01 · Scaffold delivery-service** ([10-quality.md §5](../10-quality.md), profile `presence`). VAPID keys
-  generated once (`npx web-push generate-vapid-keys`), stored as env/Swarm secrets.
+  generated once (`npx web-push generate-vapid-keys`), stored as env/Kubernetes secrets.
 - [ ] **M8-02 · Preferences and push subscriptions API**
 - [ ] **M8-03 · Routing: consume `notification.created` / `ExecutionWaitingForYou`, rules, quiet hours, deliveries table, channel queues**
 - [ ] **M8-04 · Push channel** (`web-push`, `410` cleanup, payload with actions for questions)
