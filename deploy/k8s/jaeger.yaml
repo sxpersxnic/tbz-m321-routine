@@ -33,6 +33,10 @@ spec:
       labels: { app: jaeger }
     spec:
       enableServiceLinks: false
+      # one replica: on a VM failure, start it elsewhere after 30 s instead of Kubernetes' default 5 minutes
+      tolerations:
+        - { key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 30 }
+        - { key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 30 }
       containers:
         - name: jaeger
           image: jaegertracing/jaeger:2.10.0
