@@ -1,5 +1,5 @@
 // Browsers offer crypto.subtle and crypto.randomUUID only in a secure context: HTTPS or localhost. The VM
-// deployment serves the app over plain HTTP on a VM's address (http://10.2.44.17:8080), where both are missing –
+// deployment serves the app over plain HTTP on a VM's address (http://10.2.44.21:8080), where both are missing –
 // and the sign-in needs them (oidc-client-ts: SHA-256 for the PKCE code challenge, UUIDs for the state).
 // crypto.getRandomValues exists everywhere, so both are added on top of it, only where the browser hides them.
 // Imported first in main.tsx.

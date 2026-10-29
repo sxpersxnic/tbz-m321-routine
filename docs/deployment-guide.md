@@ -5,8 +5,8 @@ One way, from four freshly installed VMs to the running platform. Background, po
 
 | Who | VM | Does |
 | --- | --- | --- |
-| **You** | vm1 – 10.2.44.17 | everything: vm1 is the control plane and installs the other VMs over SSH |
-| **Your teammates** | vm2 – 10.2.44.20, vm3 – 10.2.44.21, vm4 – 10.2.44.28 | paste **one line** you send them (step 2) |
+| **You** | vm1 – 10.2.44.21 | everything: vm1 is the control plane and installs the other VMs over SSH |
+| **Your teammates** | vm2 – 10.2.44.20, vm3 – 10.2.44.17, vm4 – 10.2.44.28 | paste **one line** you send them (step 2) |
 
 You never need your teammates' passwords: the line gives vm1's key access to their VM.
 
@@ -61,7 +61,7 @@ deploy/deploy.sh access
 ▶ Access from vm1 to vm2–vm4 (user routine)
 [sudo] password for <you>:                 ← your password on vm1
   ✔ vm2 (10.2.44.20): SSH and sudo
-  ✔ vm3 (10.2.44.21): SSH and sudo
+  ✔ vm3 (10.2.44.17): SSH and sudo
   ✔ vm4 (10.2.44.28): SSH and sudo
 ```
 
@@ -91,7 +91,7 @@ It may ask for your `sudo` password on vm1, nothing else. Then it runs on its ow
 ▶ Images (tag …)                      ✔ built 8 images, ✔ imported on vm1 … vm4            (~4 min)
 ▶ Application                         ✔ all services ready, ✔ every quorum queue has 3 replicas  (~3 min)
 ▶ Verify                              ✔ main workflow succeeded, ✔ vm1 … vm4 answer on :8080
-Routine runs on 4 VMs: http://10.2.44.17:8080
+Routine runs on 4 VMs: http://10.2.44.21:8080
 ```
 
 ## 5. Keep the secrets file
@@ -110,12 +110,12 @@ With the VPN connected:
 
 | What | Address | Login |
 | --- | --- | --- |
-| Routine | **http://10.2.44.17:8080** – exactly this address | "Try the demo" (`demo@routine.local` / `demo12345`) |
-| RabbitMQ | http://10.2.44.17:15672 | `routine` / `RABBITMQ_PASSWORD` |
-| Jaeger | http://10.2.44.17:16686 | – |
-| Keycloak admin | http://10.2.44.17:8080/auth/admin | `admin` / `KEYCLOAK_ADMIN_PASSWORD` |
+| Routine | **http://10.2.44.21:8080** – exactly this address | "Try the demo" (`demo@routine.local` / `demo12345`) |
+| RabbitMQ | http://10.2.44.21:15672 | `routine` / `RABBITMQ_PASSWORD` |
+| Jaeger | http://10.2.44.21:16686 | – |
+| Keycloak admin | http://10.2.44.21:8080/auth/admin | `admin` / `KEYCLOAK_ADMIN_PASSWORD` |
 
-Sign in through vm1's address only: Keycloak sends you back only to `http://10.2.44.17:8080`.
+Sign in through vm1's address only: Keycloak sends you back only to `http://10.2.44.21:8080`.
 
 For the demo scenarios (self-healing, scaling, a VM failing) see [deployment.md §5](deployment.md#5-operation). In a
 new shell on vm1, plain `kubectl` works (`kubectl -n routine get pods -o wide`).
@@ -135,7 +135,7 @@ is already done.
 | `… did not become ready` (app step) | `kubectl -n routine get pods -o wide`. Pods that keep restarting only on some VMs: traffic between the VMs is blocked (firewall). Details: `kubectl -n routine describe pod <pod>`, `kubectl -n routine logs <pod>` |
 | `exceeded its progress deadline` | A service waited more than 10 minutes, e.g. while the network was broken. Once the cause is fixed, run `deploy/deploy.sh` again |
 | `Keycloak does not answer` (verify) | Keycloak is slow on its first start – wait a minute, `deploy/deploy.sh verify` |
-| Browser: "Invalid redirect uri" | Open exactly `http://10.2.44.17:8080` |
+| Browser: "Invalid redirect uri" | Open exactly `http://10.2.44.21:8080` |
 
 More symptoms and their causes: [deployment.md §9](deployment.md#9-troubleshooting).
 
@@ -147,7 +147,7 @@ later (e.g. with Claude Code, once you are off the VPN):
 { deploy/deploy.sh status; kubectl -n routine get events --sort-by=.lastTimestamp | tail -60
   kubectl -n routine logs -l app=keycloak --tail=40 --prefix; } >~/routine-diagnosis.txt 2>&1
 # on your computer
-scp <you>@10.2.44.17:routine-diagnosis.txt .
+scp <you>@10.2.44.21:routine-diagnosis.txt .
 ```
 
 ## 8. Later

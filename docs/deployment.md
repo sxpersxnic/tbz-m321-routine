@@ -7,7 +7,7 @@ and starts the application. **Step by step, with checks and what to do when some
 [deployment-guide.md](deployment-guide.md).**
 
 ```bash
-# on vm1 (10.2.44.17), as a user with sudo
+# on vm1 (10.2.44.21), as a user with sudo
 git clone <this repository> routine && cd routine
 deploy/deploy.sh          # access → cluster → images → app → verify
 ```
@@ -16,9 +16,9 @@ The four VMs are listed in [`deploy/cluster.env`](../deploy/cluster.env):
 
 | VM | Address | Kubernetes role | Workload pinned to it |
 | --- | --- | --- | --- |
-| vm1 | 10.2.44.17 | server (control plane + etcd), starts the cluster | `rabbitmq-1`; builds the images |
+| vm1 | 10.2.44.21 | server (control plane + etcd), starts the cluster | `rabbitmq-1`; builds the images |
 | vm2 | 10.2.44.20 | server (control plane + etcd) | `rabbitmq-2` |
-| vm3 | 10.2.44.21 | server (control plane + etcd) | `rabbitmq-3` |
+| vm3 | 10.2.44.17 | server (control plane + etcd) | `rabbitmq-3` |
 | vm4 | 10.2.44.28 | agent (worker) | the five PostgreSQL databases |
 
 ## 1. Target topology
@@ -28,7 +28,7 @@ flowchart TB
     U([Browser / curl]) --> LB[Load balancer or DNS<br/>vm1 · vm2 · vm3 · vm4 :8080]
     LB --> E1 & E2 & E3 & E4
 
-    subgraph VM1[vm1 · 10.2.44.17 · server]
+    subgraph VM1[vm1 · 10.2.44.21 · server]
       E1[edge] ~~~ R1((rabbitmq-1))
       S1[replicas of gateway · keycloak<br/>routine · task · notification · web<br/>integration-worker]
     end
@@ -36,7 +36,7 @@ flowchart TB
       E2[edge] ~~~ R2((rabbitmq-2))
       S2[replicas …]
     end
-    subgraph VM3[vm3 · 10.2.44.21 · server]
+    subgraph VM3[vm3 · 10.2.44.17 · server]
       E3[edge] ~~~ R3((rabbitmq-3))
       S3[replicas … · jaeger · mock-external]
     end
@@ -127,11 +127,11 @@ a code change.
 | 4 | `deploy.sh app` | Generates the secrets on the first run (below), renders the overlay and `kubectl apply -k`. Waits until every StatefulSet, Deployment and DaemonSet is rolled out, then until **every quorum queue has a replica on every broker node** (`rabbitmq-queues grow`) – only then may a VM fail. Removes config maps and secrets of earlier versions |
 | 5 | `deploy.sh verify` | Runs the main workflow (`scripts/demo.sh main`) against `PUBLIC_URL` and checks that every VM answers on :8080 |
 
-Afterwards: UI on `http://10.2.44.17:8080` (`demo@routine.local` / `demo12345`), RabbitMQ on
+Afterwards: UI on `http://10.2.44.21:8080` (`demo@routine.local` / `demo12345`), RabbitMQ on
 `http://<any VM>:15672` (user `routine`, password `RABBITMQ_PASSWORD` from the secrets file), Jaeger on
 `http://<any VM>:16686`, Keycloak's admin console on `<PUBLIC_URL>/auth/admin`.
 
-**Open the platform at exactly `PUBLIC_URL`** (default `http://10.2.44.17:8080`; set it in `deploy/cluster.env` when
+**Open the platform at exactly `PUBLIC_URL`** (default `http://10.2.44.21:8080`; set it in `deploy/cluster.env` when
 a load balancer or DNS name sits in front – without a default port such as `:80`, Keycloak drops it from the
 issuer). Keycloak puts this URL into every token as issuer, and only redirects back to it after sign-in – opening
 the UI through another VM's address ends with "Invalid redirect uri". The other VMs' `:8080` still serve API calls
@@ -175,7 +175,7 @@ On vm1 (`kubectl` works in a new shell after `deploy.sh cluster`; otherwise `sud
 ### Demo scenarios on the VMs
 
 `scripts/demo.sh` scenarios that only use HTTP run unchanged against the VMs:
-`GATEWAY=http://10.2.44.17:8080 RABBIT=http://10.2.44.17:15672 RABBIT_AUTH=routine:<password> scripts/demo.sh main`
+`GATEWAY=http://10.2.44.21:8080 RABBIT=http://10.2.44.21:15672 RABBIT_AUTH=routine:<password> scripts/demo.sh main`
 (also `retry`, `idempotency`, `webhook`, `schedule`). The scenarios that stop containers use `docker compose` and
 belong to the single-host setup. On the VMs, the same effects come from Kubernetes:
 
@@ -221,7 +221,7 @@ networks. `deploy/deploy.sh` ran unchanged on vm1, as in [deployment-guide.md](d
 | --- | --- |
 | Fresh VMs: pre-flight of the guide, `git clone`, `deploy/deploy.sh` – passwords typed only at the start | all steps ✔ in **7 min 49 s**; 29 pods ready, **0 restarts**; main workflow `COMPLETED`; every VM answers on :8080 |
 | Untouched VMs as in the guide: firewall (`ufw`) on, no `tmux`, password SSH off on two VMs, other user names than `routine` – `deploy.sh key` on vm1, its line pasted on vm2–vm4, `deploy.sh` inside `tmux` | `prepare-vm.sh` ✔ on all four (and again, unchanged); `deploy.sh access` ✔ without any password of vm2–vm4; deployment all ✔ |
-| Browser through a tunnel to vm1 (like the VPN): `http://10.2.44.17:8080`, "Try the demo" | signed in through Keycloak, overview shown; a routine started from the UI (202); RabbitMQ on :15672, Jaeger on :16686 |
+| Browser through a tunnel to vm1 (like the VPN): `http://10.2.44.21:8080`, "Try the demo" | signed in through Keycloak, overview shown; a routine started from the UI (202); RabbitMQ on :15672, Jaeger on :16686 |
 | Update: new commit, `deploy.sh images app`, requests every 0.5 s through two other VMs meanwhile | 8 new images, rolling update, **0 of 188** requests failed |
 | vm2 powered off, requests through vm1 and vm3 | **0 of 184** failed; vm2 back: rejoined, broker again 3 nodes |
 | vm3 powered off (with jaeger and mock-external on it) | requests through vm1: failed for ~20 s, then all fine; main workflow again `COMPLETED` after **75 s** (mock-external restarted on vm1 after 30 s) |
@@ -257,6 +257,6 @@ Two findings from the sandbox tests are built into the manifests:
 | `deploy.sh app` waits for `rabbitmq` | The broker nodes cannot reach each other: pod traffic between VMs (8472/udp). `kubectl -n routine logs rabbitmq-1` |
 | Services cannot reach each other across VMs, but work on the same VM | Flannel's VXLAN (8472/udp) blocked, or the MTU too small (some clouds). `ip -d link show flannel.1` on a VM must show `local <its 10.2.44.x address>` |
 | `password authentication failed` / broker login refused after redeploying | The secrets file was lost or regenerated, but the volumes still hold the old passwords. Restore the file – or, if the data may go, `kubectl delete namespace routine` (deletes the volumes) and `deploy.sh app` |
-| Browser: "Sign-in is unavailable right now" | The web image is older than the fix for plain HTTP (`deploy.sh images app`), or `/auth` is not reachable: `curl http://10.2.44.17:8080/auth/realms/routine` on vm1 |
+| Browser: "Sign-in is unavailable right now" | The web image is older than the fix for plain HTTP (`deploy.sh images app`), or `/auth` is not reachable: `curl http://10.2.44.21:8080/auth/realms/routine` on vm1 |
 | A pod fails with `exec format error` after a VM lost power | A half-written image on that VM: `sudo k3s crictl rmi <image>` there, then `kubectl -n routine delete pod <pod>` |
 | Sign-in fails with "HTTPS required" | The realm requires HTTPS for requests from public IP addresses (`sslRequired: external`). Use a private address, or terminate TLS at a load balancer |
