@@ -346,7 +346,7 @@ export function CopyButton({ value, label, what = 'Value' }: { value: string; la
   const toast = useToast();
   return (
     <button type="button" className={`btn plain small ${label ? '' : 'icon-only'}`} title={`Copy ${what}`} aria-label={label ? undefined : `Copy ${what}`}
-      onClick={() => navigator.clipboard.writeText(value).then(() => toast(`${what} copied`), () => toast('Could not copy', 'error'))}>
+      onClick={() => (navigator.clipboard?.writeText(value) ?? Promise.reject()).then(() => toast(`${what} copied`), () => toast('Could not copy', 'error'))}>
       <Icon name="copy" size={14} /> {label}
     </button>
   );
