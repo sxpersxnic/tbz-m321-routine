@@ -2,7 +2,7 @@
 # Routine – automated deployment on four VMs (Kubernetes, k3s). Details: docs/deployment.md
 #
 # Run on vm1, in a clone of this repository – it sets up the whole cluster from there:
-#   deploy/deploy.sh [command]
+#   deploy/deploy.sh [command …]   (several run in order, e.g. `deploy.sh images app`)
 #
 # Commands:
 #   all        access → cluster → images → app → verify (default; every step is idempotent)
@@ -83,8 +83,8 @@ need_tools() { # need_tools <tool>[=<package>] … – installs what is missing 
   ((${#missing[@]})) || return 0
   command -v apt-get >/dev/null || fail "missing: ${missing[*]} – install them, then run deploy.sh again"
   note "installing ${missing[*]} …"
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -yq "${missing[@]}" >/dev/null || fail "apt-get install ${missing[*]} failed"
+  $SUDO env DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get update -q >/dev/null
+  $SUDO env DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -yq "${missing[@]}" >/dev/null || fail "apt-get install ${missing[*]} failed"
 }
 
 # ------------------------------------------------------------------ secrets
@@ -134,12 +134,23 @@ k3s_version() { # every node runs the same version: vm1's, or the current stable
   curl -sS -o /dev/null -w '%{redirect_url}' https://update.k3s.io/v1-release/channels/stable | sed 's|.*/||; s|%2[Bb]|+|'
 }
 
+lan_iface() { # network interface that holds the inventory address of vm n
+  local n=$1 cmd
+  cmd="ip -o -4 addr show to $(ip_of "$n")"
+  if ((n == 1)); then $cmd; else remote "$n" "$cmd"; fi | awk '{ print $2; exit }'
+}
+
 k3s_config() { # /etc/rancher/k3s/config.yaml of vm n
-  local n=$1
+  local n=$1 iface
+  iface=$(lan_iface "$n")
+  [[ -n $iface ]] || fail "vm$n has no interface with $(ip_of "$n") – check the address in $INVENTORY"
   echo "# written by deploy/deploy.sh (Routine)"
   echo "node-name: vm$n" # explicit: cloned VMs often share a hostname
   echo "node-ip: $(ip_of "$n")"
-  echo "token: $K3S_TOKEN"
+  # pod traffic between the VMs (VXLAN) takes the interface of node-ip – not the default route's, which differs
+  # on VMs with a second network card (e.g. NAT for internet access)
+  echo "flannel-iface: $iface"
+  echo "token-file: /etc/rancher/k3s/routine-token" # not in this file: k3s' kubectl reads it as any user
   if ((n == 1)); then echo "cluster-init: true"; else echo "server: https://$(ip_of 1):6443"; fi
   if is_server "$n"; then
     echo "tls-san: [$(ip_of 1), $(ip_of 2), $(ip_of 3)]"
@@ -161,10 +172,11 @@ cmd_cluster() {
   [[ -n ${ACCESS_CHECKED:-} ]] || cmd_access
   need_tools curl openssl
   load_secrets
-  local version installer=$WORK/k3s-install.sh config=$WORK/k3s-config.yaml role n
+  local version installer=$WORK/k3s-install.sh config=$WORK/k3s-config.yaml token=$WORK/k3s-token role n
   version=$(k3s_version)
   [[ $version == v* ]] || fail "could not determine the k3s version – set K3S_VERSION in $INVENTORY"
   curl -sSfL https://get.k3s.io -o "$installer" || fail "download of the k3s installer (get.k3s.io) failed"
+  (umask 077 && printf '%s\n' "$K3S_TOKEN" >"$token")
   for n in "${NODES[@]}"; do
     k3s_config "$n" >"$config"
     if is_server "$n"; then role=server; else role=agent; fi
@@ -177,9 +189,13 @@ cmd_cluster() {
     note "vm$n: installing k3s $version …"
     copy_to "$n" "$config" /tmp/routine-k3s-config.yaml
     copy_to "$n" "$installer" /tmp/routine-k3s-install.sh
-    # the official installer: verifies the binary's checksum, sets up the systemd service
-    as_root "$n" "install -D -m 600 /tmp/routine-k3s-config.yaml /etc/rancher/k3s/config.yaml && INSTALL_K3S_VERSION='$version'" \
-      "INSTALL_K3S_EXEC=$role sh /tmp/routine-k3s-install.sh >/var/log/routine-k3s-install.log 2>&1; rc=\$?; rm -f /tmp/routine-k3s-*; exit \$rc" ||
+    copy_to "$n" "$token" /tmp/routine-k3s-token
+    # the official installer: verifies the binary's checksum, sets up the systemd service. It restarts k3s only
+    # when its own service files change – FORCE_RESTART, so a changed config.yaml takes effect too
+    as_root "$n" "install -D -m 600 /tmp/routine-k3s-token /etc/rancher/k3s/routine-token" \
+      "&& install -D -m 644 /tmp/routine-k3s-config.yaml /etc/rancher/k3s/config.yaml && INSTALL_K3S_VERSION='$version'" \
+      "INSTALL_K3S_EXEC=$role INSTALL_K3S_FORCE_RESTART=true sh /tmp/routine-k3s-install.sh >/var/log/routine-k3s-install.log 2>&1;" \
+      "rc=\$?; rm -f /tmp/routine-k3s-*; exit \$rc" ||
       fail "vm$n: k3s installation failed – see /var/log/routine-k3s-install.log on vm$n"
     if ((n == 1)); then
       local deadline=$((SECONDS + 180))
@@ -201,6 +217,11 @@ cmd_cluster() {
     mkdir -p ~/.kube && $SUDO cat /etc/rancher/k3s/k3s.yaml >~/.kube/config && chmod 600 ~/.kube/config
     note "kubeconfig → ~/.kube/config"
   fi
+  # k3s' kubectl reads /etc/rancher/k3s/k3s.yaml (root only) unless KUBECONFIG names another file
+  if [[ $EUID -ne 0 ]] && ! grep -qs 'KUBECONFIG=' ~/.bashrc; then
+    echo "export KUBECONFIG=\$HOME/.kube/config # Routine: kubectl without sudo" >>~/.bashrc
+    note "KUBECONFIG in ~/.bashrc – kubectl works without sudo in new shells"
+  fi
 }
 
 images_present() { # every image of this tag is in the containerd of vm n
@@ -217,7 +238,7 @@ cmd_images() {
 
   if ! command -v docker >/dev/null; then # builds only – the cluster runs on k3s' own containerd
     need_tools docker=docker.io
-    $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -yq docker-buildx >/dev/null 2>&1 || true # BuildKit, optional
+    $SUDO env DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -yq docker-buildx >/dev/null 2>&1 || true # BuildKit, optional
   fi
   note "building on vm1 – no registry needed: the images are imported on every VM …"
   local service refs=()
@@ -349,19 +370,22 @@ cmd_destroy() {
   ok "removed – the volumes (data) stay on the VMs; the cluster stays. Uninstall k3s: k3s-uninstall.sh / k3s-agent-uninstall.sh"
 }
 
-case "${1:-all}" in
-  all)
-    cmd_access; cmd_cluster; cmd_images; cmd_app; cmd_verify
-    printf "\n%sRoutine runs on 4 VMs: %s%s\n" "$bold" "$(public_url)" "$reset"
-    note "Keycloak admin console: $(public_url)/auth/admin – user admin, password KEYCLOAK_ADMIN_PASSWORD in $SECRETS"
-    ;;
-  access) cmd_access ;;
-  cluster) cmd_cluster ;;
-  images) cmd_images ;;
-  app) cmd_app ;;
-  verify) cmd_verify ;;
-  render) cmd_render; echo "manifests: $GENERATED (kubectl kustomize $GENERATED)" ;;
-  status) cmd_status ;;
-  destroy) cmd_destroy ;;
-  *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
-esac
+(($#)) || set -- all
+for command in "$@"; do # several in a row, e.g. `deploy.sh images app`
+  case "$command" in
+    all)
+      cmd_access; cmd_cluster; cmd_images; cmd_app; cmd_verify
+      printf "\n%sRoutine runs on 4 VMs: %s%s\n" "$bold" "$(public_url)" "$reset"
+      note "Keycloak admin console: $(public_url)/auth/admin – user admin, password KEYCLOAK_ADMIN_PASSWORD in $SECRETS"
+      ;;
+    access) cmd_access ;;
+    cluster) cmd_cluster ;;
+    images) cmd_images ;;
+    app) cmd_app ;;
+    verify) cmd_verify ;;
+    render) cmd_render; echo "manifests: $GENERATED (kubectl kustomize $GENERATED)" ;;
+    status) cmd_status ;;
+    destroy) cmd_destroy ;;
+    *) sed -n '2,/^# Requirements/p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  esac
+done
