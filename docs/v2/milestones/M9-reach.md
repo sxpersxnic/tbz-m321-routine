@@ -13,7 +13,7 @@ holidays* · *Skip next run* / *Pause until* on routines · *Pause all routines 
 
 ---
 
-- [ ] **M9-01 · Scaffold connector-service** ([10-quality.md §5](../10-quality.md), default profile; master key as Swarm secret)
+- [ ] **M9-01 · Scaffold connector-service** ([10-quality.md §5](../10-quality.md), default profile; master key as Kubernetes secret)
 - [ ] **M9-02 · Connections API, encryption, key rotation, resolve endpoint, access log**
 - [ ] **M9-03 · Secrets in the engine and worker**
   - Template root `secrets` passthrough ([06 §3](../06-engine.md)), validation against

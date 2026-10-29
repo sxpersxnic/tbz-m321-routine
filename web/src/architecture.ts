@@ -154,7 +154,8 @@ export function linkState(link: ArchLink, status: SystemStatus | undefined): Lin
 /** The broker's own cluster nodes, in the order they are drawn. */
 export function brokerNodes(status: SystemStatus | undefined): Array<{ name: string; running: boolean }> {
   const nodes = status?.brokerNodes ?? [];
-  if (nodes.length) return nodes.map((node) => ({ name: node.name.replace(/^rabbit@/, ''), running: node.running && status?.broker === 'up' }));
+  // rabbit@rabbitmq-1 (compose) or rabbit@rabbitmq-1.rabbitmq-nodes.routine.svc.cluster.local (Kubernetes) → rabbitmq-1
+  if (nodes.length) return nodes.map((node) => ({ name: node.name.replace(/^rabbit@/, '').replace(/\..*$/, ''), running: node.running && status?.broker === 'up' }));
   const up = status ? status.broker === 'up' : true;
   return [1, 2, 3].map((index) => ({ name: `rabbitmq-${index}`, running: up }));
 }

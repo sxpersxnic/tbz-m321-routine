@@ -1,3 +1,4 @@
+import './insecure-context.ts'; // first: the sign-in needs it on plain HTTP (VM deployment)
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';

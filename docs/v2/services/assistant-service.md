@@ -70,7 +70,7 @@ test-run ledger entries count against the allowance.
 
 ## 8. Configuration
 
-`AI_PROVIDER` (`anthropic` or `mock`), `ANTHROPIC_API_KEY` (Swarm secret), `AI_MODEL`,
+`AI_PROVIDER` (`anthropic` or `mock`), `ANTHROPIC_API_KEY` (Kubernetes secret), `AI_MODEL`,
 `AI_EFFORT`, `ROUTINE_URL`.
 
 ## 10. Tests

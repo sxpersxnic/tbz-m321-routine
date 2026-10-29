@@ -70,7 +70,7 @@ A missing `profiles` row means defaults. It is created on first `PATCH /me` or a
 | `POST /api/v1/workspaces`, `POST /api/v1/workspaces/:id/members`, `POST /api/v1/auth/switch-workspace` | M11 | see §5 |
 
 **Tokens (M0):** user tokens gain `roles: ['user'|'admin']`. The seeded demo user is `admin`.
-Service accounts are seeded from env `SERVICE_ACCOUNTS=name:secret,…` (Swarm secrets in the
+Service accounts are seeded from env `SERVICE_ACCOUNTS=name:secret,…` (Kubernetes secrets in the
 VM deployment).
 
 ## 4. Messages

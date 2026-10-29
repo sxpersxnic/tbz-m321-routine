@@ -18,7 +18,7 @@
     "up": "docker compose up -d --build --wait",
     "down": "docker compose down",
     "demo": "bash scripts/demo.sh all",
-    "deploy:vms": "bash deploy/deploy.sh"
+    "deploy:k8s": "bash deploy/deploy.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

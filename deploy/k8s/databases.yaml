@@ -1,0 +1,226 @@
+# Databases: one PostgreSQL per service – no service can reach another service's data. All five run on the
+# VM labelled routine/data (vm4); their volumes (local-path) live on that VM.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-db
+spec:
+  selector: { app: keycloak-db }
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak-db
+spec:
+  serviceName: keycloak-db
+  replicas: 1
+  selector: { matchLabels: { app: keycloak-db } }
+  template:
+    metadata:
+      labels: { app: keycloak-db }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { routine/data: "true" }
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: keycloak }
+            - { name: POSTGRES_DB, value: keycloak }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: KEYCLOAK_DB_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, keycloak, -d, keycloak] }
+            periodSeconds: 3
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: routine-db
+spec:
+  selector: { app: routine-db }
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: routine-db
+spec:
+  serviceName: routine-db
+  replicas: 1
+  selector: { matchLabels: { app: routine-db } }
+  template:
+    metadata:
+      labels: { app: routine-db }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { routine/data: "true" }
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: routine }
+            - { name: POSTGRES_DB, value: routine }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: ROUTINE_DB_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, routine, -d, routine] }
+            periodSeconds: 3
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-db
+spec:
+  selector: { app: task-db }
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: task-db
+spec:
+  serviceName: task-db
+  replicas: 1
+  selector: { matchLabels: { app: task-db } }
+  template:
+    metadata:
+      labels: { app: task-db }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { routine/data: "true" }
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: task }
+            - { name: POSTGRES_DB, value: task }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: TASK_DB_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, task, -d, task] }
+            periodSeconds: 3
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-db
+spec:
+  selector: { app: notification-db }
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: notification-db
+spec:
+  serviceName: notification-db
+  replicas: 1
+  selector: { matchLabels: { app: notification-db } }
+  template:
+    metadata:
+      labels: { app: notification-db }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { routine/data: "true" }
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: notification }
+            - { name: POSTGRES_DB, value: notification }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: NOTIFICATION_DB_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, notification, -d, notification] }
+            periodSeconds: 3
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: integration-db
+spec:
+  selector: { app: integration-db }
+  ports:
+    - { name: postgres, port: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: integration-db
+spec:
+  serviceName: integration-db
+  replicas: 1
+  selector: { matchLabels: { app: integration-db } }
+  template:
+    metadata:
+      labels: { app: integration-db }
+    spec:
+      enableServiceLinks: false
+      nodeSelector: { routine/data: "true" }
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - { name: POSTGRES_USER, value: integration }
+            - { name: POSTGRES_DB, value: integration }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: routine-secrets, key: INTEGRATION_DB_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, integration, -d, integration] }
+            periodSeconds: 3
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 2Gi } }

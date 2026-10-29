@@ -86,11 +86,11 @@ home, calendar) is created the same way:
 - [ ] `services/<name>/migrations/001_init.sql`
 - [ ] `services/<name>/test/` with at least contract tests
 - [ ] database + role in `infra/postgres/domains-init.sql` (local) and its own Postgres
-      service in `deploy/stack.yml`
+      StatefulSet in `deploy/k8s/databases.yaml`
 - [ ] compose service: `<<: *node-service`, `build.args.SERVICE`, `deploy: *replicated`,
       common env, `DATABASE_URL`, `SERVICE_TOKEN_SECRET`, correct **profile**,
       `depends_on` broker + DB
-- [ ] `deploy/stack.yml` entry with the v1 placement/update rules
+- [ ] `deploy/k8s/` Deployment + Service with the v1 placement/update rules
 - [ ] `.github/workflows/<name>.yml` calling `_node-service.yml`, path filters like the others
 - [ ] gateway: upstream env, route prefix, probe in `/api/v1/system/status`
 - [ ] service account in `SERVICE_ACCOUNTS` if it calls `/internal` endpoints

@@ -13,7 +13,7 @@ setup questions.
 
 ---
 
-- [ ] **M10-01 · Scaffold assistant-service** ([10-quality.md §5](../10-quality.md), profile `ai`; `ANTHROPIC_API_KEY` Swarm secret; `AI_PROVIDER=mock` by default in compose)
+- [ ] **M10-01 · Scaffold assistant-service** ([10-quality.md §5](../10-quality.md), profile `ai`; `ANTHROPIC_API_KEY` Kubernetes secret; `AI_PROVIDER=mock` by default in compose)
 - [ ] **M10-02 · Settings, ledger, allowance check, mock provider**
 - [ ] **M10-03 · AI step capabilities** (`ai.summarize`, `ai.rewrite`, `ai.extract` via `@anthropic-ai/sdk`, refusal handling, fallbacks, limits)
 - [ ] **M10-04 · Draft a routine** (catalog prompt with caching, `messages.parse` + `zodOutputFormat`, validate via routine-service, one repair round)

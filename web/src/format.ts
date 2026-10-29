@@ -80,7 +80,7 @@ export function splitInstance(processedBy: string | null): { service: string; in
   return { service, instance: instance.slice(0, 6) };
 }
 
-// same host the UI was opened on – localhost for compose, the VM's address in the 3-VM deployment
+// same host the UI was opened on – localhost for compose, a VM's address in the Kubernetes deployment
 const toolUrl = (port: number) => `${window.location.protocol}//${window.location.hostname}:${port}`;
 export const JAEGER_URL = toolUrl(16686);
 export const RABBITMQ_URL = toolUrl(15672);

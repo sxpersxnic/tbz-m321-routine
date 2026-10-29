@@ -14,7 +14,7 @@ live · which replica ran each step · *Duplicate delivery ignored* badges.
   - `installChaosEndpoints(app, broker)`: `POST /internal/v1/chaos/consuming { paused }`
     (cancel/re-attach consumers without closing the connection: `Broker.pauseConsumers()` /
     `resumeConsumers()`), `POST /internal/v1/chaos/failure-rate { rate }` (runtime override of
-    `chaosFailureRate`). Enabled only when `CHAOS_ENDPOINTS=1` (compose default on, Swarm off).
+    `chaosFailureRate`). Enabled only when `CHAOS_ENDPOINTS=1` (compose default on, Kubernetes off).
 - [ ] **M12-02 · Gateway fan-out to all replicas** (`dns.lookup(name, { all: true })`, call each, report per replica)
 - [ ] **M12-03 · Web: chaos panel on Infrastructure** (per service: pause/resume, failure-rate slider, live queue depth next to it)
 - [ ] **M12-04 · Run waterfall** (`accepted_at` for every action: set on `ActionAwaitingUser` and, for normal actions, the first result's `occurredAt`; bars from `dispatched_at` → `finished_at`, colour per replica from `processed_by`, Jaeger link from `trace_id`)

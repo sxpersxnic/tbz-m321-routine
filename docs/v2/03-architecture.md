@@ -113,7 +113,7 @@ query, SSRF allow-list, webhook tokens). v2 adds:
 | Topic | Rule |
 | --- | --- |
 | **Roles** | `users.role` ∈ `user`, `admin`. Tokens carry `roles`. System endpoints (DLQ, chaos, registry) require `admin`. The demo user is admin. |
-| **Service accounts** | identity-service issues **service tokens** (client-credentials: `POST /api/v1/auth/service-token`, `aud: routine-internal`, `sub: service:<name>`, 15 min). `/internal/**` endpoints accept only service tokens from an allow-list. Secrets for service accounts come from env/Swarm secrets. |
+| **Service accounts** | identity-service issues **service tokens** (client-credentials: `POST /api/v1/auth/service-token`, `aud: routine-internal`, `sub: service:<name>`, 15 min). `/internal/**` endpoints accept only service tokens from an allow-list. Secrets for service accounts come from env/Kubernetes secrets. |
 | **Secrets** | Connection values are encrypted with AES-256-GCM (`CONNECTOR_MASTER_KEY`). Only workers resolve them, at execution time, per action. Values never enter routine definitions, run records, logs, outputs or Today cards. |
 | **Sensitive domains** | Budget and Health never log amounts, values or payees (log ids only). Their events carry values only where a trigger filter needs them. |
 | **AI** | Opt-in per user. Inputs above the size limit are rejected, not silently truncated. A token ledger enforces a monthly allowance. Mock provider in CI. |
@@ -143,9 +143,9 @@ query, SSRF allow-list, webhook tokens). v2 adds:
   - `--profile all`: everything
 - **Databases:** one Postgres *database and role* per service. For the local stack the new
   services' databases are co-hosted on one `domains-db` instance (separate databases, separate
-  credentials, no cross-database access), so memory stays reasonable. In the Swarm stack
+  credentials, no cross-database access), so memory stays reasonable. In the Kubernetes deployment
   each gets its own instance, like v1. (ADR-12)
-- **Swarm / VMs:** `deploy/stack.yml` gains every new service with the same placement rules
+- **Kubernetes / VMs:** `deploy/k8s/` gains every new service with the same placement rules
   as v1 (two replicas, never on the same VM). A CI workflow per new service reuses
   `.github/workflows/_node-service.yml`.
 
