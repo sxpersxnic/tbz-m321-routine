@@ -1,7 +1,7 @@
-# Deployment on four VMs (Kubernetes)
+# Deployment on three VMs (Kubernetes)
 
 `compose.yaml` runs the whole platform on **one** host (development, demo). This document covers the
-production-like variant: the same containers on a **Kubernetes cluster of four VMs** (k3s), so that losing a whole
+production-like variant: the same containers on a **Kubernetes cluster of three VMs** (k3s), so that losing a whole
 VM does not take the platform down. The deployment is automated: **one script, run on vm1**, sets up the cluster
 and starts the application. **Step by step, with checks and what to do when something fails:
 [deployment-guide.md](deployment-guide.md).**
@@ -12,21 +12,20 @@ git clone <this repository> routine && cd routine
 deploy/deploy.sh          # access → cluster → images → app → verify
 ```
 
-The four VMs are listed in [`deploy/cluster.env`](../deploy/cluster.env):
+The three VMs are listed in [`deploy/cluster.env`](../deploy/cluster.env):
 
 | VM | Address | Kubernetes role | Workload pinned to it |
 | --- | --- | --- | --- |
 | vm1 | 10.2.44.21 | server (control plane + etcd), starts the cluster | `rabbitmq-1`; builds the images |
 | vm2 | 10.2.44.20 | server (control plane + etcd) | `rabbitmq-2` |
-| vm3 | 10.2.44.17 | server (control plane + etcd) | `rabbitmq-3` |
-| vm4 | 10.2.44.28 | agent (worker) | the five PostgreSQL databases |
+| vm3 | 10.2.44.17 | server (control plane + etcd) | `rabbitmq-3`; the five PostgreSQL databases |
 
 ## 1. Target topology
 
 ```mermaid
 flowchart TB
-    U([Browser / curl]) --> LB[Load balancer or DNS<br/>vm1 · vm2 · vm3 · vm4 :8080]
-    LB --> E1 & E2 & E3 & E4
+    U([Browser / curl]) --> LB[Load balancer or DNS<br/>vm1 · vm2 · vm3 :8080]
+    LB --> E1 & E2 & E3
 
     subgraph VM1[vm1 · 10.2.44.21 · server]
       E1[edge] ~~~ R1((rabbitmq-1))
@@ -36,19 +35,16 @@ flowchart TB
       E2[edge] ~~~ R2((rabbitmq-2))
       S2[replicas …]
     end
-    subgraph VM3[vm3 · 10.2.44.17 · server]
+    subgraph VM3[vm3 · 10.2.44.17 · server · routine/data]
       E3[edge] ~~~ R3((rabbitmq-3))
-      S3[replicas … · jaeger · mock-external]
-    end
-    subgraph VM4[vm4 · 10.2.44.28 · agent · routine/data]
-      E4[edge]
       DB[(keycloak-db · routine-db · task-db<br/>notification-db · integration-db)]
-      S4[replicas …]
+      S3[replicas … · jaeger · mock-external]
     end
 
     R1 <-.->|quorum queues, Raft| R2 <-.-> R3
     VM1 <-.->|etcd, Raft| VM2 <-.-> VM3
-    S1 & S2 & S3 & S4 <-->|pod network, flannel VXLAN| DB
+    S1 & S2 <-->|pod network, flannel VXLAN| DB
+    S3 --- DB
 ```
 
 *Example placement: Kubernetes decides where the stateless replicas run. It keeps the two replicas of every
@@ -56,12 +52,12 @@ service on different VMs and starts lost replicas on the remaining VMs when a VM
 
 | What | Where | Why |
 | --- | --- | --- |
-| Control plane (k3s servers, embedded etcd) | vm1, vm2, vm3 | etcd needs a majority: three members tolerate the loss of one VM. A fourth member would not tolerate more (majority of 4 = 3), so vm4 is a plain worker |
+| Control plane (k3s servers, embedded etcd) | vm1, vm2, vm3 | etcd needs a majority: three members tolerate the loss of one VM |
 | `edge` (nginx, DaemonSet) | every VM, `hostPort` **8080** | Each VM takes requests with its own edge – never forwarded to a VM that just died; a load balancer / DNS in front spreads them |
 | `rabbitmq-1..3` (StatefulSet) | one per VM labelled `routine/rabbitmq` (vm1–vm3) | 3 replicas per quorum queue, one per VM – one VM can fail |
 | gateway, keycloak, routine, task, notification, web (Deployments) | 2 replicas each, required pod anti-affinity | Never both replicas on the same VM; the two Keycloak replicas form one cluster (discovery through keycloak-db) |
 | integration-worker | 3 replicas, spread over the VMs | Competing consumers, scale freely |
-| 5 PostgreSQL databases (StatefulSets) | vm4 (label `routine/data`) | A volume (k3s local-path) lives on one VM; pinning keeps the data where the database runs |
+| 5 PostgreSQL databases (StatefulSets) | vm3 (label `routine/data`) | A volume (k3s local-path) lives on one VM; pinning keeps the data where the database runs. Not vm1, which builds the images |
 | jaeger, mock-external | anywhere, 1 replica | Not in the critical path; started on another VM 30 s after a VM failure (Jaeger loses its in-memory traces). mock-external keeps its simulation state in memory, so it is not replicated |
 
 The manifests are plain Kubernetes YAML in [`deploy/k8s/`](../deploy/k8s), combined with Kustomize (built into
@@ -75,18 +71,18 @@ configuration rolls the pods that use it.
 | Option | Verdict |
 | --- | --- |
 | **k3s** (chosen) | A certified Kubernetes distribution in one binary: embedded etcd for an HA control plane on three VMs, containerd, flannel networking and local volumes included. Standard Kubernetes objects – what is learned here applies to every Kubernetes. Self-healing, rolling updates, anti-affinity, probes, StatefulSets with stable network identities for the broker nodes |
-| kubeadm / full Kubernetes | Same API, but CNI, storage and HA etcd have to be chosen and installed separately – a lot more moving parts for four VMs |
+| kubeadm / full Kubernetes | Same API, but CNI, storage and HA etcd have to be chosen and installed separately – a lot more moving parts for three VMs |
 | Docker Swarm (previous deployment) | Simpler, but a niche: placement, health and update rules are Swarm-specific, no StatefulSets, no startup probes |
 
 ## 3. Requirements
 
-**VMs** (4×): Linux with systemd (recommended: Ubuntu 24.04 LTS), 2 vCPU, 4 GB RAM, 20 GB disk, in the same network
+**VMs** (3×): Linux with systemd (recommended: Ubuntu 24.04 LTS), 2 vCPU, 4 GB RAM, 20 GB disk, in the same network
 with the fixed addresses above, and internet access (k3s release download, public images such as `postgres` and
 `rabbitmq`).
 
-**Access**: you log in to vm1 and run `deploy/deploy.sh` there as a user with `sudo`. vm1 reaches vm2–vm4 over SSH
+**Access**: you log in to vm1 and run `deploy/deploy.sh` there as a user with `sudo`. vm1 reaches vm2 and vm3 over SSH
 as the user `routine` (`SSH_USER` in `deploy/cluster.env`) with vm1's key: `deploy.sh key` prints a line that
-whoever manages vm2–vm4 runs there once – it runs [`deploy/prepare-vm.sh`](../deploy/prepare-vm.sh), which creates
+whoever manages vm2 and vm3 runs there once – it runs [`deploy/prepare-vm.sh`](../deploy/prepare-vm.sh), which creates
 that user with vm1's public key and `sudo` without password, installs the basics and opens an active firewall
 ([deployment-guide.md](deployment-guide.md), steps 1–2). vm1 installs `docker.io` (to build the images), `curl`, `jq` and `openssl` from the distribution's
 packages if missing.
@@ -99,13 +95,13 @@ packages if missing.
 | 2379–2380 | TCP | vm1–vm3 | etcd (control plane, Raft) |
 | 10250 | TCP | VMs | kubelet (logs, exec, metrics) |
 | 8472 | UDP | VMs | flannel VXLAN – all pod traffic between VMs |
-| 22 | TCP | vm1 → vm2–vm4, admins → vm1 | SSH (deploy.sh installs k3s and imports images over SSH) |
+| 22 | TCP | vm1 → vm2, vm3; admins → vm1 | SSH (deploy.sh installs k3s and imports images over SSH) |
 | 8080 | TCP | users → VMs | UI and API (edge) |
 | 15672 | TCP | **admins only** → VMs | RabbitMQ management (NodePort; password from the secrets file) |
 | 16686 | TCP | **admins only** → VMs | Jaeger (NodePort) – has **no login**, so never open it to users or the internet |
 
 Everything else (databases, broker ports 5672/4369/25672, mock-external) stays inside the cluster and is not
-published. Restrict 6443/2379–2380/10250/8472 to the four VMs. The pod traffic on 8472/udp (VXLAN) is not
+published. Restrict 6443/2379–2380/10250/8472 to the three VMs. The pod traffic on 8472/udp (VXLAN) is not
 encrypted – on a network you do not trust, switch k3s to `flannel-backend: wireguard-native` (add it to
 `k3s_config` in `deploy.sh`; then 51820/udp instead of 8472/udp). Not enabled by default because it is untested in
 this setup.
@@ -120,9 +116,9 @@ a code change.
 
 | Step | Command | What happens |
 | --- | --- | --- |
-| 0 | `deploy.sh key` | Once, before everything: creates vm1's SSH key and prints the line for vm2–vm4 (`deploy/prepare-vm.sh` with that key, from GitHub at this commit) |
-| 1 | `deploy.sh access` | Checks that it runs on vm1, SSH with vm1's key to vm2–vm4 and `sudo` on every VM |
-| 2 | `deploy.sh cluster` | Installs k3s with the official installer (it verifies the binary's checksum) and writes `/etc/rancher/k3s/config.yaml` on every VM: vm1 starts the cluster (`cluster-init`), vm2 and vm3 join as **servers** one after the other, vm4 joins as **agent**. Every VM gets the same version (vm1's, or the current stable release for a new cluster); Traefik and ServiceLB are disabled (the platform brings its own edge). Pod traffic between the VMs (flannel VXLAN) uses the interface of the VM's address, also on VMs with a second network card. Node labels `routine/rabbitmq` (vm1–vm3) and `routine/data` (vm4). Copies the kubeconfig to `~/.kube/config` on vm1 if there is none and sets `KUBECONFIG` in `~/.bashrc` |
+| 0 | `deploy.sh key` | Once, before everything: creates vm1's SSH key and prints the line for vm2 and vm3 (`deploy/prepare-vm.sh` with that key, from GitHub at this commit) |
+| 1 | `deploy.sh access` | Checks that it runs on vm1, SSH with vm1's key to vm2 and vm3 and `sudo` on every VM |
+| 2 | `deploy.sh cluster` | Installs k3s with the official installer (it verifies the binary's checksum) and writes `/etc/rancher/k3s/config.yaml` on every VM: vm1 starts the cluster (`cluster-init`), vm2 and vm3 join as **servers** one after the other. Every VM gets the same version (vm1's, or the current stable release for a new cluster); Traefik and ServiceLB are disabled (the platform brings its own edge). Pod traffic between the VMs (flannel VXLAN) uses the interface of the VM's address, also on VMs with a second network card. Node labels `routine/rabbitmq` (vm1–vm3) and `routine/data` (vm3). Copies the kubeconfig to `~/.kube/config` on vm1 if there is none and sets `KUBECONFIG` in `~/.bashrc` |
 | 3 | `deploy.sh images` | Builds the 8 service images **on vm1** with Docker and imports them into the containerd of every VM (`k3s ctr images import`) – no registry needed. Tag = git commit, plus a content hash when there are uncommitted changes. Skipped when every VM has the images already |
 | 4 | `deploy.sh app` | Generates the secrets on the first run (below), renders the overlay and `kubectl apply -k`. Waits until every StatefulSet, Deployment and DaemonSet is rolled out, then until **every quorum queue has a replica on every broker node** (`rabbitmq-queues grow`) – only then may a VM fail. Removes config maps and secrets of earlier versions |
 | 5 | `deploy.sh verify` | Runs the main workflow (`scripts/demo.sh main`) against `PUBLIC_URL` and checks that every VM answers on :8080 |
@@ -145,7 +141,7 @@ vm1 – mode 600, in `.gitignore` – and turns them into the Kubernetes secret 
 
 | Secret | Used for |
 | --- | --- |
-| `K3S_TOKEN` | joins vm2–vm4 to the cluster – whoever has it can join a machine to the cluster |
+| `K3S_TOKEN` | joins vm2 and vm3 to the cluster – whoever has it can join a machine to the cluster |
 | `RABBITMQ_PASSWORD` | broker user `routine` (services, management UI); written into the rendered broker definitions |
 | `RABBITMQ_ERLANG_COOKIE` | shared secret of the broker nodes – whoever has it controls the broker cluster |
 | `<SERVICE>_DB_PASSWORD` (5×) | one password per database, Keycloak's included |
@@ -170,7 +166,7 @@ On vm1 (`kubectl` works in a new shell after `deploy.sh cluster`; otherwise `sud
 | Change configuration (e.g. evolution demo) | `kubectl -n routine set env deployment/routine-service EXECUTION_COMPLETED_FORMAT=expand` (rolling); for good: edit `deploy/k8s/services.yaml`, `deploy.sh app` |
 | Take a VM out for maintenance | `kubectl drain vm2 --ignore-daemonsets` → replicas move away (a broker node or database stays down until the VM is back); afterwards `kubectl uncordon vm2` |
 | Remove the application (data stays) | `deploy/deploy.sh destroy` – the volumes stay; `deploy.sh app` brings it back with the same data |
-| Remove k3s from a VM | `/usr/local/bin/k3s-uninstall.sh` (servers) or `k3s-agent-uninstall.sh` (vm4) – **deletes the volumes** |
+| Remove k3s from a VM | `/usr/local/bin/k3s-uninstall.sh` – **deletes the volumes** |
 
 ### Demo scenarios on the VMs
 
@@ -191,14 +187,14 @@ belong to the single-host setup. On the VMs, the same effects come from Kubernet
 | Failure | What happens | Recovery |
 | --- | --- | --- |
 | A replica crashes | Kubernetes restarts it; the other replica serves meanwhile | automatic |
-| vm2 or vm3 fails | etcd keeps 2/3 members (majority), the API stays up; its edge drops out of the load balancer; broker keeps 2/3 nodes; the surviving replica of each service serves at once (measured: no failed request); jaeger and mock-external (one replica) start on another VM after 30 s, the other lost replicas after ~5 min (`NoExecute` toleration) | automatic; when the VM comes back, its broker node rejoins |
-| vm1 fails | As vm2/vm3 – the cluster DNS has a second replica on another VM (`deploy.sh cluster`). vm2/vm3 keep the cluster running. Without a load balancer, users lose the UI: `PUBLIC_URL` is vm1's address. `deploy.sh` and the kubeconfig live on vm1, so administer from vm2 (`sudo k3s kubectl`) until vm1 is back | restart vm1 |
-| vm4 fails | The databases are gone: logins, routines and tasks are unavailable until vm4 is back. Broker, edge and replicas keep running; messages wait in the broker | restart vm4 – data is on its volumes |
+| vm2 fails | etcd keeps 2/3 members (majority), the API stays up; its edge drops out of the load balancer; broker keeps 2/3 nodes; the surviving replica of each service serves at once (measured: no failed request); jaeger and mock-external (one replica) start on another VM after 30 s, the other lost replicas after ~5 min (`NoExecute` toleration) | automatic; when the VM comes back, its broker node rejoins |
+| vm1 fails | As vm2 – the cluster DNS has a second replica on another VM (`deploy.sh cluster`). vm2 and vm3 keep the cluster running. Without a load balancer, users lose the UI: `PUBLIC_URL` is vm1's address. `deploy.sh` and the kubeconfig live on vm1, so administer from vm2 (`sudo k3s kubectl`) until vm1 is back | restart vm1 |
+| vm3 fails | As vm2 – and the databases are gone: logins, routines and tasks are unavailable until vm3 is back. Broker (2/3 nodes), edge and replicas keep running; messages wait in the broker | restart vm3 – data is on its volumes |
 | Two VMs fail | etcd and/or the broker lose their majority: the cluster cannot change anything, queues stop (the outbox keeps every state change) | bring one VM back |
 
-vm4 is the remaining single point of failure: it holds all five database volumes. Spreading the databases over the
-VMs would not remove that – every VM would then hold *some* critical data, so any VM loss would break something.
-Pinning them to the one VM without a broker node or etcd member means any other VM can fail without data impact.
+vm3 is the remaining single point of failure for the data: it holds all five database volumes. Spreading the
+databases over the VMs would not remove that – every VM would then hold *some* critical data, so any VM loss would
+break something. Pinned to one VM, vm1 and vm2 can fail without data impact.
 The real fix is a replicated database, e.g. CloudNativePG on this cluster
 (see [availability.md §3](availability.md#3-what-remains-on-purpose)).
 
@@ -208,12 +204,22 @@ The real fix is a replicated database, e.g. CloudNativePG on this cluster
 | --- | --- | --- |
 | Creating the VMs | Depends on the platform (TBZ lab, VMware, Proxmox, a cloud) – there is no common API | Create 4 Ubuntu VMs with the specs and addresses from §3, then run `deploy.sh` on vm1 |
 | Firewall / security groups | Also platform-specific (cloud security group, `ufw`, a lab firewall) | Open the ports from §3 |
-| Load balancer or DNS in front of the VMs | Needs infrastructure outside the VMs (cloud LB, keepalived with a floating IP, or DNS with four A records) | Point it at `vm1..4:8080` with a health check on `/edge/health`. Without it, users use vm1's address |
+| Load balancer or DNS in front of the VMs | Needs infrastructure outside the VMs (cloud LB, keepalived with a floating IP, or DNS with three A records) | Point it at `vm1..3:8080` with a health check on `/edge/health`. Without it, users use vm1's address |
 | TLS certificates | Need a domain name | Terminate TLS at the load balancer |
 
 ## 8. Tested
 
-**On four VMs, 2026-10-29**: Ubuntu 24.04 (arm64, qemu), the addresses of `deploy/cluster.env`, one user with
+**On three VMs – the current layout, 2026-10-29**: Ubuntu 24.04 (arm64, qemu, 4 GB RAM each) with the addresses of
+`deploy/cluster.env` (vm1 10.2.44.21, vm2 10.2.44.20, vm3 10.2.44.17), untouched as in the guide: firewall (`ufw`)
+on, no `tmux`, password SSH off on vm2 and vm3, a user `student` everywhere.
+
+| Test | Result |
+| --- | --- |
+| The guide from step 1: `deploy.sh key` on vm1, its line pasted on vm2 and vm3, `deploy.sh access`, `deploy.sh` inside `tmux` | all ✔, only prompt: the sudo password on vm1; 3 control-plane nodes, 28 pods ready, **0 restarts**; databases on vm3; memory used 1.4 / 1.7 / 2.0 GB of 3.9 GB |
+| Browser through a tunnel to vm1: `http://10.2.44.21:8080`, "Try the demo" | signed in through Keycloak; RabbitMQ and Jaeger reachable |
+| vm2 powered off, main workflow through vm1 for 2 minutes | **39 of 40** succeeded – one failed after 62 s, while Kubernetes declared vm2 dead and moved its traffic |
+
+**Before, on four VMs** (vm4 = databases), 2026-10-29: Ubuntu 24.04 (arm64, qemu), one user with
 password login and `sudo` *with* password, a second network card for internet access (NAT) – the setup of many lab
 networks. `deploy/deploy.sh` ran unchanged on vm1, as in [deployment-guide.md](deployment-guide.md).
 
@@ -251,7 +257,7 @@ Two findings from the sandbox tests are built into the manifests:
 | Symptom | Cause / fix |
 | --- | --- |
 | `deploy.sh access` fails for a VM | The line of `deploy.sh key` has not run on that VM, or failed there. From vm1: `ssh routine@10.2.44.20` – port 22 blocked, or `deploy.sh` run with `sudo` (then it uses root's key instead of yours) |
-| A VM does not become `Ready` after joining | On that VM: `journalctl -u k3s` (servers) / `journalctl -u k3s-agent` (vm4), installer log in `/var/log/routine-k3s-install.log`. Usually ports 6443/2379–2380/8472 between the VMs (§3) |
+| A VM does not become `Ready` after joining | On that VM: `journalctl -u k3s`, installer log in `/var/log/routine-k3s-install.log`. Usually ports 6443/2379–2380/8472 between the VMs (§3) |
 | Pods stay `Pending` | `kubectl -n routine describe pod <pod>`: anti-affinity with too few `Ready` VMs, or a missing node label (`deploy.sh cluster` sets them) |
 | `ErrImageNeverPull` | The image of this tag is missing on that VM – `deploy.sh images` |
 | `deploy.sh app` waits for `rabbitmq` | The broker nodes cannot reach each other: pod traffic between VMs (8472/udp). `kubectl -n routine logs rabbitmq-1` |

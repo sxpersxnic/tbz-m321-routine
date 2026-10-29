@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Routine – automated deployment on four VMs (Kubernetes, k3s). Details: docs/deployment.md
+# Routine – automated deployment on three VMs (Kubernetes, k3s). Details: docs/deployment.md
 #
 # Run on vm1, in a clone of this repository – it sets up the whole cluster from there:
 #   deploy/deploy.sh [command …]   (several run in order, e.g. `deploy.sh images app`)
 #
 # Commands:
-#   key        print the line for vm2–vm4: it runs deploy/prepare-vm.sh there with vm1's public key
+#   key        print the line for vm2 and vm3: it runs deploy/prepare-vm.sh there with vm1's public key
 #   all        access → cluster → images → app → verify (default; every step is idempotent)
-#   access     check SSH from vm1 to vm2–vm4 (user SSH_USER, with vm1's key) and sudo there
-#   cluster    install k3s: vm1–vm3 control plane (embedded etcd), vm4 worker; node labels
+#   access     check SSH from vm1 to vm2 and vm3 (user SSH_USER, with vm1's key) and sudo there
+#   cluster    install k3s: vm1–vm3 all control plane (embedded etcd); node labels
 #   images     build the service images on vm1 and import them on every VM
 #   app        deploy / update the application (rolling update, zero downtime) and wait until it is healthy
 #   verify     run the main workflow (scripts/demo.sh main) against the deployed system
@@ -16,10 +16,10 @@
 #   status     nodes, pods and where they run
 #   destroy    remove the application (volumes and cluster stay)
 #
-# Inventory: deploy/cluster.env (the four VMs), or INVENTORY=<file>.
+# Inventory: deploy/cluster.env (the three VMs), or INVENTORY=<file>.
 # Secrets: generated on the first run into deploy/cluster.secrets.env (next to the inventory, mode 600, never
 #          committed) – keep that file: the databases only accept the passwords they were created with.
-# Requirements: Ubuntu/Debian on vm1 with sudo; on vm2–vm4 the line of `deploy.sh key` has run.
+# Requirements: Ubuntu/Debian on vm1 with sudo; on vm2 and vm3 the line of `deploy.sh key` has run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,10 +31,10 @@ source "$INVENTORY"
 SECRETS=${SECRETS:-${INVENTORY%.env}.secrets.env}
 GENERATED=deploy/.generated
 NAMESPACE=routine
-NODES=(1 2 3 4)
+NODES=(1 2 3)
 SERVERS=(1 2 3)   # control plane: etcd needs a majority – three servers tolerate the loss of one
 BROKER_NODES=(1 2 3)
-DATA_NODE=4
+DATA_NODE=3 # the databases' volumes live on one VM – not vm1, which builds the images
 IMAGES=(gateway keycloak routine-service task-service notification-service integration-worker mock-external web)
 SSH_USER=${SSH_USER:-$(id -un)}
 SUDO=; ((EUID == 0)) || SUDO=sudo
@@ -109,7 +109,7 @@ rabbit_auth() { printf 'routine:%s' "$RABBITMQ_PASSWORD"; }
 
 # ------------------------------------------------------------------ steps
 cmd_access() {
-  step "Access from vm1 to vm2–vm4 (user $SSH_USER)"
+  step "Access from vm1 to vm2 and vm3 (user $SSH_USER)"
   ip -o addr show | grep -qF " $(ip_of 1)/" || fail "this machine is not vm1 ($(ip_of 1)) – run deploy.sh on vm1"
   [[ -z $SUDO ]] || $SUDO -v || fail "sudo on vm1 failed"
   local n
@@ -133,13 +133,13 @@ prepare_url() { # deploy/prepare-vm.sh of exactly this commit on GitHub
   echo "https://raw.githubusercontent.com/$repo/$(git rev-parse HEAD)/deploy/prepare-vm.sh"
 }
 
-cmd_key() { # the line whoever manages vm2–vm4 pastes there
+cmd_key() { # the line whoever manages vm2 and vm3 pastes there
   [[ -f ~/.ssh/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N '' -C "routine-deploy@$(hostname)" -f ~/.ssh/id_ed25519
   local url key
   key=$(cat ~/.ssh/id_ed25519.pub)
   url=$(prepare_url) && curl -sfI "$url" >/dev/null ||
-    fail "deploy/prepare-vm.sh of this commit is not on GitHub (commit not pushed?) – copy that file to vm2–vm4 and run there: sudo bash prepare-vm.sh '$key'"
-  step "Send this line to whoever manages vm2, vm3 and vm4 – they paste it on their VM (it asks for their sudo password):"
+    fail "deploy/prepare-vm.sh of this commit is not on GitHub (commit not pushed?) – copy that file to vm2 and vm3 and run there: sudo bash prepare-vm.sh '$key'"
+  step "Send this line to whoever manages vm2 and vm3 – they paste it on their VM (it asks for their sudo password):"
   printf '\n%s\n\n' "curl -fsSL $url | sudo bash -s -- '$key'"
   note "It creates the user $SSH_USER there, who logs in only with vm1's key. Check afterwards: deploy/deploy.sh access"
 }
@@ -184,7 +184,7 @@ wait_node_ready() {
 }
 
 cmd_cluster() {
-  step "Kubernetes (k3s): vm1–vm3 control plane, vm4 worker"
+  step "Kubernetes (k3s): vm1–vm3, each part of the control plane"
   [[ -n ${ACCESS_CHECKED:-} ]] || cmd_access
   need_tools curl openssl
   load_secrets
@@ -402,7 +402,7 @@ for command in "$@"; do # several in a row, e.g. `deploy.sh images app`
   case "$command" in
     all)
       cmd_access; cmd_cluster; cmd_images; cmd_app; cmd_verify
-      printf "\n%sRoutine runs on 4 VMs: %s%s\n" "$bold" "$(public_url)" "$reset"
+      printf "\n%sRoutine runs on %s VMs: %s%s\n" "$bold" "${#NODES[@]}" "$(public_url)" "$reset"
       note "Keycloak admin console: $(public_url)/auth/admin – user admin, password KEYCLOAK_ADMIN_PASSWORD in $SECRETS"
       ;;
     key) cmd_key ;;

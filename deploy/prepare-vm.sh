@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Routine – prepares one VM for the Kubernetes deployment (docs/deployment-guide.md). Safe to run again.
 #
-#   vm2–vm4:  the line `deploy/deploy.sh key` prints on vm1 – it runs this script with vm1's public key:
+#   vm2, vm3: the line `deploy/deploy.sh key` prints on vm1 – it runs this script with vm1's public key:
 #             curl -fsSL <url of this script> | sudo bash -s -- '<vm1 public key>'
 #   vm1:      sudo deploy/prepare-vm.sh            (no key: vm1 is where deploy.sh runs)
 #
@@ -13,7 +13,7 @@ set -euo pipefail
 
 KEY=${1:-}
 DEPLOY_USER=routine
-SUBNET=${SUBNET:-10.2.44.0/24} # the four VMs (deploy/cluster.env)
+SUBNET=${SUBNET:-10.2.44.0/24} # the VMs (deploy/cluster.env)
 
 green=$'\033[32m'; red=$'\033[31m'; reset=$'\033[0m'
 ok()   { printf "  %s✔ %s%s\n" "$green" "$*" "$reset"; }

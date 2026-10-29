@@ -1,5 +1,5 @@
 # Databases: one PostgreSQL per service – no service can reach another service's data. All five run on the
-# VM labelled routine/data (vm4); their volumes (local-path) live on that VM.
+# VM labelled routine/data (vm3); their volumes (local-path) live on that VM.
 apiVersion: v1
 kind: Service
 metadata:

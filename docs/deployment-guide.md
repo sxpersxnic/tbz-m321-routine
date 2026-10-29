@@ -1,12 +1,12 @@
-# Setting up the four VMs – step by step
+# Setting up the three VMs – step by step
 
-One way, from four freshly installed VMs to the running platform. Background, ports and failure behaviour:
+One way, from three freshly installed VMs to the running platform. Background, ports and failure behaviour:
 [deployment.md](deployment.md).
 
 | Who | VM | Does |
 | --- | --- | --- |
 | **You** | vm1 – 10.2.44.21 | everything: vm1 is the control plane and installs the other VMs over SSH |
-| **Your teammates** | vm2 – 10.2.44.20, vm3 – 10.2.44.17, vm4 – 10.2.44.28 | paste **one line** you send them (step 2) |
+| **Your teammates** | vm2 – 10.2.44.20, vm3 – 10.2.44.17 | paste **one line** you send them (step 2) |
 
 You never need your teammates' passwords: the line gives vm1's key access to their VM.
 
@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/…/deploy/prepare-vm.sh | sudo bas
 
 **Send that line to your teammates** (chat is fine – it holds only vm1's *public* key).
 
-## 2. Your teammates, on vm2, vm3 and vm4: paste the line
+## 2. Your teammates, on vm2 and vm3: paste the line
 
 Each teammate logs in to their VM as usual, pastes the line and types their own `sudo` password. It ends with:
 
@@ -58,11 +58,10 @@ deploy/deploy.sh access
 ```
 
 ```text
-▶ Access from vm1 to vm2–vm4 (user routine)
+▶ Access from vm1 to vm2 and vm3 (user routine)
 [sudo] password for <you>:                 ← your password on vm1
   ✔ vm2 (10.2.44.20): SSH and sudo
   ✔ vm3 (10.2.44.17): SSH and sudo
-  ✔ vm4 (10.2.44.28): SSH and sudo
 ```
 
 `✘ vm3: no SSH access …` – the line has not run on vm3 yet, or it failed there: ask that teammate for the output
@@ -86,12 +85,12 @@ deploy/deploy.sh
 It may ask for your `sudo` password on vm1, nothing else. Then it runs on its own, about 10 minutes:
 
 ```text
-▶ Access from vm1 to vm2–vm4         ✔ vm2 … vm4: SSH and sudo
-▶ Kubernetes (k3s)                    ✔ vm1 … vm4: k3s v1.36.5+k3s1 server/agent, ready     (~3 min)
-▶ Images (tag …)                      ✔ built 8 images, ✔ imported on vm1 … vm4            (~4 min)
+▶ Access from vm1 to vm2 and vm3    ✔ vm2, vm3: SSH and sudo
+▶ Kubernetes (k3s)                    ✔ vm1 … vm3: k3s v1.36.5+k3s1 server, ready           (~3 min)
+▶ Images (tag …)                      ✔ built 8 images, ✔ imported on vm1 … vm3            (~4 min)
 ▶ Application                         ✔ all services ready, ✔ every quorum queue has 3 replicas  (~3 min)
-▶ Verify                              ✔ main workflow succeeded, ✔ vm1 … vm4 answer on :8080
-Routine runs on 4 VMs: http://10.2.44.21:8080
+▶ Verify                              ✔ main workflow succeeded, ✔ vm1 … vm3 answer on :8080
+Routine runs on 3 VMs: http://10.2.44.21:8080
 ```
 
 ## 5. Keep the secrets file
@@ -130,7 +129,7 @@ is already done.
 | `this machine is not vm1` | You are on another VM, or vm1 has another address than in `deploy/cluster.env` |
 | `vmN: no SSH access` | Step 2 has not run on that VM, or failed there – ask that teammate |
 | `vmN: k3s installation failed` | That VM: `sudo tail -30 /var/log/routine-k3s-install.log` – usually no internet there |
-| `vmN did not become ready` | That VM: `sudo journalctl -u k3s -n 50` (vm4: `-u k3s-agent`) – usually a firewall: step 2's line again on that VM |
+| `vmN did not become ready` | That VM: `sudo journalctl -u k3s -n 50` – usually a firewall: step 2's line again on that VM |
 | `build of … failed` | On vm1: `df -h /` and `free -m` (disk, memory) |
 | `… did not become ready` (app step) | `kubectl -n routine get pods -o wide`. Pods that keep restarting only on some VMs: traffic between the VMs is blocked (firewall). Details: `kubectl -n routine describe pod <pod>`, `kubectl -n routine logs <pod>` |
 | `exceeded its progress deadline` | A service waited more than 10 minutes, e.g. while the network was broken. Once the cause is fixed, run `deploy/deploy.sh` again |
@@ -156,4 +155,4 @@ scp <you>@10.2.44.21:routine-diagnosis.txt .
 | --- | --- |
 | Deploy a new version | `git pull && deploy/deploy.sh images app` |
 | Remove the application, keep the data | `deploy/deploy.sh destroy` (back with `deploy/deploy.sh app`) |
-| Remove everything, data included | on vm1–vm3 `sudo /usr/local/bin/k3s-uninstall.sh`, on vm4 `sudo /usr/local/bin/k3s-agent-uninstall.sh`, then `deploy/deploy.sh` again |
+| Remove everything, data included | on vm1–vm3 `sudo /usr/local/bin/k3s-uninstall.sh`, then `deploy/deploy.sh` again |

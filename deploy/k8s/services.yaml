@@ -313,7 +313,7 @@ spec:
       labels: { app: integration-worker }
     spec:
       enableServiceLinks: false
-      topologySpreadConstraints: # spread over the VMs, but scaling beyond four replicas stays possible
+      topologySpreadConstraints: # spread over the VMs, but more replicas than VMs stay possible
         - { maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: ScheduleAnyway, labelSelector: { matchLabels: { app: integration-worker } } }
       containers:
         - name: integration-worker

@@ -1,11 +1,11 @@
-# Routine on Kubernetes (k3s on four VMs) – the base manifests. Deployed by deploy/deploy.sh (see
+# Routine on Kubernetes (k3s on three VMs) – the base manifests. Deployed by deploy/deploy.sh (see
 # docs/deployment.md), which renders an overlay on top (deploy/.generated/, never committed): the image tag,
 # PUBLIC_URL, the generated secrets and the configuration files from infra/.
 #
 # Placement (node labels are set by deploy.sh):
 #   every VM            edge (DaemonSet, :8080), at most one replica of every platform service
 #   routine/rabbitmq    vm1–vm3 → one broker node each
-#   routine/data        vm4 → the five PostgreSQL databases (their volumes live on that VM)
+#   routine/data        vm3 → the five PostgreSQL databases (their volumes live on that VM)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: routine
