@@ -680,7 +680,7 @@ Routine counts as successfully implemented when:
 
 ## 22. Implementation
 
-The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · No single point of failure: [docs/availability.md](docs/availability.md) · Deployment on four VMs (Kubernetes): [docs/deployment.md](docs/deployment.md) – step by step: [docs/deployment-guide.md](docs/deployment-guide.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
+The platform is fully implemented. Details: [docs/architecture.md](docs/architecture.md) · No single point of failure: [docs/availability.md](docs/availability.md) · Deployment on three VMs (Kubernetes): [docs/deployment.md](docs/deployment.md) – step by step: [docs/deployment-guide.md](docs/deployment-guide.md) · Live demo and evidence for the success criteria: [docs/demo.md](docs/demo.md) · Testing manually on your machine: [docs/testing.md](docs/testing.md) · Contracts: [contracts/](contracts/README.md)
 
 ## Quick start
 
@@ -720,7 +720,7 @@ services/
   mock-external/             simulated third-party services
 web/                         web client (React + Vite, nginx) – its own service
 scripts/demo.sh              demo scenarios / acceptance test
-deploy/                      automated deployment on four VMs (Kubernetes, k3s)
+deploy/                      automated deployment on three VMs (Kubernetes, k3s)
 .github/workflows/           CI: one pipeline per service (lint, typecheck, tests, image) + system test
 ```
 
