@@ -5,8 +5,9 @@
 #   deploy/deploy.sh [command …]   (several run in order, e.g. `deploy.sh images app`)
 #
 # Commands:
+#   key        print the line for vm2–vm4: it runs deploy/prepare-vm.sh there with vm1's public key
 #   all        access → cluster → images → app → verify (default; every step is idempotent)
-#   access     SSH from vm1 to vm2–vm4 (copies a key, asks for the password once if needed) and sudo there
+#   access     check SSH from vm1 to vm2–vm4 (user SSH_USER, with vm1's key) and sudo there
 #   cluster    install k3s: vm1–vm3 control plane (embedded etcd), vm4 worker; node labels
 #   images     build the service images on vm1 and import them on every VM
 #   app        deploy / update the application (rolling update, zero downtime) and wait until it is healthy
@@ -18,7 +19,7 @@
 # Inventory: deploy/cluster.env (the four VMs), or INVENTORY=<file>.
 # Secrets: generated on the first run into deploy/cluster.secrets.env (next to the inventory, mode 600, never
 #          committed) – keep that file: the databases only accept the passwords they were created with.
-# Requirements: Ubuntu/Debian on vm1 with sudo; vm2–vm4 reachable from vm1 by SSH, with sudo.
+# Requirements: Ubuntu/Debian on vm1 with sudo; on vm2–vm4 the line of `deploy.sh key` has run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -113,12 +114,8 @@ cmd_access() {
   [[ -z $SUDO ]] || $SUDO -v || fail "sudo on vm1 failed"
   local n
   for n in "${NODES[@]:1}"; do
-    if ! remote "$n" true 2>/dev/null; then
-      [[ -f ~/.ssh/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
-      note "vm$n: copying vm1's SSH key – enter the password of $SSH_USER@$(ip_of "$n")"
-      ssh-copy-id -i ~/.ssh/id_ed25519.pub -o StrictHostKeyChecking=accept-new "$SSH_USER@$(ip_of "$n")" >/dev/null 2>&1 ||
-        fail "vm$n: no SSH access as $SSH_USER – give vm1's key to that VM (docs/deployment-guide.md, step 2); run deploy.sh as your own user, not with sudo; another user name there: SSH_USER in $INVENTORY"
-    fi
+    remote "$n" true 2>/dev/null ||
+      fail "vm$n: no SSH access as $SSH_USER@$(ip_of "$n") – the line of \`deploy/deploy.sh key\` has not run on vm$n yet (docs/deployment-guide.md, step 2). Run deploy.sh as your own user, not with sudo"
     if [[ $SSH_USER != root ]] && ! remote "$n" 'sudo -n true' 2>/dev/null && [[ -z ${SUDO_PASSWORD+set} ]]; then
       read -rsp "  sudo password of $SSH_USER on the VMs: " SUDO_PASSWORD; echo
     fi
@@ -126,6 +123,25 @@ cmd_access() {
     ok "vm$n ($(ip_of "$n")): SSH and sudo"
   done
   ACCESS_CHECKED=1
+}
+
+prepare_url() { # deploy/prepare-vm.sh of exactly this commit on GitHub
+  local origin repo
+  origin=$(git remote get-url origin 2>/dev/null) || return 1
+  repo=$(sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##' <<<"$origin")
+  [[ $repo != "$origin" && $repo == */* ]] || return 1
+  echo "https://raw.githubusercontent.com/$repo/$(git rev-parse HEAD)/deploy/prepare-vm.sh"
+}
+
+cmd_key() { # the line whoever manages vm2–vm4 pastes there
+  [[ -f ~/.ssh/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N '' -C "routine-deploy@$(hostname)" -f ~/.ssh/id_ed25519
+  local url key
+  key=$(cat ~/.ssh/id_ed25519.pub)
+  url=$(prepare_url) && curl -sfI "$url" >/dev/null ||
+    fail "deploy/prepare-vm.sh of this commit is not on GitHub (commit not pushed?) – copy that file to vm2–vm4 and run there: sudo bash prepare-vm.sh '$key'"
+  step "Send this line to whoever manages vm2, vm3 and vm4 – they paste it on their VM (it asks for their sudo password):"
+  printf '\n%s\n\n' "curl -fsSL $url | sudo bash -s -- '$key'"
+  note "It creates the user $SSH_USER there, who logs in only with vm1's key. Check afterwards: deploy/deploy.sh access"
 }
 
 k3s_version() { # every node runs the same version: vm1's, or the current stable release for a new cluster
@@ -389,6 +405,7 @@ for command in "$@"; do # several in a row, e.g. `deploy.sh images app`
       printf "\n%sRoutine runs on 4 VMs: %s%s\n" "$bold" "$(public_url)" "$reset"
       note "Keycloak admin console: $(public_url)/auth/admin – user admin, password KEYCLOAK_ADMIN_PASSWORD in $SECRETS"
       ;;
+    key) cmd_key ;;
     access) cmd_access ;;
     cluster) cmd_cluster ;;
     images) cmd_images ;;

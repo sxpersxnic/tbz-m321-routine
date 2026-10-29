@@ -1,142 +1,89 @@
 # Setting up the four VMs – step by step
 
-A checklist to follow on the VMs by yourself, from start to a working platform. Background, ports, failure
-behaviour and operation: [deployment.md](deployment.md).
+One way, from four freshly installed VMs to the running platform. Background, ports and failure behaviour:
+[deployment.md](deployment.md).
 
-It starts from four freshly installed VMs that know nothing about each other: steps 1–3 install what is missing,
-open the firewall if there is one, and give vm1 SSH access to the other three. Then a single script sets up
-Kubernetes and the platform (step 4).
+| Who | VM | Does |
+| --- | --- | --- |
+| **You** | vm1 – 10.2.44.17 | everything: vm1 is the control plane and installs the other VMs over SSH |
+| **Your teammates** | vm2 – 10.2.44.20, vm3 – 10.2.44.21, vm4 – 10.2.44.28 | paste **one line** you send them (step 2) |
 
-Everything below was run end to end on four Ubuntu 24.04 VMs with the addresses of
-[`deploy/cluster.env`](../deploy/cluster.env) ([deployment.md §8](deployment.md#8-tested)) – also with the firewall
-on, without `tmux`, and with password login switched off on some VMs. Steps 1–3 take about 15 minutes, the script
-about 10.
+You never need your teammates' passwords: the line gives vm1's key access to their VM.
 
-## 0. What you need
+What the VMs need: Ubuntu 24.04 (22.04 works too), 2 vCPU, 4 GB RAM, 20 GB disk, internet access, and a user with
+`sudo` on each. Tested end to end, with the firewall on and without anything preinstalled
+([deployment.md §8](deployment.md#8-tested)) – about 25 minutes in total.
 
-| Check | Why |
-| --- | --- |
-| Four VMs with Ubuntu 24.04 (22.04 works too), 2 vCPU, 4 GB RAM, 20 GB disk | vm1 builds the images and runs a share of the platform |
-| Addresses **10.2.44.17 / .20 / .21 / .28** (vm1–vm4), in one network | Other addresses: note them in step 1, change `deploy/cluster.env` in step 4 |
-| One user with `sudo` on every VM, the same name everywhere | Another name on vm2–vm4: `SSH_USER=<name>` in `deploy/cluster.env` |
-| You can log in to every VM – SSH from your computer over the VPN, or the console of the VM platform | Steps 1–3 run on each VM |
-| Every VM reaches the internet | Ubuntu packages, k3s download (GitHub), images from Docker Hub |
+## 1. You, on vm1: get the code and the line for your teammates
 
-Below, `<user>` is that user's name.
-
-## 1. Prepare each VM – vm1, vm2, vm3 and vm4
-
-Connect the VPN. Log in to the VM (`ssh <user>@10.2.44.20` for vm2, and so on) and paste:
+Connect the VPN, log in to vm1, then paste:
 
 ```bash
-ip -br -4 addr                                   # this VM's 10.2.44.x address must be listed
-sudo apt-get update -q && sudo apt-get install -y openssh-server curl
-curl -sI https://get.k3s.io | head -1            # HTTP/2 200 – this VM reaches the internet
-date -u                                          # must match the other VMs within a minute
-sudo ufw status | head -1                        # "inactive": done with this VM – "active": step 1b
+sudo apt-get install -y git
+git clone https://github.com/sxpersxnic/tbz-m321-routine.git routine
+cd routine
+sudo deploy/prepare-vm.sh
+deploy/deploy.sh key
 ```
 
-| You see | Meaning |
-| --- | --- |
-| no 10.2.44.x address | The VM has another address – note it for `deploy/cluster.env` (step 4). It must be in the same network as the others |
-| `curl` prints nothing or an error | No internet on this VM – the platform cannot be installed; ask whoever runs the VM network |
-| the time is off by more than a minute | `sudo timedatectl set-ntp true`, or ask for NTP – the cluster's certificates need the same time everywhere |
+`prepare-vm.sh` installs what vm1 needs (`curl`, `tmux`) and opens the firewall if it is on. `deploy.sh key`
+creates vm1's SSH key and prints one line, like this:
 
-### 1b. Only if the firewall is active
+```text
+curl -fsSL https://raw.githubusercontent.com/…/deploy/prepare-vm.sh | sudo bash -s -- 'ssh-ed25519 AAAA… routine-deploy@vm1'
+```
 
-The VMs must reach each other on every port, and you must reach the platform. Paste on that VM:
+**Send that line to your teammates** (chat is fine – it holds only vm1's *public* key).
+
+## 2. Your teammates, on vm2, vm3 and vm4: paste the line
+
+Each teammate logs in to their VM as usual, pastes the line and types their own `sudo` password. It ends with:
+
+```text
+  ✔ packages: openssh-server curl git tmux
+  ✔ user routine: logs in with vm1's key, sudo without password
+  ✔ firewall (ufw) is off – nothing to open          (or: is on: opened for the cluster …)
+  ✔ internet reachable
+
+vm2 is ready – addresses: 10.2.44.20 …
+```
+
+That is all they do. The line creates a user `routine` on their VM that only vm1's key can log in to, and that
+`deploy.sh` uses to install Kubernetes there. It is safe to run again.
+
+## 3. You, on vm1: check the access
 
 ```bash
-sudo ufw allow OpenSSH                # keep your own login
-sudo ufw allow from 10.2.44.0/24      # the other VMs: Kubernetes API, etcd, kubelet, pod network (8472/udp)
-sudo ufw allow from 10.42.0.0/16      # pods
-sudo ufw allow from 10.43.0.0/16      # Kubernetes services
-sudo ufw allow 8080/tcp               # Routine (UI and API)
-sudo ufw allow 15672/tcp              # RabbitMQ management – admins
-sudo ufw allow 16686/tcp              # Jaeger – admins, no login: keep it inside the VPN
-sudo ufw reload && sudo ufw status | head -1
+deploy/deploy.sh access
 ```
 
-## 2. Give vm1 access to the other VMs
-
-`deploy.sh` runs on vm1 and installs vm2–vm4 over SSH, with a key instead of a password. Log in to **vm1** and
-create its key (once):
-
-```bash
-sudo apt-get install -y git tmux
-[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
-for ip in 10.2.44.20 10.2.44.21 10.2.44.28; do ssh-copy-id -i ~/.ssh/id_ed25519.pub "$USER@$ip"; done
+```text
+▶ Access from vm1 to vm2–vm4 (user routine)
+[sudo] password for <you>:                 ← your password on vm1
+  ✔ vm2 (10.2.44.20): SSH and sudo
+  ✔ vm3 (10.2.44.21): SSH and sudo
+  ✔ vm4 (10.2.44.28): SSH and sudo
 ```
 
-For every VM, `ssh-copy-id` asks `Are you sure you want to continue connecting (yes/no…)?` – type `yes` – and
-then for your password on that VM.
+`✘ vm3: no SSH access …` – the line has not run on vm3 yet, or it failed there: ask that teammate for the output
+of step 2.
 
-**If it says `Permission denied (publickey)`**, that VM allows no password logins. Copy the key from **your
-computer** instead, which can log in everywhere – once per such VM (here vm2):
+## 4. You, on vm1: deploy
 
-```bash
-ssh <user>@10.2.44.17 cat .ssh/id_ed25519.pub |
-  ssh <user>@10.2.44.20 'mkdir -p -m 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
-```
-
-(Only a console, no SSH from your computer? On vm1 `cat ~/.ssh/id_ed25519.pub`, and add that one line to
-`~/.ssh/authorized_keys` on the other VM.)
-
-**Check on vm1** – three host names, no password question:
-
-```bash
-for ip in 10.2.44.20 10.2.44.21 10.2.44.28; do
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ip" hostname || echo "$ip: NO KEY ACCESS"
-done
-```
-
-## 3. Pre-flight on vm1
-
-Still on vm1, start a `tmux` session: the deployment keeps running if the VPN or your SSH connection drops.
+Start `tmux` first: the deployment keeps running even if the VPN or your SSH connection drops.
 
 ```bash
 tmux new -s deploy
+deploy/deploy.sh
 ```
 
 | tmux | Keys |
 | --- | --- |
+| Back in after a dropped connection (log in to vm1 again first) | `tmux attach -t deploy` |
 | Leave it running in the background | `Ctrl-b`, then `d` |
-| Back in (also after a dropped connection: log in to vm1 again) | `tmux attach -t deploy` |
 | Scroll up | `Ctrl-b`, then `[` – arrow keys, `q` to stop |
 
-Then paste this. Every line must end in `ok`, or HTTP 200/401:
-
-```bash
-ip -br -4 addr | grep -q ' 10.2.44.17/' && echo "vm1 address ok"
-for ip in 10.2.44.20 10.2.44.21 10.2.44.28; do ping -c1 -W2 $ip >/dev/null && echo "$ip ok" || echo "$ip NOT REACHABLE"; done
-curl -sI https://get.k3s.io | head -1                  # HTTP/2 200 – internet
-curl -sI https://registry-1.docker.io/v2/ | head -1    # HTTP/2 401 – Docker Hub reachable (401 is right)
-sudo -v && echo "sudo ok"
-```
-
-`NOT REACHABLE`: the VMs are not in one network, or a firewall between them (outside the VMs) blocks them – that
-is the VM platform's network configuration, not something on the VMs.
-
-## 4. Clone and run
-
-```bash
-git clone https://github.com/sxpersxnic/tbz-m321-routine.git routine
-cd routine
-deploy/deploy.sh
-```
-
-Other addresses than 10.2.44.17/.20/.21/.28? Before `deploy/deploy.sh`, edit them in `deploy/cluster.env`
-(`nano deploy/cluster.env`) – they also go into the URLs below.
-
-It asks for passwords at the start, then runs on its own:
-
-| Prompt | Type |
-| --- | --- |
-| `[sudo] password for <user>:` | your password on vm1 |
-| `sudo password of <user> on the VMs:` | your sudo password on vm2–vm4 (once; kept in memory only) – only if `sudo` there needs a password |
-| `<user>@10.2.44.20's password:` | only if you skipped step 2: the script copies vm1's key itself, where password login is allowed |
-
-If a step takes longer than 15 minutes, `sudo` on vm1 may ask once more. The steps you will see:
+It may ask for your `sudo` password on vm1, nothing else. Then it runs on its own, about 10 minutes:
 
 ```text
 ▶ Access from vm1 to vm2–vm4         ✔ vm2 … vm4: SSH and sudo
@@ -168,8 +115,7 @@ With the VPN connected:
 | Jaeger | http://10.2.44.17:16686 | – |
 | Keycloak admin | http://10.2.44.17:8080/auth/admin | `admin` / `KEYCLOAK_ADMIN_PASSWORD` |
 
-Sign in through vm1's address only: Keycloak sends you back only to `PUBLIC_URL` (`http://10.2.44.17:8080`).
-The other VMs serve the same platform on :8080 for API calls and a load balancer.
+Sign in through vm1's address only: Keycloak sends you back only to `http://10.2.44.17:8080`.
 
 For the demo scenarios (self-healing, scaling, a VM failing) see [deployment.md §5](deployment.md#5-operation). In a
 new shell on vm1, plain `kubectl` works (`kubectl -n routine get pods -o wide`).
@@ -181,16 +127,15 @@ is already done.
 
 | ✘ message | What to do |
 | --- | --- |
-| `this machine is not vm1` | You are on another VM, or vm1 has another address – fix `deploy/cluster.env` |
-| `vmN: no SSH access` | Step 2 for that VM – the check there must print its host name. Other user name on that VM → `SSH_USER` in `deploy/cluster.env` |
-| `vmN: k3s installation failed` | On that VM: `sudo tail -30 /var/log/routine-k3s-install.log` – usually no internet on that VM |
-| `vmN did not become ready` | On that VM: `sudo journalctl -u k3s -n 50` (vm4: `-u k3s-agent`) – usually the firewall: `sudo ufw status` on every VM, step 1b |
-| `build of … failed` | `df -h /` and `free -m` on vm1 (disk, memory), Docker Hub reachable (step 3) |
-| `… did not become ready` (app step) | `kubectl -n routine get pods -o wide`. Pods that keep restarting only on some VMs: traffic between the VMs is blocked – firewall, step 1b. Details: `kubectl -n routine describe pod <pod>`, `kubectl -n routine logs <pod>` |
+| `this machine is not vm1` | You are on another VM, or vm1 has another address than in `deploy/cluster.env` |
+| `vmN: no SSH access` | Step 2 has not run on that VM, or failed there – ask that teammate |
+| `vmN: k3s installation failed` | That VM: `sudo tail -30 /var/log/routine-k3s-install.log` – usually no internet there |
+| `vmN did not become ready` | That VM: `sudo journalctl -u k3s -n 50` (vm4: `-u k3s-agent`) – usually a firewall: step 2's line again on that VM |
+| `build of … failed` | On vm1: `df -h /` and `free -m` (disk, memory) |
+| `… did not become ready` (app step) | `kubectl -n routine get pods -o wide`. Pods that keep restarting only on some VMs: traffic between the VMs is blocked (firewall). Details: `kubectl -n routine describe pod <pod>`, `kubectl -n routine logs <pod>` |
 | `exceeded its progress deadline` | A service waited more than 10 minutes, e.g. while the network was broken. Once the cause is fixed, run `deploy/deploy.sh` again |
 | `Keycloak does not answer` (verify) | Keycloak is slow on its first start – wait a minute, `deploy/deploy.sh verify` |
 | Browser: "Invalid redirect uri" | Open exactly `http://10.2.44.17:8080` |
-| Browser: "HTTPS required" | The VMs have public addresses – see [deployment.md §9](deployment.md#9-troubleshooting) |
 
 More symptoms and their causes: [deployment.md §9](deployment.md#9-troubleshooting).
 
@@ -198,16 +143,16 @@ More symptoms and their causes: [deployment.md §9](deployment.md#9-troubleshoot
 later (e.g. with Claude Code, once you are off the VPN):
 
 ```bash
-# on vm1
+# on vm1, in ~/routine
 { deploy/deploy.sh status; kubectl -n routine get events --sort-by=.lastTimestamp | tail -60
   kubectl -n routine logs -l app=keycloak --tail=40 --prefix; } >~/routine-diagnosis.txt 2>&1
 # on your computer
-scp <user>@10.2.44.17:routine-diagnosis.txt .
+scp <you>@10.2.44.17:routine-diagnosis.txt .
 ```
 
-## 8. Start over
+## 8. Later
 
-| Goal | Command |
+| Goal | On vm1, in ~/routine |
 | --- | --- |
 | Deploy a new version | `git pull && deploy/deploy.sh images app` |
 | Remove the application, keep the data | `deploy/deploy.sh destroy` (back with `deploy/deploy.sh app`) |
