@@ -49,7 +49,8 @@ api() { # api METHOD PATH [JSON]
 }
 
 login() { # token from Keycloak: client routine-cli (password grant, for scripts only – the web app uses the code flow)
-  TOKEN=$(curl -sS -f "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" -d grant_type=password -d client_id=routine-cli \
+  # scope openid: Keycloak answers /userinfo (user_id) only for OpenID Connect tokens – otherwise 403
+  TOKEN=$(curl -sS -f "$GATEWAY/auth/realms/routine/protocol/openid-connect/token" -d grant_type=password -d client_id=routine-cli -d scope=openid \
     --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASSWORD" | jq -r .access_token) \
     || fail "Login failed – is the system running? (docker compose up -d --wait)"
   [[ -n $TOKEN && $TOKEN != null ]] || fail "no token received"
@@ -297,6 +298,7 @@ scenario_idempotency() {
   step "b) The same ActionRequested message is delivered twice"
   action_id=$(execution "$first" | jq -r '.actions[0].id')
   owner=$(user_id)
+  [[ $owner =~ ^[0-9a-f-]{36}$ ]] || fail "no user id from Keycloak (userinfo) – the message would be rejected, not deduplicated"
   before=$(count /api/v1/tasks)
   envelope=$(jq -nc --arg mid "$(uuid)" --arg aid "$action_id" --arg eid "$first" --arg rid "$rid" --arg owner "$owner" '{
     messageId: $mid, type: "ActionRequested", version: 1, occurredAt: (now | todate), source: "demo-script", correlationId: $eid,
@@ -308,7 +310,11 @@ scenario_idempotency() {
   after=$(count /api/v1/tasks)
   info "tasks before: $before, after: $after"
   [[ $before == "$after" ]] || fail "the duplicate created an extra task"
-  docker compose logs --no-log-prefix --since 30s task-service routine-service 2>/dev/null | grep "$action_id" | jq -r 'select(.msg | test("duplicate")) | "    \(.service): \(.msg)"' | head -4
+  # an unchanged count alone also holds when task-service rejected the message – it must have seen the duplicates
+  local seen
+  seen=$(docker compose logs --no-log-prefix --since 30s task-service routine-service 2>/dev/null | grep "$action_id" | jq -r 'select(.msg | test("duplicate")) | "    \(.service): \(.msg)"')
+  grep -q 'task-service' <<<"$seen" || fail "task-service did not report the deliveries as duplicates"
+  head -4 <<<"$seen"
   ok "duplicates detected (actionId = idempotency key) → ignored, result only reported again"
 }
 
