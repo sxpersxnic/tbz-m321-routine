@@ -220,6 +220,7 @@ networks. `deploy/deploy.sh` ran unchanged on vm1, as in [deployment-guide.md](d
 | Test | Result |
 | --- | --- |
 | Fresh VMs: pre-flight of the guide, `git clone`, `deploy/deploy.sh` – passwords typed only at the start | all steps ✔ in **7 min 49 s**; 29 pods ready, **0 restarts**; main workflow `COMPLETED`; every VM answers on :8080 |
+| Untouched VMs as in the guide: firewall (`ufw`) on, no `tmux`, password SSH off on two VMs, other user names than `routine` – `deploy.sh key` on vm1, its line pasted on vm2–vm4, `deploy.sh` inside `tmux` | `prepare-vm.sh` ✔ on all four (and again, unchanged); `deploy.sh access` ✔ without any password of vm2–vm4; deployment all ✔ |
 | Browser through a tunnel to vm1 (like the VPN): `http://10.2.44.17:8080`, "Try the demo" | signed in through Keycloak, overview shown; a routine started from the UI (202); RabbitMQ on :15672, Jaeger on :16686 |
 | Update: new commit, `deploy.sh images app`, requests every 0.5 s through two other VMs meanwhile | 8 new images, rolling update, **0 of 188** requests failed |
 | vm2 powered off, requests through vm1 and vm3 | **0 of 184** failed; vm2 back: rejoined, broker again 3 nodes |
