@@ -117,7 +117,7 @@ cmd_access() {
       [[ -f ~/.ssh/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
       note "vm$n: copying vm1's SSH key – enter the password of $SSH_USER@$(ip_of "$n")"
       ssh-copy-id -i ~/.ssh/id_ed25519.pub -o StrictHostKeyChecking=accept-new "$SSH_USER@$(ip_of "$n")" >/dev/null 2>&1 ||
-        fail "vm$n: SSH login as $SSH_USER failed – run deploy.sh as your own user (not with sudo), or set SSH_USER in $INVENTORY"
+        fail "vm$n: no SSH access as $SSH_USER – give vm1's key to that VM (docs/deployment-guide.md, step 2); run deploy.sh as your own user, not with sudo; another user name there: SSH_USER in $INVENTORY"
     fi
     if [[ $SSH_USER != root ]] && ! remote "$n" 'sudo -n true' 2>/dev/null && [[ -z ${SUDO_PASSWORD+set} ]]; then
       read -rsp "  sudo password of $SSH_USER on the VMs: " SUDO_PASSWORD; echo
