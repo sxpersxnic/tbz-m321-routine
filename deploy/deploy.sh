@@ -213,6 +213,17 @@ cmd_cluster() {
   local brokers; printf -v brokers 'vm%s ' "${BROKER_NODES[@]}"
   ok "labels: rabbitmq → ${brokers% }, databases → vm$DATA_NODE"
 
+  # cluster DNS: k3s starts one CoreDNS replica, usually on vm1. When that VM failed, no service could resolve a
+  # name until Kubernetes moved it – the platform was down for almost 8 minutes (measured). Two replicas; k3s'
+  # manifest spreads them over the VMs and does not manage the replica count, so a k3s restart keeps it.
+  local deadline=$((SECONDS + 120))
+  until k -n kube-system get deployment coredns >/dev/null 2>&1; do
+    ((SECONDS < deadline)) || fail "k3s did not create CoreDNS – journalctl -u k3s"
+    sleep 2
+  done
+  k -n kube-system scale deployment coredns --replicas=2 >/dev/null
+  ok "cluster DNS (CoreDNS): 2 replicas on different VMs"
+
   if [[ ! -f ~/.kube/config ]]; then # plain `kubectl` for the admin on vm1
     mkdir -p ~/.kube && $SUDO cat /etc/rancher/k3s/k3s.yaml >~/.kube/config && chmod 600 ~/.kube/config
     note "kubeconfig → ~/.kube/config"
