@@ -85,9 +85,10 @@ with the fixed addresses above, and internet access (k3s release download, publi
 `rabbitmq`).
 
 **Access**: you log in to vm1 and run `deploy/deploy.sh` there as a user with `sudo`. vm1 reaches vm2–vm4 over SSH
-as the same user (or `SSH_USER` in `deploy/cluster.env`); `deploy.sh access` creates a key on vm1 and copies it to
-the other VMs – it asks for their password once if the key is not there yet, and for the `sudo` password if `sudo`
-needs one. vm1 installs `docker.io` (to build the images), `curl`, `jq` and `openssl` from the distribution's
+as the user `routine` (`SSH_USER` in `deploy/cluster.env`) with vm1's key: `deploy.sh key` prints a line that
+whoever manages vm2–vm4 runs there once – it runs [`deploy/prepare-vm.sh`](../deploy/prepare-vm.sh), which creates
+that user with vm1's public key and `sudo` without password, installs the basics and opens an active firewall
+([deployment-guide.md](deployment-guide.md), steps 1–2). vm1 installs `docker.io` (to build the images), `curl`, `jq` and `openssl` from the distribution's
 packages if missing.
 
 **Network**: open these ports between the VMs, and the public ones to your users:
@@ -119,7 +120,8 @@ a code change.
 
 | Step | Command | What happens |
 | --- | --- | --- |
-| 1 | `deploy.sh access` | Checks that it runs on vm1. SSH key from vm1 to vm2–vm4 (`ssh-copy-id` when needed), `sudo` on every VM |
+| 0 | `deploy.sh key` | Once, before everything: creates vm1's SSH key and prints the line for vm2–vm4 (`deploy/prepare-vm.sh` with that key, from GitHub at this commit) |
+| 1 | `deploy.sh access` | Checks that it runs on vm1, SSH with vm1's key to vm2–vm4 and `sudo` on every VM |
 | 2 | `deploy.sh cluster` | Installs k3s with the official installer (it verifies the binary's checksum) and writes `/etc/rancher/k3s/config.yaml` on every VM: vm1 starts the cluster (`cluster-init`), vm2 and vm3 join as **servers** one after the other, vm4 joins as **agent**. Every VM gets the same version (vm1's, or the current stable release for a new cluster); Traefik and ServiceLB are disabled (the platform brings its own edge). Pod traffic between the VMs (flannel VXLAN) uses the interface of the VM's address, also on VMs with a second network card. Node labels `routine/rabbitmq` (vm1–vm3) and `routine/data` (vm4). Copies the kubeconfig to `~/.kube/config` on vm1 if there is none and sets `KUBECONFIG` in `~/.bashrc` |
 | 3 | `deploy.sh images` | Builds the 8 service images **on vm1** with Docker and imports them into the containerd of every VM (`k3s ctr images import`) – no registry needed. Tag = git commit, plus a content hash when there are uncommitted changes. Skipped when every VM has the images already |
 | 4 | `deploy.sh app` | Generates the secrets on the first run (below), renders the overlay and `kubectl apply -k`. Waits until every StatefulSet, Deployment and DaemonSet is rolled out, then until **every quorum queue has a replica on every broker node** (`rabbitmq-queues grow`) – only then may a VM fail. Removes config maps and secrets of earlier versions |
@@ -218,6 +220,7 @@ networks. `deploy/deploy.sh` ran unchanged on vm1, as in [deployment-guide.md](d
 | Test | Result |
 | --- | --- |
 | Fresh VMs: pre-flight of the guide, `git clone`, `deploy/deploy.sh` – passwords typed only at the start | all steps ✔ in **7 min 49 s**; 29 pods ready, **0 restarts**; main workflow `COMPLETED`; every VM answers on :8080 |
+| Untouched VMs as in the guide: firewall (`ufw`) on, no `tmux`, password SSH off on two VMs, other user names than `routine` – `deploy.sh key` on vm1, its line pasted on vm2–vm4, `deploy.sh` inside `tmux` | `prepare-vm.sh` ✔ on all four (and again, unchanged); `deploy.sh access` ✔ without any password of vm2–vm4; deployment all ✔ |
 | Browser through a tunnel to vm1 (like the VPN): `http://10.2.44.17:8080`, "Try the demo" | signed in through Keycloak, overview shown; a routine started from the UI (202); RabbitMQ on :15672, Jaeger on :16686 |
 | Update: new commit, `deploy.sh images app`, requests every 0.5 s through two other VMs meanwhile | 8 new images, rolling update, **0 of 188** requests failed |
 | vm2 powered off, requests through vm1 and vm3 | **0 of 184** failed; vm2 back: rejoined, broker again 3 nodes |
@@ -247,7 +250,7 @@ Two findings from the sandbox tests are built into the manifests:
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `deploy.sh access` fails for a VM | SSH from vm1 to that address (`ssh <user>@10.2.44.20`) – wrong user (`SSH_USER`), password login disabled (copy `~/.ssh/id_ed25519.pub` from vm1 yourself), or port 22 blocked |
+| `deploy.sh access` fails for a VM | The line of `deploy.sh key` has not run on that VM, or failed there. From vm1: `ssh routine@10.2.44.20` – port 22 blocked, or `deploy.sh` run with `sudo` (then it uses root's key instead of yours) |
 | A VM does not become `Ready` after joining | On that VM: `journalctl -u k3s` (servers) / `journalctl -u k3s-agent` (vm4), installer log in `/var/log/routine-k3s-install.log`. Usually ports 6443/2379–2380/8472 between the VMs (§3) |
 | Pods stay `Pending` | `kubectl -n routine describe pod <pod>`: anti-affinity with too few `Ready` VMs, or a missing node label (`deploy.sh cluster` sets them) |
 | `ErrImageNeverPull` | The image of this tag is missing on that VM – `deploy.sh images` |
