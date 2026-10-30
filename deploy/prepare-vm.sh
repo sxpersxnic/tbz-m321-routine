@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Routine – prepares one VM for the Kubernetes deployment (docs/deployment-guide.md). Safe to run again.
 #
-#   vm2, vm3: the line `deploy/deploy.sh key` prints on vm1 – it runs this script with vm1's public key:
+#   vm2–vm4:  the line `deploy/deploy.sh key` prints on vm1 – it runs this script with vm1's public key:
 #             curl -fsSL <url of this script> | sudo bash -s -- '<vm1 public key>'
 #   vm1:      sudo deploy/prepare-vm.sh            (no key: vm1 is where deploy.sh runs)
 #
