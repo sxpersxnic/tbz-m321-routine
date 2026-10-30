@@ -1,12 +1,16 @@
-# Setting up the three VMs – step by step
+# Setting up the VMs – step by step
 
-One way, from three freshly installed VMs to the running platform. Background, ports and failure behaviour:
+One way, from freshly installed VMs to the running platform. Background, ports and failure behaviour:
 [deployment.md](deployment.md).
 
 | Who | VM | Does |
 | --- | --- | --- |
 | **You** | vm1 – 10.2.44.21 | everything: vm1 is the control plane and installs the other VMs over SSH |
 | **Your teammates** | vm2 – 10.2.44.20, vm3 – 10.2.44.17 | paste **one line** you send them (step 2) |
+| **Whoever manages vm4** | vm4 – 10.2.44.28 (worker) | the same line, once vm4 is available again – [step 9](#9-adding-vm4-once-it-is-back) |
+
+**vm4 is temporarily unavailable.** Until it is back, comment out the line `VM4=10.2.44.28` in
+`deploy/cluster.env` on vm1 (`# VM4=…`); everything below then works with vm1–vm3.
 
 You never need your teammates' passwords: the line gives vm1's key access to their VM.
 
@@ -154,5 +158,53 @@ scp <you>@10.2.44.21:routine-diagnosis.txt .
 | Goal | On vm1, in ~/routine |
 | --- | --- |
 | Deploy a new version | `git pull && deploy/deploy.sh images app` |
+| Add vm4 | [step 9](#9-adding-vm4-once-it-is-back) |
+| New passwords | [step 10](#10-new-passwords) |
 | Remove the application, keep the data | `deploy/deploy.sh destroy` (back with `deploy/deploy.sh app`) |
-| Remove everything, data included | on vm1–vm3 `sudo /usr/local/bin/k3s-uninstall.sh`, then `deploy/deploy.sh` again |
+| Remove everything, data included | on every VM `sudo /usr/local/bin/k3s-uninstall.sh`, then `deploy/deploy.sh` again |
+
+## 9. Adding vm4 once it is back
+
+vm4 joins as a worker: it gets an edge and replicas of the services, no data – vm1–vm3 stay as they are.
+
+1. **On vm4** (whoever manages it): paste the line of `deploy/deploy.sh key`, exactly as in step 2. Run
+   `deploy/deploy.sh key` on vm1 again if you no longer have the line.
+2. **On vm1**: `VM4=10.2.44.28` must be active in `deploy/cluster.env` – it is in the repository; if you commented it
+   out, remove the `#` again. Then:
+
+   ```bash
+   cd ~/routine && git pull
+   tmux new -s deploy
+   deploy/deploy.sh
+   ```
+
+It ends with:
+
+```text
+▶ Kubernetes (k3s): vm1–vm3 control plane, vm4 worker   ✔ vm4: k3s v1.36.5+k3s1 agent, ready
+▶ Images (tag …)                                        ✔ imported on vm4 …
+▶ Application                                           ✔ all services ready
+▶ Verify                                                ✔ main workflow succeeded, ✔ vm1 … vm4 answer on :8080
+Routine runs on 4 VMs: http://10.2.44.21:8080
+```
+
+The services roll once so that their replicas spread onto vm4 – without downtime, like an update.
+`kubectl -n routine get pods -o wide` shows the pods on vm4.
+
+| ✘ message | What to do |
+| --- | --- |
+| `vm4: no SSH access` | Step 1 has not run on vm4 yet – or vm4 is still down: comment out `VM4=` and run `deploy/deploy.sh` without it |
+| `vm4: its SSH host key changed` | vm4 was reinstalled: `ssh-keygen -R 10.2.44.28` on vm1, then `deploy/deploy.sh` again |
+
+## 10. New passwords
+
+On vm1, in `~/routine`, inside `tmux`:
+
+```bash
+deploy/rotate-secrets.sh
+```
+
+It sets a new password for Keycloak's admin, RabbitMQ and the five databases, writes them to
+`deploy/cluster.secrets.env` and rolls the pods onto them (about 3 minutes, ends with the main workflow). Then copy
+the file to your password manager again – the old passwords no longer work. Only some:
+`deploy/rotate-secrets.sh RABBITMQ_PASSWORD`. Details: [deployment.md §4](deployment.md#new-passwords-rotation).

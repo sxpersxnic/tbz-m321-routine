@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Routine – automated deployment on three VMs (Kubernetes, k3s). Details: docs/deployment.md
+# Routine – automated deployment on the VMs of deploy/cluster.env (Kubernetes, k3s). Details: docs/deployment.md
 #
 # Run on vm1, in a clone of this repository – it sets up the whole cluster from there:
 #   deploy/deploy.sh [command …]   (several run in order, e.g. `deploy.sh images app`)
 #
 # Commands:
-#   key        print the line for vm2 and vm3: it runs deploy/prepare-vm.sh there with vm1's public key
+#   key        print the line for the other VMs: it runs deploy/prepare-vm.sh there with vm1's public key
 #   all        access → cluster → images → app → verify (default; every step is idempotent)
-#   access     check SSH from vm1 to vm2 and vm3 (user SSH_USER, with vm1's key) and sudo there
-#   cluster    install k3s: vm1–vm3 all control plane (embedded etcd); node labels
+#   access     check SSH from vm1 to the other VMs (user SSH_USER, with vm1's key) and sudo there
+#   cluster    install k3s: vm1–vm3 control plane (embedded etcd), vm4 … workers; node labels
 #   images     build the service images on vm1 and import them on every VM
 #   app        deploy / update the application (rolling update, zero downtime) and wait until it is healthy
 #   verify     run the main workflow (scripts/demo.sh main) against the deployed system
@@ -16,10 +16,12 @@
 #   status     nodes, pods and where they run
 #   destroy    remove the application (volumes and cluster stay)
 #
-# Inventory: deploy/cluster.env (the three VMs), or INVENTORY=<file>.
+# Inventory: deploy/cluster.env (VM1–VM3, optionally VM4 …), or INVENTORY=<file>. A VM added there joins the
+#            cluster as a worker on the next run.
 # Secrets: generated on the first run into deploy/cluster.secrets.env (next to the inventory, mode 600, never
 #          committed) – keep that file: the databases only accept the passwords they were created with.
-# Requirements: Ubuntu/Debian on vm1 with sudo; on vm2 and vm3 the line of `deploy.sh key` has run.
+#          New values: deploy/rotate-secrets.sh
+# Requirements: Ubuntu/Debian on vm1 with sudo; on the other VMs the line of `deploy.sh key` has run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -31,8 +33,11 @@ source "$INVENTORY"
 SECRETS=${SECRETS:-${INVENTORY%.env}.secrets.env}
 GENERATED=deploy/.generated
 NAMESPACE=routine
-NODES=(1 2 3)
-SERVERS=(1 2 3)   # control plane: etcd needs a majority – three servers tolerate the loss of one
+NODES=() # every VMn set in the inventory
+for n in 1 2 3 4 5 6 7 8 9; do var=VM$n; [[ -z ${!var:-} ]] || NODES+=("$n"); done
+[[ " ${NODES[*]} " == " 1 2 3 "* ]] || { echo "$INVENTORY must set VM1, VM2 and VM3" >&2; exit 1; }
+SERVERS=(1 2 3)   # control plane: etcd needs a majority – three servers tolerate the loss of one (four would too)
+                  # every further VM joins as an agent: a worker for the services and the edge
 BROKER_NODES=(1 2 3)
 DATA_NODE=3 # the databases' volumes live on one VM – not vm1, which builds the images
 IMAGES=(gateway keycloak routine-service task-service notification-service integration-worker mock-external web)
@@ -51,6 +56,11 @@ fail() { printf "  %s✘ %s%s\n" "$red" "$*" "$reset" >&2; exit 1; }
 ip_of() { local var="VM$1"; echo "${!var:?VM$1 is not set in $INVENTORY}"; }
 public_url() { echo "${PUBLIC_URL:-http://$(ip_of 1):8080}"; }
 is_server() { [[ " ${SERVERS[*]} " == *" $1 "* ]]; }
+others() { # "vm2, vm3 and vm4" – the VMs vm1 reaches over SSH
+  local list="" n
+  for n in "${NODES[@]:1}"; do list+="${list:+, }vm$n"; done
+  echo "${list%, *} and ${list##*, }"
+}
 k() { $SUDO k3s kubectl "$@"; } # kubectl of the cluster (vm1 is a server)
 
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
@@ -109,13 +119,18 @@ rabbit_auth() { printf 'routine:%s' "$RABBITMQ_PASSWORD"; }
 
 # ------------------------------------------------------------------ steps
 cmd_access() {
-  step "Access from vm1 to vm2 and vm3 (user $SSH_USER)"
+  step "Access from vm1 to $(others) (user $SSH_USER)"
   ip -o addr show | grep -qF " $(ip_of 1)/" || fail "this machine is not vm1 ($(ip_of 1)) – run deploy.sh on vm1"
   [[ -z $SUDO ]] || $SUDO -v || fail "sudo on vm1 failed"
-  local n
+  local n error
   for n in "${NODES[@]:1}"; do
-    remote "$n" true 2>/dev/null ||
+    if ! error=$(remote "$n" true 2>&1); then
+      # a reinstalled VM has a new host key – SSH refuses it until the old one is removed (the user's decision)
+      [[ $error != *"IDENTIFICATION HAS CHANGED"* ]] ||
+        fail "vm$n: its SSH host key changed (reinstalled VM?) – if that is expected: ssh-keygen -R $(ip_of "$n"), then run deploy.sh again"
+      is_server "$n" || note "vm$n is a worker – to deploy without it for now, comment out VM$n in $INVENTORY"
       fail "vm$n: no SSH access as $SSH_USER@$(ip_of "$n") – the line of \`deploy/deploy.sh key\` has not run on vm$n yet (docs/deployment-guide.md, step 2). Run deploy.sh as your own user, not with sudo"
+    fi
     if [[ $SSH_USER != root ]] && ! remote "$n" 'sudo -n true' 2>/dev/null && [[ -z ${SUDO_PASSWORD+set} ]]; then
       read -rsp "  sudo password of $SSH_USER on the VMs: " SUDO_PASSWORD; echo
     fi
@@ -133,13 +148,13 @@ prepare_url() { # deploy/prepare-vm.sh of exactly this commit on GitHub
   echo "https://raw.githubusercontent.com/$repo/$(git rev-parse HEAD)/deploy/prepare-vm.sh"
 }
 
-cmd_key() { # the line whoever manages vm2 and vm3 pastes there
+cmd_key() { # the line whoever manages the other VMs pastes there
   [[ -f ~/.ssh/id_ed25519 ]] || ssh-keygen -q -t ed25519 -N '' -C "routine-deploy@$(hostname)" -f ~/.ssh/id_ed25519
   local url key
   key=$(cat ~/.ssh/id_ed25519.pub)
   url=$(prepare_url) && curl -sfI "$url" >/dev/null ||
-    fail "deploy/prepare-vm.sh of this commit is not on GitHub (commit not pushed?) – copy that file to vm2 and vm3 and run there: sudo bash prepare-vm.sh '$key'"
-  step "Send this line to whoever manages vm2 and vm3 – they paste it on their VM (it asks for their sudo password):"
+    fail "deploy/prepare-vm.sh of this commit is not on GitHub (commit not pushed?) – copy that file to $(others) and run there: sudo bash prepare-vm.sh '$key'"
+  step "Send this line to whoever manages $(others) – they paste it on their VM (it asks for their sudo password):"
   printf '\n%s\n\n' "curl -fsSL $url | sudo bash -s -- '$key'"
   note "It creates the user $SSH_USER there, who logs in only with vm1's key. Check afterwards: deploy/deploy.sh access"
 }
@@ -184,11 +199,13 @@ wait_node_ready() {
 }
 
 cmd_cluster() {
-  step "Kubernetes (k3s): vm1–vm3, each part of the control plane"
+  local workers="" n
+  for n in "${NODES[@]:3}"; do workers+="${workers:+, }vm$n"; done
+  step "Kubernetes (k3s): vm1–vm3 control plane${workers:+, $workers worker}"
   [[ -n ${ACCESS_CHECKED:-} ]] || cmd_access
   need_tools curl openssl
   load_secrets
-  local version installer=$WORK/k3s-install.sh config=$WORK/k3s-config.yaml token=$WORK/k3s-token role n
+  local version installer=$WORK/k3s-install.sh config=$WORK/k3s-config.yaml token=$WORK/k3s-token role
   version=$(k3s_version)
   [[ $version == v* ]] || fail "could not determine the k3s version – set K3S_VERSION in $INVENTORY"
   curl -sSfL https://get.k3s.io -o "$installer" || fail "download of the k3s installer (get.k3s.io) failed"
@@ -201,6 +218,12 @@ cmd_cluster() {
       as_root "$n" 'systemctl is-active --quiet k3s || systemctl is-active --quiet k3s-agent'; then
       ok "vm$n: k3s $version $role, running"
       continue
+    fi
+    if ! is_server "$n" && k get node "vm$n" >/dev/null 2>&1 && ! as_root "$n" 'systemctl is-active --quiet k3s-agent'; then
+      # a reinstalled VM comes with a new node password – k3s refuses it while the old registration exists
+      k delete node "vm$n" >/dev/null
+      k -n kube-system delete secret "vm$n.node-password.k3s" --ignore-not-found >/dev/null
+      note "vm$n: removed its old registration in the cluster (k3s was not running there)"
     fi
     note "vm$n: installing k3s $version …"
     copy_to "$n" "$config" /tmp/routine-k3s-config.yaml
@@ -320,6 +343,12 @@ cmd_render() { # deploy/.generated: overlay on deploy/k8s with the image tag, se
     echo "  - { name: edge-config, files: [nginx.conf] }"
     echo "secretGenerator:"
     echo "  - { name: routine-secrets, envs: [secrets.env] }"
+    # the VMs in the pod template: when one is added, the Deployments roll once and the scheduler spreads their
+    # replicas over all VMs – without it, a new VM would only get the edge until the next update
+    echo "patches:"
+    echo "  - target: { kind: Deployment }"
+    printf '    patch: "{ apiVersion: apps/v1, kind: Deployment, metadata: { name: any }, spec: { template: { metadata: { annotations: { routine/vms: %s } } } } }"\n' \
+      "'${NODES[*]/#/vm}'"
   } >"$GENERATED/kustomization.yaml"
 }
 

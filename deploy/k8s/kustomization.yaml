@@ -1,4 +1,4 @@
-# Routine on Kubernetes (k3s on three VMs) – the base manifests. Deployed by deploy/deploy.sh (see
+# Routine on Kubernetes (k3s on three VMs, plus workers) – the base manifests. Deployed by deploy/deploy.sh (see
 # docs/deployment.md), which renders an overlay on top (deploy/.generated/, never committed): the image tag,
 # PUBLIC_URL, the generated secrets and the configuration files from infra/.
 #
