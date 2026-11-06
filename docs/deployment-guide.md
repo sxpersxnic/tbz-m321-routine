@@ -135,6 +135,48 @@ is already done.
 | `exceeded its progress deadline` | A service waited more than 10 minutes, e.g. while the network was broken. Once the cause is fixed, run `deploy/deploy.sh` again |
 | `Keycloak does not answer` (verify) | Keycloak is slow on its first start – wait a minute, `deploy/deploy.sh verify` |
 | Browser: "Invalid redirect uri" | Open exactly `http://10.2.44.21:8080` |
+| `vmN: only … GB free on /var/lib` | [No space left on device](#no-space-left-on-device) |
+| `vmN: ports 8080 15672 16686 are held by docker-proxy` | [Ports held by docker-proxy](#ports-held-by-docker-proxy) |
+| Browser: black page, console `ERR_CONTENT_LENGTH_MISMATCH` | A full disk (nginx cannot buffer the large JavaScript file and cuts it off), or an old `docker compose` stack answers instead of the cluster – `deploy/deploy.sh access` names which |
+
+### No space left on device
+
+A VM with 20 GB fills up when it also keeps Docker images and stacks from testing. Symptoms: `sudo journalctl -u k3s
+-n 20` ends in `no space left on device` and k3s restarts every 5 seconds; the browser gets cut-off files. On that VM:
+
+```bash
+df -h /var/lib
+```
+
+```bash
+sudo du -xh --max-depth=2 /var/lib 2>/dev/null | sort -h | tail -8
+```
+
+Usually `/var/lib/docker` is the largest. Docker is only used for building – the cluster runs on k3s' own
+containerd, so this frees space without touching the cluster (an old compose stack must be removed first, below):
+
+```bash
+sudo docker image prune -af && sudo docker builder prune -af
+```
+
+k3s starts again by itself within seconds once there is space. Check with `kubectl get nodes`, then run
+`deploy/deploy.sh` again.
+
+### Ports held by docker-proxy
+
+A `docker compose up` from testing still runs on that VM and holds :8080 (and :15672, :16686) – the browser sees that
+stack, not the cluster. Remove its containers (`tbz-m321-routine` is the folder name the stack was started from –
+`sudo docker ps` shows it as the prefix of the container names):
+
+```bash
+sudo docker ps -aq --filter label=com.docker.compose.project=tbz-m321-routine | xargs -r sudo docker rm -f
+```
+
+Its volumes hold that stack's test data (not the cluster's). They take space; remove them once you don't need them:
+
+```bash
+sudo docker volume ls -q --filter label=com.docker.compose.project=tbz-m321-routine | xargs -r sudo docker volume rm
+```
 
 More symptoms and their causes: [deployment.md §9](deployment.md#9-troubleshooting).
 

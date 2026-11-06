@@ -122,7 +122,27 @@ cmd_access() {
     as_root "$n" true || fail "vm$n: sudo failed"
     ok "vm$n ($(ip_of "$n")): SSH and sudo"
   done
+  for n in "${NODES[@]}"; do preflight "$n"; done
   ACCESS_CHECKED=1
+}
+
+# What breaks the cluster without saying so: a full disk (etcd stops, k3s restarts forever, nginx cuts large
+# responses off) and another program on the platform's ports (e.g. a `docker compose up` from testing – it keeps
+# answering on :8080, so the browser sees that stack instead of the cluster).
+MIN_FREE_GB=${MIN_FREE_GB:-3}
+PUBLIC_PORTS=(8080 15672 16686)
+preflight() { # preflight <vm>
+  local n=$1 free holders filter
+  free=$(as_root "$n" 'df --output=avail -BG /var/lib | tail -1 | tr -dc 0-9')
+  free=${free:-0}
+  ((free >= MIN_FREE_GB)) ||
+    fail "vm$n: only ${free} GB free on /var/lib (minimum $MIN_FREE_GB) – free space first: docs/deployment-guide.md §7, \"no space left on device\""
+  filter=$(printf ' or sport = :%s' "${PUBLIC_PORTS[@]}")
+  # k3s itself may hold these ports (hostPort / NodePort) – anything else is in the way
+  holders=$(as_root "$n" "ss -Hltnp '( ${filter# or } )'" | grep -v '"k3s' | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | sort -u | paste -sd, -) || true
+  [[ -z $holders ]] ||
+    fail "vm$n: ports ${PUBLIC_PORTS[*]} are held by $holders – an old \`docker compose\` stack? docs/deployment-guide.md §7, \"ports held by docker-proxy\""
+  ok "vm$n: ${free} GB free, ports ${PUBLIC_PORTS[*]} free for the cluster"
 }
 
 prepare_url() { # deploy/prepare-vm.sh of exactly this commit on GitHub
@@ -280,6 +300,11 @@ cmd_images() {
 
   local archive=$WORK/images.tar
   $SUDO docker save "${refs[@]}" >"$archive"
+  # every deploy builds a new tag – without this, vm1's disk fills up with old builds (k3s' containerd cleans
+  # its own copies when the disk gets full, Docker never does). Images a container still uses stay.
+  $SUDO docker images --filter reference='routine/*' --format '{{.Repository}}:{{.Tag}}' | grep -vx "routine/.*:$TAG" |
+    xargs -r $SUDO docker rmi >/dev/null 2>&1 || true
+  $SUDO docker builder prune -f >/dev/null 2>&1 || true
   for n in "${missing[@]}"; do
     copy_to "$n" "$archive" /tmp/routine-images.tar
     as_root "$n" 'k3s ctr -n k8s.io images import /tmp/routine-images.tar >/dev/null; rc=$?; rm -f /tmp/routine-images.tar; exit $rc' ||
