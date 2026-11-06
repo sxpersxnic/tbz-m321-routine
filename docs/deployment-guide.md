@@ -135,7 +135,7 @@ is already done.
 | `exceeded its progress deadline` | A service waited more than 10 minutes, e.g. while the network was broken. Once the cause is fixed, run `deploy/deploy.sh` again |
 | `Keycloak does not answer` (verify) | Keycloak is slow on its first start – wait a minute, `deploy/deploy.sh verify` |
 | Browser: "Invalid redirect uri" | Open exactly `http://10.2.44.21:8080` |
-| `vmN: only … GB free on /var/lib` | [No space left on device](#no-space-left-on-device) |
+| `vmN: … GB free on /var/lib, needs … GB` | [No space left on device](#no-space-left-on-device) |
 | `vmN: ports 8080 15672 16686 are held by docker-proxy` | [Ports held by docker-proxy](#ports-held-by-docker-proxy) |
 | Browser: black page, console `ERR_CONTENT_LENGTH_MISMATCH` | A full disk (nginx cannot buffer the large JavaScript file and cuts it off), or an old `docker compose` stack answers instead of the cluster – `deploy/deploy.sh access` names which |
 
@@ -159,7 +159,8 @@ containerd, so this frees space without touching the cluster (an old compose sta
 sudo docker image prune -af && sudo docker builder prune -af
 ```
 
-k3s starts again by itself within seconds once there is space. Check with `kubectl get nodes`, then run
+Why `deploy.sh` asks for 20 % free (on vm1 5 GB more, for building the images): below 15 % Kubernetes marks the VM as
+out of disk and evicts its pods. k3s starts again by itself within seconds once there is space. Check with `kubectl get nodes`, then run
 `deploy/deploy.sh` again.
 
 ### Ports held by docker-proxy
@@ -170,6 +171,12 @@ stack, not the cluster. Remove its containers (`tbz-m321-routine` is the folder 
 
 ```bash
 sudo docker ps -aq --filter label=com.docker.compose.project=tbz-m321-routine | xargs -r sudo docker rm -f
+```
+
+On vm2 or vm3 you don't need your teammate: vm1 reaches them as `routine` (step 2), e.g. for vm2:
+
+```bash
+ssh routine@10.2.44.20 "sudo docker ps -aq --filter label=com.docker.compose.project=tbz-m321-routine | xargs -r sudo docker rm -f"
 ```
 
 Its volumes hold that stack's test data (not the cluster's). They take space; remove them once you don't need them:

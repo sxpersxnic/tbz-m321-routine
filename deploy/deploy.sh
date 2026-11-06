@@ -122,28 +122,42 @@ cmd_access() {
     as_root "$n" true || fail "vm$n: sudo failed"
     ok "vm$n ($(ip_of "$n")): SSH and sudo"
   done
-  for n in "${NODES[@]}"; do preflight "$n"; done
+  local blocked=0
+  for n in "${NODES[@]}"; do preflight "$n" || blocked=1; done
+  ((blocked == 0)) || fail "fix the VMs above, then run deploy.sh again"
   ACCESS_CHECKED=1
 }
 
 # What breaks the cluster without saying so: a full disk (etcd stops, k3s restarts forever, nginx cuts large
 # responses off) and another program on the platform's ports (e.g. a `docker compose up` from testing – it keeps
 # answering on :8080, so the browser sees that stack instead of the cluster).
-MIN_FREE_GB=${MIN_FREE_GB:-3}
+# Free space: the kubelet evicts pods below 15 % free (imagefs.available) – 20 % leaves a margin. vm1 also needs
+# room to build the images, pack them and import its own copy.
+FREE_PCT=${FREE_PCT:-20}
+BUILD_GB=${BUILD_GB:-5}
 PUBLIC_PORTS=(8080 15672 16686)
-preflight() { # preflight <vm>
-  local n=$1 free holders filter
-  free=$(as_root "$n" 'df --output=avail -BG /var/lib | tail -1 | tr -dc 0-9')
-  free=${free:-0}
-  ((free >= MIN_FREE_GB)) ||
-    fail "vm$n: only ${free} GB free on /var/lib (minimum $MIN_FREE_GB) – free space first: docs/deployment-guide.md §7, \"no space left on device\""
+preflight() { # preflight <vm> – reports every problem of that VM; non-zero when there is one
+  local n=$1 size_kb avail_kb need_kb holders filter problems=0
+  read -r size_kb avail_kb < <(as_root "$n" 'df --output=size,avail -k /var/lib | tail -1')
+  need_kb=$((size_kb * FREE_PCT / 100))
+  ((n != 1)) || need_kb=$((need_kb + BUILD_GB * 1024 * 1024))
+  if ((avail_kb < need_kb)); then
+    printf "  %s✘ vm%s: %s GB free on /var/lib, needs %s GB – docs/deployment-guide.md §7, \"no space left on device\"%s\n" \
+      "$red" "$n" "$(gb "$avail_kb")" "$(gb "$need_kb")" "$reset" >&2
+    problems=1
+  fi
   filter=$(printf ' or sport = :%s' "${PUBLIC_PORTS[@]}")
   # k3s itself may hold these ports (hostPort / NodePort) – anything else is in the way
   holders=$(as_root "$n" "ss -Hltnp '( ${filter# or } )'" | grep -v '"k3s' | grep -o 'users:(("[^"]*' | cut -d'"' -f2 | sort -u | paste -sd, -) || true
-  [[ -z $holders ]] ||
-    fail "vm$n: ports ${PUBLIC_PORTS[*]} are held by $holders – an old \`docker compose\` stack? docs/deployment-guide.md §7, \"ports held by docker-proxy\""
-  ok "vm$n: ${free} GB free, ports ${PUBLIC_PORTS[*]} free for the cluster"
+  if [[ -n $holders ]]; then
+    printf "  %s✘ vm%s: ports %s are held by %s – an old \`docker compose\` stack? docs/deployment-guide.md §7, \"ports held by docker-proxy\"%s\n" \
+      "$red" "$n" "${PUBLIC_PORTS[*]}" "$holders" "$reset" >&2
+    problems=1
+  fi
+  ((problems == 0)) || return 1
+  ok "vm$n: $(gb "$avail_kb") GB free (needs $(gb "$need_kb")), ports ${PUBLIC_PORTS[*]} free for the cluster"
 }
+gb() { awk -v kb="$1" 'BEGIN { printf "%.1f", kb / 1048576 }'; }
 
 prepare_url() { # deploy/prepare-vm.sh of exactly this commit on GitHub
   local origin repo
