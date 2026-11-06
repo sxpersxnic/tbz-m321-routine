@@ -1,4 +1,4 @@
-# Deployment configuration: compose (one host) and the Kubernetes manifests (three VMs) must stay valid,
+# Deployment configuration: compose (one host) and the Kubernetes manifests (the VMs) must stay valid,
 # the scripts must pass shellcheck.
 name: deployment
 
